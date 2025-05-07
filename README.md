@@ -78,6 +78,46 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
+5. Configure your OpenAI API key in the .env file:
+
+```
+OPENAI_API_KEY="your-openai-api-key-here"
+```
+
+### Using the Chat API
+
+The server provides a chat endpoint that uses LangChain and OpenAI to create a conversational AI system. Each user session maintains its own conversation history.
+
+#### Chat Endpoint
+
+- **URL**: `/api/chat/`
+- **Method**: POST
+- **Request Body**:
+  ```json
+  {
+    "user_id": "unique-user-identifier",
+    "message": "Your message here"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "response": "AI assistant's response",
+    "conversation_history": [
+      {"role": "user", "content": "Your message here"},
+      {"role": "assistant", "content": "AI assistant's response"}
+    ]
+  }
+  ```
+
+#### Example Request
+
+```bash
+curl -X POST "http://localhost:8000/api/chat/" \
+     -H "Content-Type: application/json" \
+     -d '{"user_id": "user123", "message": "Hello, how can you help me today?"}'
+```
+
 ### Running the Server
 
 ```bash
