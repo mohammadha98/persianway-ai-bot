@@ -31,6 +31,8 @@ class KnowledgeBaseResponse(BaseModel):
     """
     answer: str = Field(..., description="The answer to the question")
     sources: List[DocumentSource] = Field(..., description="The sources used to generate the answer")
+    requires_human_support: bool = Field(False, description="Indicates if the query requires human expert attention")
+    query_id: Optional[str] = Field(None, description="Unique identifier for the query when human support is required")
     
     class Config:
         schema_extra = {
@@ -42,7 +44,9 @@ class KnowledgeBaseResponse(BaseModel):
                         "source": "fertilization-guide-table.pdf",
                         "page": 5
                     }
-                ]
+                ],
+                "requires_human_support": False,
+                "query_id": None
             }
         }
 

@@ -20,9 +20,13 @@ class Settings(BaseSettings):
     # OpenAI settings
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL_NAME: str = "gpt-3.5-turbo"
-    OPENAI_TEMPERATURE: float = 0.7
+    OPENAI_TEMPERATURE: float = 0.3
     OPENAI_MAX_TOKENS: int = 500
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-ada-002"
+    
+    # Human referral settings
+    KNOWLEDGE_BASE_CONFIDENCE_THRESHOLD: float = 0.5  # Minimum confidence score to consider an answer adequate
+    HUMAN_REFERRAL_MESSAGE: str = "متأسفانه، اطلاعات کافی در پایگاه دانش برای پاسخ به این سؤال وجود ندارد. سؤال شما برای بررسی بیشتر توسط کارشناسان ما ثبت شده است."
     
     # Persian Agriculture Knowledge Base settings
     PERSIAN_AGRICULTURE_SYSTEM_PROMPT: str = """

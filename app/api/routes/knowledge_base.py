@@ -14,16 +14,19 @@ async def query_knowledge_base(query: KnowledgeBaseQuery, kb_service=Depends(get
     """Query the knowledge base with a question.
     
     This endpoint accepts a question and returns an answer based on the
-    agricultural documents in the knowledge base.
+    agricultural documents in the knowledge base. If the system cannot find
+    relevant information, it will flag the query for human expert review.
     """
     try:
         # Query the knowledge base
         result = await kb_service.query_knowledge_base(query.question)
         
-        # Return the response
+        # Return the response with human referral information if needed
         return KnowledgeBaseResponse(
             answer=result["answer"],
-            sources=result["sources"]
+            sources=result["sources"],
+            requires_human_support=result["requires_human_support"],
+            query_id=result["query_id"]
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Knowledge base query error: {str(e)}")
