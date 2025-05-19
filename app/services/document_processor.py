@@ -105,10 +105,17 @@ class DocumentProcessor:
             docs = self.process_pdf(pdf_file)
             all_docs.extend(docs)
         
-        # Add documents to vector store
+        # Add documents to vector store in batches to avoid token limit issues
         if all_docs:
             vector_store = self.get_vector_store()
-            vector_store.add_documents(all_docs)
+            
+            # Process in batches of 100 documents to stay well under the 300k token limit
+            batch_size = 100
+            for i in range(0, len(all_docs), batch_size):
+                batch = all_docs[i:i + batch_size]
+                vector_store.add_documents(batch)
+                print(f"Processed batch {i//batch_size + 1}/{(len(all_docs) + batch_size - 1)//batch_size} with {len(batch)} documents")
+            
             vector_store.persist()
         
         return len(all_docs)

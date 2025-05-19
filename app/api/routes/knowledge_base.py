@@ -54,6 +54,28 @@ async def process_documents(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=f"Document processing error: {str(e)}")
 
 
+@router.post("/process-excel", response_model=ProcessDocsResponse)
+async def process_excel_files(background_tasks: BackgroundTasks):
+    """Process all Excel QA files in the configured directory.
+    
+    This endpoint triggers the processing of all Excel QA files in the docs directory
+    and adds them to the vector database. This operation runs in the background.
+    """
+    try:
+        # Get the knowledge base service
+        kb_service = get_knowledge_base_service()
+        
+        # Process Excel files in the background
+        background_tasks.add_task(kb_service.process_excel_files)
+        
+        return ProcessDocsResponse(
+            message="Excel QA processing started in the background",
+            status="processing"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Excel processing error: {str(e)}")
+
+
 @router.get("/status")
 async def get_processing_status():
     """Get the status of the document processing.
@@ -72,9 +94,22 @@ async def get_processing_status():
         collection = vector_store._collection
         count = collection.count()
         
+        # Count documents by source type
+        pdf_count = 0
+        excel_qa_count = 0
+        
+        # This is a simple approach - in a production system you might want to use more efficient queries
+        for doc in collection.get()['metadatas']:
+            if doc.get('source_type') == 'excel_qa':
+                excel_qa_count += 1
+            else:
+                pdf_count += 1
+        
         return {
             "status": "ready" if count > 0 else "empty",
-            "document_count": count
+            "document_count": count,
+            "pdf_document_count": pdf_count,
+            "excel_qa_count": excel_qa_count
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Status check error: {str(e)}")

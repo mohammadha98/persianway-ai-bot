@@ -9,6 +9,7 @@ from langchain.memory import ConversationBufferMemory
 
 from app.core.config import settings
 from app.services.document_processor import get_document_processor
+from app.services.excel_processor import get_excel_qa_processor
 
 # Set up logging for human referrals
 referral_logger = logging.getLogger("human_referral")
@@ -28,6 +29,7 @@ class KnowledgeBaseService:
     def __init__(self):
         """Initialize the knowledge base service."""
         self.document_processor = get_document_processor()
+        self.excel_processor = get_excel_qa_processor()
         
         # System prompt for agricultural knowledge in Persian
         self.system_prompt = settings.PERSIAN_AGRICULTURE_SYSTEM_PROMPT
@@ -118,6 +120,14 @@ class KnowledgeBaseService:
             f"{'=' * 50}"
         )
     
+    def process_excel_files(self) -> int:
+        """Process all Excel QA files in the configured directory.
+        
+        Returns:
+            Number of QA pairs processed
+        """
+        return self.excel_processor.process_all_excel_files()
+    
     async def query_knowledge_base(self, query: str) -> Dict[str, Any]:
         """Query the knowledge base with a question.
         
@@ -128,6 +138,60 @@ class KnowledgeBaseService:
             Dictionary containing the answer, source documents, and human referral flag
         """
         try:
+            # Get the vector store
+            vector_store = self.document_processor.get_vector_store()
+            
+            # First, try to find exact or semantically similar matches in the QA database
+            qa_results = vector_store.similarity_search_with_score(
+                query, 
+                k=4,
+                filter={"source_type": "excel_qa"}
+            )
+            
+            # Check if we have a high-confidence QA match
+            qa_match_found = False
+            qa_answer = ""
+            qa_sources = []
+            
+            if qa_results:
+                # Get the best match
+                best_qa_match, best_score = qa_results[0]
+                
+                # Convert score to confidence (scores are distances, lower is better)
+                # Normalize to 0-1 range where 1 is highest confidence
+                best_confidence = 1.0 - min(best_score, 1.0)
+                
+                # Check if confidence exceeds threshold
+                if best_confidence >= settings.QA_MATCH_THRESHOLD:
+                    qa_match_found = True
+                    
+                    # Extract answer from the QA pair
+                    content_parts = best_qa_match.page_content.split("\nAnswer: ")
+                    if len(content_parts) > 1:
+                        qa_answer = content_parts[1]
+                    
+                    # Format QA sources
+                    for doc, score in qa_results:
+                        if "source_type" in doc.metadata and doc.metadata["source_type"] == "excel_qa":
+                            qa_sources.append({
+                                "content": doc.page_content,
+                                "source": doc.metadata.get("source", "Unknown"),
+                                "page": 0,  # Excel files don't have pages
+                                "source_type": "excel_qa",
+                                "title": doc.metadata.get("title", "")
+                            })
+            
+            # If we have a high-confidence QA match, return it directly
+            if qa_match_found and qa_answer:
+                return {
+                    "answer": qa_answer,
+                    "sources": qa_sources,
+                    "requires_human_support": False,
+                    "query_id": None,
+                    "source_type": "excel_qa"
+                }
+            
+            # Otherwise, fall back to the PDF-based knowledge retrieval
             # Get the QA chain
             qa_chain = self._get_qa_chain()
             
@@ -144,7 +208,8 @@ class KnowledgeBaseService:
                 sources.append({
                     "content": doc.page_content,
                     "source": doc.metadata.get("source", "Unknown"),
-                    "page": doc.metadata.get("page", 0)
+                    "page": doc.metadata.get("page", 0),
+                    "source_type": doc.metadata.get("source_type", "pdf")
                 })
             
             # Calculate confidence score
@@ -158,7 +223,8 @@ class KnowledgeBaseService:
                 "answer": answer if not requires_human_support else settings.HUMAN_REFERRAL_MESSAGE,
                 "sources": sources,
                 "requires_human_support": requires_human_support,
-                "query_id": None
+                "query_id": None,
+                "source_type": "pdf"
             }
             
             # If human referral is needed, generate a query ID and log the request

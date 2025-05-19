@@ -21,6 +21,7 @@ pypdf2>=3.0.0
 chromadb>=0.4.6
 tiktoken>=0.4.0
 pypdf
+openpyxl>=3.1.0  # Required for Excel file processing
 # Optional: Deep learning
 # tensorflow>=2.12.0
 # torch>=2.0.0

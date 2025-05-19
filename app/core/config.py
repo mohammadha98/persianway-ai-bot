@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     KNOWLEDGE_BASE_CONFIDENCE_THRESHOLD: float = 0.5  # Minimum confidence score to consider an answer adequate
     HUMAN_REFERRAL_MESSAGE: str = "متأسفانه، اطلاعات کافی در پایگاه دانش برای پاسخ به این سؤال وجود ندارد. سؤال شما برای بررسی بیشتر توسط کارشناسان ما ثبت شده است."
     
+    # Excel QA settings
+    EXCEL_QA_PATH: str = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "docs")
+    QA_MATCH_THRESHOLD: float = 0.8  # Confidence threshold for considering a QA match sufficient
+    QA_PRIORITY_FACTOR: float = 1.2  # Weight to assign to QA matches versus PDF content matches
+    
     # Persian Agriculture Knowledge Base settings
     PERSIAN_AGRICULTURE_SYSTEM_PROMPT: str = """
     شما یک دستیار هوشمند متخصص در زمینه کشاورزی و علوم خاک هستید. وظیفه شما پاسخ دادن به سؤالات در مورد:

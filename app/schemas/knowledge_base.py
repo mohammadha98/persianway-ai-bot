@@ -22,6 +22,8 @@ class DocumentSource(BaseModel):
     content: str = Field(..., description="The content of the document")
     source: str = Field(..., description="The source of the document")
     page: int = Field(..., description="The page number of the document")
+    source_type: str = Field("pdf", description="The type of source (pdf or excel_qa)")
+    title: Optional[str] = Field(None, description="The title of the QA pair (for excel_qa sources)")
 
 
 class KnowledgeBaseResponse(BaseModel):
@@ -33,6 +35,7 @@ class KnowledgeBaseResponse(BaseModel):
     sources: List[DocumentSource] = Field(..., description="The sources used to generate the answer")
     requires_human_support: bool = Field(False, description="Indicates if the query requires human expert attention")
     query_id: Optional[str] = Field(None, description="Unique identifier for the query when human support is required")
+    source_type: str = Field("pdf", description="The primary source type for this answer (pdf or excel_qa)")
     
     class Config:
         schema_extra = {
