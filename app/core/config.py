@@ -14,13 +14,18 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api"
     ALLOWED_HOSTS: List[str] = ["*"]
     
+    # Server settings
+    HOST: str = "0.0.0.0"
+    PORT: int = 8000
+    DEBUG: bool = False
+    
     # Model settings
     MODEL_PATH: str = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models")
     
     # OpenAI settings
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL_NAME: str = "gpt-3.5-turbo"
-    OPENAI_TEMPERATURE: float = 0.3
+    OPENAI_TEMPERATURE: float = 0.7
     OPENAI_MAX_TOKENS: int = 500
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-ada-002"
     

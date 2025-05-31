@@ -188,7 +188,8 @@ class KnowledgeBaseService:
                     "sources": qa_sources,
                     "requires_human_support": False,
                     "query_id": None,
-                    "source_type": "excel_qa"
+                    "source_type": "excel_qa",
+                    "confidence_score": best_confidence
                 }
             
             # Otherwise, fall back to the PDF-based knowledge retrieval
@@ -224,7 +225,8 @@ class KnowledgeBaseService:
                 "sources": sources,
                 "requires_human_support": requires_human_support,
                 "query_id": None,
-                "source_type": "pdf"
+                "source_type": "pdf",
+                "confidence_score": confidence_score
             }
             
             # If human referral is needed, generate a query ID and log the request

@@ -36,6 +36,7 @@ class KnowledgeBaseResponse(BaseModel):
     requires_human_support: bool = Field(False, description="Indicates if the query requires human expert attention")
     query_id: Optional[str] = Field(None, description="Unique identifier for the query when human support is required")
     source_type: str = Field("pdf", description="The primary source type for this answer (pdf or excel_qa)")
+    confidence_score: float = Field(0.0, description="Confidence score of the answer between 0 and 1")
     
     class Config:
         schema_extra = {
@@ -48,6 +49,7 @@ class KnowledgeBaseResponse(BaseModel):
                         "page": 5
                     }
                 ],
+                "confidence_score": 0.85,
                 "requires_human_support": False,
                 "query_id": None
             }

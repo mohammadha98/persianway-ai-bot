@@ -26,7 +26,9 @@ async def query_knowledge_base(query: KnowledgeBaseQuery, kb_service=Depends(get
             answer=result["answer"],
             sources=result["sources"],
             requires_human_support=result["requires_human_support"],
-            query_id=result["query_id"]
+            query_id=result["query_id"],
+            source_type=result.get("source_type", "pdf"),
+            confidence_score=result["confidence_score"]
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Knowledge base query error: {str(e)}")

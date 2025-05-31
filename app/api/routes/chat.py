@@ -17,7 +17,7 @@ async def create_chat(request: ChatRequest, chat_service=Depends(get_chat_servic
     """
     try:
         # Process the message
-        response = await chat_service.process_message(
+        result = await chat_service.process_message(
             user_id=request.user_id,
             message=request.message
         )
@@ -27,7 +27,9 @@ async def create_chat(request: ChatRequest, chat_service=Depends(get_chat_servic
         
         # Return the response
         return ChatResponse(
-            response=response,
+            query_analysis=result["query_analysis"],
+            response_parameters=result["response_parameters"],
+            answer=result["answer"],
             conversation_history=conversation_history
         )
     except Exception as e:
