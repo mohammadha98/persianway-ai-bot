@@ -127,6 +127,75 @@ class KnowledgeBaseService:
             Number of QA pairs processed
         """
         return self.excel_processor.process_all_excel_files()
+
+    async def add_knowledge_contribution(
+        self,
+        title: str,
+        content: str,
+        source: str,
+        meta_tags: List[str],
+        author_name: Optional[str] = None,
+        additional_references: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Adds a new knowledge entry to the vector store.
+
+        Args:
+            title: Title of the entry.
+            content: Main body/content in Persian.
+            source: The origin or reference for the knowledge.
+            meta_tags: Comma-separated keywords for categorization.
+            author_name: Optional name of the contributor.
+            additional_references: Optional URLs or citations.
+
+        Returns:
+            A dictionary with the ID and timestamp of the new entry.
+        """
+        try:
+            doc_id = str(uuid.uuid4())
+            submitted_at = datetime.now().isoformat()
+
+            # Prepare metadata
+            metadata = {
+                "source": source,
+                "title": title,
+                "meta_tags": ",".join(meta_tags), # Store as comma-separated string as per existing patterns if any, or adjust if vector store handles lists
+                "author_name": author_name if author_name else "Unknown",
+                "additional_references": additional_references if additional_references else "None",
+                "submission_timestamp": submitted_at,
+                "entry_type": "user_contribution", # Differentiate from PDF/Excel
+                "id": doc_id
+            }
+
+            # Create Langchain Document
+            # The main content for embedding should be a combination of title and content for better retrieval
+            document_content = f"Title: {title}\n\nContent: {content}"
+            langchain_document = self.document_processor.text_splitter.create_documents(
+                texts=[document_content],
+                metadatas=[metadata] # Pass metadata for each document
+            )
+            
+            # Ensure documents are created and metadata is correctly assigned
+            if not langchain_document:
+                 raise ValueError("Failed to create document for vector store.")
+
+            # Add to vector store
+            vector_store = self.document_processor.get_vector_store()
+            vector_store.add_documents(langchain_document)
+            vector_store.persist() # Ensure data is saved
+
+            return {
+                "id": doc_id,
+                "title": title,
+                "submitted_at": submitted_at,
+                "meta_tags": meta_tags,
+                "source": source,
+                "author_name": author_name,
+                "additional_references": additional_references
+            }
+        except Exception as e:
+            logging.error(f"Error adding knowledge contribution: {str(e)}")
+            # Re-raise the exception so the route can handle it and return a 500 error
+            raise
     
     async def query_knowledge_base(self, query: str) -> Dict[str, Any]:
         """Query the knowledge base with a question.

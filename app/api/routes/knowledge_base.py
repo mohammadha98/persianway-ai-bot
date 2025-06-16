@@ -1,7 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from typing import Dict, Any, List
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Form, Body, UploadFile, File
+from typing import Dict, Any, List, Optional
+from enum import Enum
+import uuid
+from datetime import datetime
 
-from app.schemas.knowledge_base import KnowledgeBaseQuery, KnowledgeBaseResponse, ProcessDocsResponse
+from app.schemas.knowledge_base import (
+    KnowledgeBaseQuery, 
+    KnowledgeBaseResponse, 
+    ProcessDocsResponse,
+    KnowledgeContributionResponse,
+    KnowledgeContributionItem
+)
 from app.services.knowledge_base import get_knowledge_base_service
 from app.services.document_processor import get_document_processor
 
@@ -115,3 +124,57 @@ async def get_processing_status():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Status check error: {str(e)}")
+
+
+
+@router.post("/contribute", response_model=KnowledgeContributionResponse)
+async def contribute_knowledge(
+    kb_service=Depends(get_knowledge_base_service),
+    title: str = Form(..., description="Title of the knowledge entry."),
+    content: str = Form(..., description="Main body/content of the knowledge in Persian."),
+    source: str = Form(..., description="The origin or reference for the knowledge."),
+    meta_tags: str = Form(..., description="Comma-separated keywords for categorization (e.g., soil,fertilizer,wheat)."),
+    author_name: Optional[str] = Form(None, description="Name of the contributor (optional)."),
+    additional_references: Optional[str] = Form(None, description="URLs or citation text for further reading (optional).")
+):
+    """Allows users to contribute new agricultural knowledge entries.
+
+    The endpoint accepts form-data for various fields describing the knowledge.
+    It validates the input, processes it, and stores it in the vector knowledge base.
+    """
+    try:
+        # Basic input sanitation (FastAPI handles basic type validation)
+        # More advanced sanitation (e.g., HTML stripping) could be added here if content allows HTML
+        cleaned_title = title.strip()
+        cleaned_content = content.strip()
+        cleaned_source = source.strip()
+        
+        if not cleaned_title or not cleaned_content or not cleaned_source:
+            return KnowledgeContributionResponse(success=False, message="Title, content, and source cannot be empty.")
+
+        parsed_meta_tags = [tag.strip() for tag in meta_tags.split(',') if tag.strip()]
+        if not parsed_meta_tags:
+            return KnowledgeContributionResponse(success=False, message="Meta tags cannot be empty and must be comma-separated.")
+
+        # Call the service to add the contribution
+        contribution_details = await kb_service.add_knowledge_contribution(
+            title=cleaned_title,
+            content=cleaned_content,
+            source=cleaned_source,
+            meta_tags=parsed_meta_tags,
+            author_name=author_name.strip() if author_name else None,
+            additional_references=additional_references.strip() if additional_references else None,
+        )
+        
+        return KnowledgeContributionResponse(
+            success=True,
+            contribution=KnowledgeContributionItem(**contribution_details)
+        )
+
+    except ValueError as ve:
+        # Handle specific validation errors from service or here
+        return KnowledgeContributionResponse(success=False, message=str(ve))
+    except Exception as e:
+        # Log the exception for debugging
+        # logger.error(f"Error during knowledge contribution: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to contribute knowledge: {str(e)}")

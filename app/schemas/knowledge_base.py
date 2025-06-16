@@ -17,6 +17,44 @@ class KnowledgeBaseQuery(BaseModel):
         }
 
 
+class KnowledgeContributionItem(BaseModel):
+    """Schema for a single knowledge contribution item, used in the response."""
+    id: str = Field(..., description="Unique identifier for the contribution")
+    title: str = Field(..., description="Title of the entry")
+    submitted_at: str = Field(..., description="Timestamp of submission")
+    meta_tags: List[str] = Field(..., description="Keywords for categorization")
+    source: str = Field(..., description="The origin or reference for the knowledge")
+    author_name: Optional[str] = Field(None, description="Name of the contributor")
+    additional_references: Optional[str] = Field(None, description="URLs or citation text for further reading")
+
+
+class KnowledgeContributionResponse(BaseModel):
+    """Schema for the knowledge contribution API response."""
+    success: bool = Field(..., description="Indicates if the contribution was successful")
+    contribution: Optional[KnowledgeContributionItem] = Field(None, description="Details of the submitted contribution")
+    message: Optional[str] = Field(None, description="Error message in case of failure")
+
+    class Config:
+        schema_extra = {
+            "example_success": {
+                "success": True,
+                "contribution": {
+                    "id": "4dfaaf98-4036-4e8a-9235-18f915d21a24",
+                    "title": "Properties of Loamy Soil",
+                    "submitted_at": "2024-06-01T14:10:22+03:30",
+                    "meta_tags": ["loam", "soil", "agriculture"],
+                    "source": "Expert observation",
+                    "author_name": "Dr. KhakShenas",
+                    "additional_references": "https://example.com/loamy-soil-guide"
+                }
+            },
+            "example_failure": {
+                "success": False,
+                "message": "Invalid content_type provided."
+            }
+        }
+
+
 class DocumentSource(BaseModel):
     """Schema for a document source."""
     content: str = Field(..., description="The content of the document")
@@ -56,6 +94,44 @@ class KnowledgeBaseResponse(BaseModel):
         }
 
 
+class KnowledgeContributionItem(BaseModel):
+    """Schema for a single knowledge contribution item, used in the response."""
+    id: str = Field(..., description="Unique identifier for the contribution")
+    title: str = Field(..., description="Title of the entry")
+    submitted_at: str = Field(..., description="Timestamp of submission")
+    meta_tags: List[str] = Field(..., description="Keywords for categorization")
+    source: str = Field(..., description="The origin or reference for the knowledge")
+    author_name: Optional[str] = Field(None, description="Name of the contributor")
+    additional_references: Optional[str] = Field(None, description="URLs or citation text for further reading")
+
+
+class KnowledgeContributionResponse(BaseModel):
+    """Schema for the knowledge contribution API response."""
+    success: bool = Field(..., description="Indicates if the contribution was successful")
+    contribution: Optional[KnowledgeContributionItem] = Field(None, description="Details of the submitted contribution")
+    message: Optional[str] = Field(None, description="Error message in case of failure")
+
+    class Config:
+        schema_extra = {
+            "example_success": {
+                "success": True,
+                "contribution": {
+                    "id": "4dfaaf98-4036-4e8a-9235-18f915d21a24",
+                    "title": "Properties of Loamy Soil",
+                    "submitted_at": "2024-06-01T14:10:22+03:30",
+                    "meta_tags": ["loam", "soil", "agriculture"],
+                    "source": "Expert observation",
+                    "author_name": "Dr. KhakShenas",
+                    "additional_references": "https://example.com/loamy-soil-guide"
+                }
+            },
+            "example_failure": {
+                "success": False,
+                "message": "Invalid content_type provided."
+            }
+        }
+
+
 class ProcessDocsResponse(BaseModel):
     """Schema for document processing response."""
     message: str = Field(..., description="A message about the document processing")
@@ -66,5 +142,43 @@ class ProcessDocsResponse(BaseModel):
             "example": {
                 "message": "Document processing started in the background",
                 "status": "processing"
+            }
+        }
+
+
+class KnowledgeContributionItem(BaseModel):
+    """Schema for a single knowledge contribution item, used in the response."""
+    id: str = Field(..., description="Unique identifier for the contribution")
+    title: str = Field(..., description="Title of the entry")
+    submitted_at: str = Field(..., description="Timestamp of submission")
+    meta_tags: List[str] = Field(..., description="Keywords for categorization")
+    source: str = Field(..., description="The origin or reference for the knowledge")
+    author_name: Optional[str] = Field(None, description="Name of the contributor")
+    additional_references: Optional[str] = Field(None, description="URLs or citation text for further reading")
+
+
+class KnowledgeContributionResponse(BaseModel):
+    """Schema for the knowledge contribution API response."""
+    success: bool = Field(..., description="Indicates if the contribution was successful")
+    contribution: Optional[KnowledgeContributionItem] = Field(None, description="Details of the submitted contribution")
+    message: Optional[str] = Field(None, description="Error message in case of failure")
+
+    class Config:
+        schema_extra = {
+            "example_success": {
+                "success": True,
+                "contribution": {
+                    "id": "4dfaaf98-4036-4e8a-9235-18f915d21a24",
+                    "title": "Properties of Loamy Soil",
+                    "submitted_at": "2024-06-01T14:10:22+03:30",
+                    "meta_tags": ["loam", "soil", "agriculture"],
+                    "source": "Expert observation",
+                    "author_name": "Dr. KhakShenas",
+                    "additional_references": "https://example.com/loamy-soil-guide"
+                }
+            },
+            "example_failure": {
+                "success": False,
+                "message": "Invalid content_type provided."
             }
         }
