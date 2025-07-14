@@ -4,7 +4,7 @@ uvicorn>=0.22.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
-python-multipart
+python-multipart>=0.0.5
 # ML dependencies
 scikit-learn>=1.2.2
 numpy>=1.24.3
@@ -17,10 +17,9 @@ openai>=0.27.8
 langchain-community
 
 # RAG dependencies
-pypdf2>=3.0.0
 chromadb>=0.4.6
 tiktoken>=0.4.0
-pypdf
+pypdf>=3.0.0
 openpyxl>=3.1.0  # Required for Excel file processing
 # Optional: Deep learning
 # tensorflow>=2.12.0

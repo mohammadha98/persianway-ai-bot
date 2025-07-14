@@ -13,7 +13,7 @@ from app.services.excel_processor import get_excel_qa_processor
 
 # Set up logging for human referrals
 referral_logger = logging.getLogger("human_referral")
-file_handler = logging.FileHandler("human_referrals.log")
+file_handler = logging.FileHandler("human_referrals.log", encoding="utf-8")
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 referral_logger.addHandler(file_handler)
 referral_logger.setLevel(logging.INFO)
