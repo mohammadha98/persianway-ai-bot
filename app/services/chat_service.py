@@ -57,11 +57,60 @@ class ChatService:
         
         return self._sessions[user_id]
     
-    async def process_message(self, user_id: str, message: str) -> Dict[str, Any]:
-        """Process a user message and get a response according to the advanced response system.
+    def _is_topic_related_to_domain(self, query: str) -> bool:
+        """Check if the query is related to the knowledge base domain.
+        
+        Args:
+            query: The user's question
+            
+        Returns:
+            True if the query is related to the domain, False otherwise
+        """
+        query_lower = query.lower()
+        
+        # Define domain-related keywords (expand based on your knowledge base content)
+        domain_keywords = [
+            # Health and beauty related
+            'پوست', 'صورت', 'ماسک', 'کرم', 'زیبایی', 'سلامت', 'درمان', 'دارو', 'بیمار',
+            'معده', 'شکم', 'ماساژ', 'روغن', 'مالت', 'خرما', 'شیر', 'کودک', 'نوزاد', 'مو', 'ریزش',
+            'skin', 'face', 'mask', 'cream', 'beauty', 'health', 'treatment', 'medicine', 'hair',
+            # Agriculture related (if still relevant)
+            'کود', 'کشاورزی', 'خاک', 'کاشت', 'برداشت', 'آفت', 'بیماری', 'گیاه', 'محصول',
+            'آبیاری', 'بذر', 'نهال', 'درخت', 'میوه', 'سبزی', 'غلات', 'دام', 'طیور',
+            'fertilizer', 'agriculture', 'soil', 'plant', 'crop', 'farming', 'irrigation'
+        ]
+        
+        # Unrelated topics that should be referred to humans
+        unrelated_keywords = [
+            # Technology
+            'کامپیوتر', 'نرم افزار', 'اپلیکیشن', 'وب سایت', 'برنامه نویسی', 'شبکه', 'اینترنت',
+            'computer', 'software', 'application', 'website', 'programming', 'network', 'internet',
+            # Finance
+            'پول', 'بانک', 'سرمایه گذاری', 'بورس', 'اقتصاد', 'مالی', 'حسابداری',
+            'money', 'bank', 'investment', 'stock', 'economy', 'financial', 'accounting',
+            # Politics/History
+            'سیاست', 'انتخابات', 'دولت', 'تاریخ', 'جنگ', 'مکتب', 'دیدگاه', 'ایدئولوژی', 'فلسفه سیاسی',
+            'politics', 'election', 'government', 'history', 'war', 'ideology', 'political view', 'philosophy'
+        ]
+        
+        # Check for unrelated topics first
+        if any(keyword in query_lower for keyword in unrelated_keywords):
+            return False
+            
+        # Check for domain-related topics
+        if any(keyword in query_lower for keyword in domain_keywords):
+            return True
+            
+        # For ambiguous queries, be more conservative - require explicit domain match
+        return False
 
-        This service will first check the knowledge base for an answer. If the confidence
-        is low, it will refer the query to a human instead of using a general model.
+    async def process_message(self, user_id: str, message: str) -> Dict[str, Any]:
+        """Process a user message using a hybrid approach.
+
+        This service implements a three-tier approach:
+        1. Check knowledge base for high-confidence answers
+        2. Use general knowledge for domain-related topics with low KB confidence
+        3. Refer unrelated topics to humans
 
         Args:
             user_id: Unique identifier for the user session
@@ -70,7 +119,7 @@ class ChatService:
         Returns:
             A dictionary representing the ChatResponse schema.
         """
-        CONFIDENCE_THRESHOLD = 0.75
+        KB_CONFIDENCE_THRESHOLD = 0.6  # Lowered threshold for better coverage
         HUMAN_REFERRAL_MESSAGE = settings.HUMAN_REFERRAL_MESSAGE
 
         query_analysis = {
@@ -87,27 +136,67 @@ class ChatService:
         answer = ""
 
         try:
-            kb_service = get_knowledge_base_service()
-            kb_result = await kb_service.query_knowledge_base(message)
+            # First, check if the topic is related to our domain
+            is_domain_related = self._is_topic_related_to_domain(message)
             
-            kb_confidence = kb_result.get("confidence_score", 0) if kb_result else 0
-
-            if kb_confidence >= CONFIDENCE_THRESHOLD:
-                # High confidence answer found in the knowledge base
-                answer = kb_result["answer"]
-                query_analysis["confidence_score"] = kb_confidence
-                query_analysis["knowledge_source"] = kb_result.get("source_type", "knowledge_base")
-                query_analysis["requires_human_referral"] = False
-                query_analysis["reasoning"] = "High confidence answer found in knowledge base."
-                response_parameters["temperature"] = 0.1  # Use low temperature for factual KB answers
-            else:
-                # Low confidence from KB, indicating the query is outside the domain.
-                # Refer to a human specialist as per system design.
+            if not is_domain_related:
+                # Unrelated topic - refer to human
                 answer = HUMAN_REFERRAL_MESSAGE
-                query_analysis["confidence_score"] = kb_confidence
+                query_analysis["confidence_score"] = 0.0
                 query_analysis["knowledge_source"] = "none"
                 query_analysis["requires_human_referral"] = True
-                query_analysis["reasoning"] = "Query is outside the scope of the knowledge base and requires human attention."
+                query_analysis["reasoning"] = "Query is outside our domain expertise and requires human specialist attention."
+            else:
+                # Domain-related topic - try knowledge base first
+                kb_service = get_knowledge_base_service()
+                kb_result = await kb_service.query_knowledge_base(message)
+                
+                kb_confidence = kb_result.get("confidence_score", 0) if kb_result else 0
+
+                if kb_confidence >= KB_CONFIDENCE_THRESHOLD:
+                    # High confidence answer from knowledge base
+                    answer = kb_result["answer"]
+                    query_analysis["confidence_score"] = kb_confidence
+                    query_analysis["knowledge_source"] = kb_result.get("source_type", "knowledge_base")
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "High confidence answer found in knowledge base."
+                    response_parameters["temperature"] = 0.1  # Low temperature for factual answers
+                else:
+                    # Low KB confidence but domain-related - use general knowledge with context
+                    conversation = self._get_or_create_session(user_id)
+                    
+                    # Create a context-aware prompt
+                    context_prompt = f"""
+{settings.SYSTEM_PROMPT}
+
+اگر سوال در حوزه تخصص شما نیست، لطفاً به کاربر بگویید که این سوال نیاز به بررسی توسط کارشناس دارد.
+اگر سوال مرتبط است، پاسخ مفیدی ارائه دهید.
+
+سوال کاربر: {message}
+                    """
+                    
+                    # Get response using general knowledge
+                    response = conversation.predict(input=context_prompt)
+                    
+                    # Check if the model indicated it needs human referral
+                    referral_indicators = [
+                        "نیاز به بررسی توسط کارشناس",
+                        "به کارشناس مراجعه کنید",
+                        "خارج از حوزه تخصص",
+                        "نمی‌توانم پاسخ دهم"
+                    ]
+                    
+                    if any(indicator in response for indicator in referral_indicators):
+                        answer = HUMAN_REFERRAL_MESSAGE
+                        query_analysis["requires_human_referral"] = True
+                        query_analysis["reasoning"] = "Model determined the query requires specialist attention."
+                    else:
+                        answer = response
+                        query_analysis["confidence_score"] = 0.7  # Medium confidence for general knowledge
+                        query_analysis["knowledge_source"] = "general_knowledge"
+                        query_analysis["requires_human_referral"] = False
+                        query_analysis["reasoning"] = "Answer provided using general knowledge with domain context."
+                        response_parameters["temperature"] = 0.3  # Moderate temperature for general knowledge
 
             # Add the interaction to the conversation history
             conversation = self._get_or_create_session(user_id)

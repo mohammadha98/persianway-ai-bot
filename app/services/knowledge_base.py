@@ -89,19 +89,87 @@ class KnowledgeBaseService:
         """
         if not source_documents:
             return 0.0
-            
-        # For now, use a simple heuristic based on the number of documents and their scores
-        # This can be enhanced with more sophisticated relevance scoring in the future
-        scores = []
-        for doc in source_documents:
-            # Get similarity score if available, otherwise use a default value
-            score = doc.metadata.get("score", 0.5)
-            scores.append(score)
-            
-        # Average the scores
-        avg_score = sum(scores) / len(scores) if scores else 0.0
         
-        return avg_score
+        query_lower = query.lower()
+        total_score = 0.0
+        relevant_docs = 0
+        
+        for doc in source_documents:
+            doc_content = doc.page_content.lower()
+            
+            # Check if document is relevant to the query
+            if not self._is_content_relevant(query, doc.page_content):
+                continue  # Skip irrelevant documents
+            
+            relevant_docs += 1
+            
+            # Calculate relevance score based on multiple factors
+            relevance_score = 0.0
+            
+            # Factor 1: Direct keyword matches (40% weight)
+            query_words = [word for word in query_lower.split() if len(word) > 2]
+            if query_words:
+                matches = sum(1 for word in query_words if word in doc_content)
+                keyword_score = matches / len(query_words)
+                relevance_score += keyword_score * 0.4
+            
+            # Factor 2: Document length and completeness (20% weight)
+            # Longer, more complete documents tend to be more reliable
+            doc_length = len(doc.page_content)
+            length_score = min(doc_length / 500, 1.0)  # Normalize to 500 chars
+            relevance_score += length_score * 0.2
+            
+            # Factor 3: Source type preference (20% weight)
+            source_type = doc.metadata.get("source_type", "unknown")
+            if source_type == "excel_qa":
+                source_score = 1.0  # Prefer structured QA pairs
+            elif source_type == "pdf":
+                source_score = 0.8  # PDF content is good but less structured
+            else:
+                source_score = 0.6  # Other sources
+            relevance_score += source_score * 0.2
+            
+            # Factor 4: Semantic similarity (20% weight)
+            # Check for semantic relationships
+            semantic_score = 0.0
+            semantic_keywords = {
+                'پوست': ['skin', 'face', 'facial', 'dermal'],
+                'مو': ['hair', 'scalp'],
+                'ریزش': ['loss', 'fall', 'thinning'],
+                'زیبایی': ['beauty', 'cosmetic'],
+                'سلامت': ['health', 'wellness'],
+                'درمان': ['treatment', 'therapy', 'cure'],
+                'دارو': ['medicine', 'medication', 'drug']
+            }
+            
+            for persian_term, english_terms in semantic_keywords.items():
+                if persian_term in query_lower:
+                    if persian_term in doc_content or any(term in doc_content for term in english_terms):
+                        semantic_score += 0.5
+                for eng_term in english_terms:
+                    if eng_term in query_lower:
+                        if persian_term in doc_content or eng_term in doc_content:
+                            semantic_score += 0.5
+            
+            semantic_score = min(semantic_score, 1.0)  # Cap at 1.0
+            relevance_score += semantic_score * 0.2
+            
+            total_score += relevance_score
+        
+        # If no relevant documents found, return very low confidence
+        if relevant_docs == 0:
+            return 0.1
+        
+        # Average the scores and apply a penalty for having few relevant documents
+        avg_score = total_score / relevant_docs
+        
+        # Apply penalty if we have very few relevant documents
+        if relevant_docs < 2:
+            avg_score *= 0.7  # Reduce confidence if only 1 relevant doc
+        elif relevant_docs < 3:
+            avg_score *= 0.85  # Slight reduction if only 2 relevant docs
+        
+        return min(avg_score, 1.0)
     
     def _log_human_referral(self, query: str, sources: List[Dict[str, Any]], query_id: str) -> None:
         """Log a query that requires human attention.
@@ -211,6 +279,18 @@ class KnowledgeBaseService:
         query_lower = query.lower()
         content_lower = qa_content.lower()
         
+        # Extract key terms from query (remove common words)
+        common_words = {'که', 'این', 'آن', 'در', 'به', 'از', 'با', 'برای', 'تا', 'و', 'یا', 'اما', 'چه', 'چی', 'کی', 'کجا', 'چرا', 'چگونه', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+        query_words = [word for word in query_lower.split() if word not in common_words and len(word) > 2]
+        
+        # Check for direct word matches
+        direct_matches = sum(1 for word in query_words if word in content_lower)
+        match_ratio = direct_matches / max(len(query_words), 1)
+        
+        # If we have good word overlap, consider it relevant
+        if match_ratio >= 0.3:  # At least 30% of query words should match
+            return True
+            
         # Define domain-specific keywords to detect topic mismatch
         domain_keywords = {
             'agriculture': [
@@ -220,8 +300,8 @@ class KnowledgeBaseService:
             ],
             'health_beauty': [
                 'پوست', 'صورت', 'ماسک', 'کرم', 'زیبایی', 'سلامت', 'درمان', 'دارو', 'بیمار',
-                'معده', 'شکم', 'ماساژ', 'روغن', 'مالت', 'خرما', 'شیر', 'کودک', 'نوزاد',
-                'skin', 'face', 'mask', 'cream', 'beauty', 'health', 'treatment', 'medicine'
+                'معده', 'شکم', 'ماساژ', 'روغن', 'مالت', 'خرما', 'شیر', 'کودک', 'نوزاد', 'مو', 'ریزش',
+                'skin', 'face', 'mask', 'cream', 'beauty', 'health', 'treatment', 'medicine', 'hair'
             ],
             'technology': [
                 'کامپیوتر', 'نرم افزار', 'اپلیکیشن', 'وب سایت', 'برنامه نویسی', 'شبکه',
@@ -247,18 +327,37 @@ class KnowledgeBaseService:
                 content_domain = domain
                 break
         
-        print(f"Query: {query}")
-        print(f"QA Content: {qa_content}")
-        print(f"Query Domain: {query_domain}")
-        print(f"Content Domain: {content_domain}")
-
         # If query domain is known and content domain is known and they differ, it's irrelevant
         if query_domain and content_domain and query_domain != content_domain:
-            print("Domains mismatch, returning False")
             return False
         
-        # If the query is clearly about one domain, but the content has no clear domain,
-        # we should be cautious. For now, we allow it, but this could be refined.
+        # Check for semantic relevance using expanded keyword matching
+        semantic_keywords = {
+            # Health and beauty semantic mapping
+            'پوست': ['skin', 'face', 'facial', 'dermal'],
+            'مو': ['hair', 'scalp'],
+            'ریزش': ['loss', 'fall', 'thinning'],
+            'زیبایی': ['beauty', 'cosmetic'],
+            'سلامت': ['health', 'wellness'],
+            'درمان': ['treatment', 'therapy', 'cure'],
+            'دارو': ['medicine', 'medication', 'drug'],
+            # Agriculture semantic mapping
+            'کود': ['fertilizer', 'nutrient'],
+            'کشاورزی': ['agriculture', 'farming'],
+            'خاک': ['soil', 'earth'],
+            'گیاه': ['plant', 'vegetation'],
+            'محصول': ['crop', 'produce']
+        }
+        
+        # Check for semantic matches
+        for persian_term, english_terms in semantic_keywords.items():
+            if persian_term in query_lower:
+                if persian_term in content_lower or any(term in content_lower for term in english_terms):
+                    return True
+            for eng_term in english_terms:
+                if eng_term in query_lower:
+                    if persian_term in content_lower or eng_term in content_lower:
+                        return True
         
         # If the content contains highly specific patterns from a different domain, it's likely irrelevant
         if query_domain and query_domain != 'health_beauty':
@@ -272,7 +371,30 @@ class KnowledgeBaseService:
             if any(pattern in content_lower for pattern in highly_specific_health_patterns):
                 return False
 
-        return True
+        # Add explicit checks for political/unrelated content
+        political_patterns = [
+            'سیاست', 'انتخابات', 'دولت', 'مکتب', 'دیدگاه سیاسی', 'politics', 'political', 'government'
+        ]
+        if any(pattern in query_lower for pattern in political_patterns):
+            return False
+            
+        # Be more conservative - only return True if we have strong evidence of relevance
+        # Either through domain matching or semantic keyword matching
+        if query_domain and content_domain and query_domain == content_domain:
+            return True
+            
+        # Check if we found semantic matches earlier
+        for persian_term, english_terms in semantic_keywords.items():
+            if persian_term in query_lower:
+                if persian_term in content_lower or any(term in content_lower for term in english_terms):
+                    return True
+            for eng_term in english_terms:
+                if eng_term in query_lower:
+                    if persian_term in content_lower or eng_term in content_lower:
+                        return True
+        
+        # Default to False for better precision
+        return False
     
     async def query_knowledge_base(self, query: str) -> Dict[str, Any]:
         """Query the knowledge base with a question.
