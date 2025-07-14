@@ -57,65 +57,11 @@ class ChatService:
         
         return self._sessions[user_id]
     
-    def _is_agriculture_query(self, message: str) -> bool:
-        """Detect if the message is an agriculture-related query.
-
-        Args:
-            message: The message from the user
-
-        Returns:
-            True if the message is likely about agriculture, False otherwise
-        """
-        # Enhanced list of agriculture-related keywords (English and Persian)
-        # This is a simplified approach. A more robust solution might involve
-        # a text classification model or more sophisticated NLP techniques.
-        agriculture_keywords = [
-            # English
-            'agriculture', 'soil', 'fertilizer', 'irrigation', 'crop', 'farming', 'horticulture',
-            'seed', 'planting', 'harvest', 'pest', 'pesticide', 'plant', 'tree',
-            'fruit', 'vegetable', 'weed', 'livestock', 'poultry', 'farm', 'garden',
-            'greenhouse', 'breeding', 'seedling', 'grafting', 'nutrition', 'deficiency',
-            'root', 'leaf', 'stem', 'flower', 'grain', 'disease', 'fungus', 'bacteria',
-            'virus', 'insect', 'mite', 'nematode', 'herbicide', 'fungicide', 'insecticide',
-            'acaricide', 'chemical fertilizer', 'organic fertilizer', 'manure', 'biofertilizer',
-            'ph', 'ec', 'npk', 'nitrogen', 'phosphorus', 'potassium', 'calcium', 'magnesium',
-            'iron', 'zinc', 'copper', 'manganese', 'boron', 'molybdenum', 'sulfur', 'chlorine',
-            'cultivation', 'tillage', 'soil science', 'plant nutrition', 'crop management',
-            'pest control', 'agricultural sustainability', 'water management', 'agronomy',
-            # Persian (similar to previous list, can be expanded)
-            'کشاورزی', 'خاک', 'کود', 'آبیاری', 'محصول', 'زراعت', 'باغبانی',
-            'بذر', 'کاشت', 'داشت', 'برداشت', 'آفت', 'سم', 'گیاه', 'درخت',
-            'میوه', 'سبزی', 'علف', 'هرز', 'دام', 'طیور', 'مزرعه', 'باغ',
-            'گلخانه', 'اصلاح', 'نهال', 'پیوند', 'تغذیه', 'کمبود', 'عناصر',
-            'ریشه', 'برگ', 'ساقه', 'گل', 'دانه', 'بیماری', 'قارچ', 'باکتری',
-            'ویروس', 'حشره', 'کنه', 'نماتد', 'علف‌کش', 'قارچ‌کش', 'حشره‌کش',
-            'کنه‌کش', 'کود شیمیایی', 'کود آلی', 'کود حیوانی', 'کود زیستی',
-            'پی اچ', 'ای سی', 'ان پی کا', 'ازت', 'فسفر', 'پتاسیم', 'کلسیم', 'منیزیم',
-            'آهن', 'روی', 'مس', 'منگنز', 'بور', 'مولیبدن', 'گوگرد', 'کلر'
-        ]
-
-        message_lower = message.lower()
-        for keyword in agriculture_keywords:
-            if keyword in message_lower:
-                return True
-        return False
-    
-    def _calculate_general_confidence(self, response: str) -> float:
-        """Calculate a general confidence score for non-knowledge base responses.
-        
-        Args:
-            response: The model's response
-            
-        Returns:
-            A confidence score between 0 and 1
-        """
-        # For general chat responses, we'll use a default high confidence
-        # This could be improved with more sophisticated methods in the future
-        # such as analyzing response certainty markers or model logprobs
-        return 0.9
-    
     async def process_message(self, user_id: str, message: str) -> Dict[str, Any]:
         """Process a user message and get a response according to the advanced response system.
+
+        This service will first check the knowledge base for an answer. If the confidence
+        is low, it will refer the query to a human instead of using a general model.
 
         Args:
             user_id: Unique identifier for the user session
@@ -125,10 +71,9 @@ class ChatService:
             A dictionary representing the ChatResponse schema.
         """
         CONFIDENCE_THRESHOLD = 0.75
-        HUMAN_REFERRAL_MESSAGE = "I need to refer this question to a human specialist. This question appears to be outside my knowledge domain or requires specialized expertise beyond my current capabilities."
+        HUMAN_REFERRAL_MESSAGE = settings.HUMAN_REFERRAL_MESSAGE
 
         query_analysis = {
-            "is_agriculture_related": False,
             "confidence_score": 0.0,
             "knowledge_source": "none",
             "requires_human_referral": False,
@@ -136,64 +81,38 @@ class ChatService:
         }
         response_parameters = {
             "model": settings.OPENAI_MODEL_NAME,
-            "temperature": settings.OPENAI_TEMPERATURE, # Default temperature
+            "temperature": settings.OPENAI_TEMPERATURE,
             "max_tokens": settings.OPENAI_MAX_TOKENS
         }
         answer = ""
 
         try:
-            is_agri_query = self._is_agriculture_query(message)
-            query_analysis["is_agriculture_related"] = is_agri_query
+            kb_service = get_knowledge_base_service()
+            kb_result = await kb_service.query_knowledge_base(message)
+            
+            kb_confidence = kb_result.get("confidence_score", 0) if kb_result else 0
 
-            if not is_agri_query:
-                query_analysis["requires_human_referral"] = True
-                query_analysis["reasoning"] = "Query is not agriculture-related."
-                query_analysis["confidence_score"] = 0.0 # No confidence as it's out of domain
-                answer = HUMAN_REFERRAL_MESSAGE
-                response_parameters["temperature"] = 0.3 # Default for non-agri, though referred
+            if kb_confidence >= CONFIDENCE_THRESHOLD:
+                # High confidence answer found in the knowledge base
+                answer = kb_result["answer"]
+                query_analysis["confidence_score"] = kb_confidence
+                query_analysis["knowledge_source"] = kb_result.get("source_type", "knowledge_base")
+                query_analysis["requires_human_referral"] = False
+                query_analysis["reasoning"] = "High confidence answer found in knowledge base."
+                response_parameters["temperature"] = 0.1  # Use low temperature for factual KB answers
             else:
-                # Query is agriculture-related, proceed with knowledge base or general model
-                kb_service = get_knowledge_base_service()
-                kb_result = await kb_service.query_knowledge_base(message)
+                # Low confidence from KB, indicating the query is outside the domain.
+                # Refer to a human specialist as per system design.
+                answer = HUMAN_REFERRAL_MESSAGE
+                query_analysis["confidence_score"] = kb_confidence
+                query_analysis["knowledge_source"] = "none"
+                query_analysis["requires_human_referral"] = True
+                query_analysis["reasoning"] = "Query is outside the scope of the knowledge base and requires human attention."
 
-                if kb_result and kb_result.get("answer") and kb_result.get("confidence_score", 0) >= CONFIDENCE_THRESHOLD:
-                    # High confidence answer from knowledge base
-                    answer = kb_result["answer"]
-                    query_analysis["confidence_score"] = kb_result["confidence_score"]
-                    query_analysis["knowledge_source"] = kb_result.get("source_type", "knowledge_base")
-                    query_analysis["requires_human_referral"] = False
-                    query_analysis["reasoning"] = "High confidence answer found in knowledge base."
-                    response_parameters["temperature"] = 0.1 # Factual agricultural knowledge
-                    
-                    # Add to conversation history
-                    conversation = self._get_or_create_session(user_id)
-                    conversation.memory.chat_memory.add_user_message(message)
-                    conversation.memory.chat_memory.add_ai_message(answer)
-
-                else:
-                    # Low confidence from KB or no KB result, or general agri question
-                    # Use general model, but assess confidence
-                    conversation = self._get_or_create_session(user_id)
-                    # Adjust temperature for explanatory content if not strictly factual from KB
-                    current_llm_temp = 0.3 
-                    conversation.llm.temperature = current_llm_temp # Update LLM temp for this call
-                    response_parameters["temperature"] = current_llm_temp
-
-                    general_response = conversation.predict(input=message)
-                    general_confidence = self._calculate_general_confidence(general_response) # This might need refinement
-
-                    if general_confidence >= CONFIDENCE_THRESHOLD:
-                        answer = general_response
-                        query_analysis["confidence_score"] = general_confidence
-                        query_analysis["knowledge_source"] = "general_knowledge"
-                        query_analysis["requires_human_referral"] = False
-                        query_analysis["reasoning"] = "Answer generated from general knowledge model with sufficient confidence."
-                    else:
-                        answer = HUMAN_REFERRAL_MESSAGE
-                        query_analysis["confidence_score"] = general_confidence # Report the lower confidence
-                        query_analysis["knowledge_source"] = "general_knowledge" # Still attempted general knowledge
-                        query_analysis["requires_human_referral"] = True
-                        query_analysis["reasoning"] = "Query is agriculture-related, but confidence in general knowledge response is low."
+            # Add the interaction to the conversation history
+            conversation = self._get_or_create_session(user_id)
+            conversation.memory.chat_memory.add_user_message(message)
+            conversation.memory.chat_memory.add_ai_message(answer)
 
             # Construct the final response dictionary
             return {
@@ -204,14 +123,14 @@ class ChatService:
 
         except Exception as e:
             error_msg = f"Error processing message: {str(e)}"
-            # Fallback to human referral on error
+            # Fallback to human referral on any processing error
             query_analysis["requires_human_referral"] = True
             query_analysis["reasoning"] = f"An internal error occurred: {error_msg}"
             query_analysis["confidence_score"] = 0.0
             query_analysis["knowledge_source"] = "none"
             return {
                 "query_analysis": query_analysis,
-                "response_parameters": response_parameters, # Use default params
+                "response_parameters": response_parameters,
                 "answer": HUMAN_REFERRAL_MESSAGE
             }
     

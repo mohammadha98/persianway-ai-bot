@@ -31,8 +31,8 @@ class KnowledgeBaseService:
         self.document_processor = get_document_processor()
         self.excel_processor = get_excel_qa_processor()
         
-        # System prompt for agricultural knowledge in Persian
-        self.system_prompt = settings.PERSIAN_AGRICULTURE_SYSTEM_PROMPT
+        # System prompt for knowledge base
+        self.system_prompt = settings.SYSTEM_PROMPT
         
         # Initialize the language model
         self.llm = ChatOpenAI(
@@ -197,6 +197,83 @@ class KnowledgeBaseService:
             # Re-raise the exception so the route can handle it and return a 500 error
             raise
     
+    def _is_content_relevant(self, query: str, qa_content: str) -> bool:
+        """Check if the QA content is relevant to the user's query using semantic similarity.
+        
+        Args:
+            query: The user's question
+            qa_content: The QA pair content to check
+            
+        Returns:
+            True if content appears relevant, False otherwise
+        """
+        # Convert to lowercase for comparison
+        query_lower = query.lower()
+        content_lower = qa_content.lower()
+        
+        # Define domain-specific keywords to detect topic mismatch
+        domain_keywords = {
+            'agriculture': [
+                'کود', 'کشاورزی', 'خاک', 'کاشت', 'برداشت', 'آفت', 'بیماری', 'گیاه', 'محصول',
+                'آبیاری', 'بذر', 'نهال', 'درخت', 'میوه', 'سبزی', 'غلات', 'دام', 'طیور',
+                'fertilizer', 'agriculture', 'soil', 'plant', 'crop', 'farming', 'irrigation'
+            ],
+            'health_beauty': [
+                'پوست', 'صورت', 'ماسک', 'کرم', 'زیبایی', 'سلامت', 'درمان', 'دارو', 'بیمار',
+                'معده', 'شکم', 'ماساژ', 'روغن', 'مالت', 'خرما', 'شیر', 'کودک', 'نوزاد',
+                'skin', 'face', 'mask', 'cream', 'beauty', 'health', 'treatment', 'medicine'
+            ],
+            'technology': [
+                'کامپیوتر', 'نرم افزار', 'اپلیکیشن', 'وب سایت', 'برنامه نویسی', 'شبکه',
+                'computer', 'software', 'application', 'website', 'programming', 'network'
+            ],
+            'finance': [
+                'پول', 'بانک', 'سرمایه گذاری', 'بورس', 'اقتصاد', 'مالی', 'حسابداری',
+                'money', 'bank', 'investment', 'stock', 'economy', 'financial', 'accounting'
+            ]
+        }
+        
+        # Detect query domain
+        query_domain = None
+        for domain, keywords in domain_keywords.items():
+            if any(keyword in query_lower for keyword in keywords):
+                query_domain = domain
+                break
+        
+        # Detect content domain
+        content_domain = None
+        for domain, keywords in domain_keywords.items():
+            if any(keyword in content_lower for keyword in keywords):
+                content_domain = domain
+                break
+        
+        print(f"Query: {query}")
+        print(f"QA Content: {qa_content}")
+        print(f"Query Domain: {query_domain}")
+        print(f"Content Domain: {content_domain}")
+
+        # If query domain is known and content domain is known and they differ, it's irrelevant
+        if query_domain and content_domain and query_domain != content_domain:
+            print("Domains mismatch, returning False")
+            return False
+        
+        # If the query is clearly about one domain, but the content has no clear domain,
+        # we should be cautious. For now, we allow it, but this could be refined.
+        
+        # If the content contains highly specific patterns from a different domain, it's likely irrelevant
+        if query_domain and query_domain != 'health_beauty':
+            highly_specific_health_patterns = [
+                'مالت خرما',
+                'شکم کودک',
+                'سفیر سلامت',
+                'پوست صورت',
+                'جوشهای سرسیاه'
+            ]
+            if any(pattern in content_lower for pattern in highly_specific_health_patterns):
+                return False
+
+        return True
+    
     async def query_knowledge_base(self, query: str) -> Dict[str, Any]:
         """Query the knowledge base with a question.
         
@@ -213,44 +290,46 @@ class KnowledgeBaseService:
             # First, try to find exact or semantically similar matches in the QA database
             qa_results = vector_store.similarity_search_with_score(
                 query, 
-                k=4,
+                k=8,  # Increased to get more candidates for relevance filtering
                 filter={"source_type": "excel_qa"}
             )
             
-            # Check if we have a high-confidence QA match
+            # Check if we have a high-confidence QA match that is also relevant
             qa_match_found = False
             qa_answer = ""
             qa_sources = []
+            best_confidence = 0.0
             
             if qa_results:
-                # Get the best match
-                best_qa_match, best_score = qa_results[0]
-                
-                # Convert score to confidence (scores are distances, lower is better)
-                # Normalize to 0-1 range where 1 is highest confidence
-                best_confidence = 1.0 - min(best_score, 1.0)
-                
-                # Check if confidence exceeds threshold
-                if best_confidence >= settings.QA_MATCH_THRESHOLD:
+                best_match = None
+                best_confidence = 0.0
+
+                # Filter results for relevance and find the best relevant match
+                for qa_match, score in qa_results:
+                    confidence = 1.0 - min(score, 1.0)
+                    
+                    if confidence > best_confidence and self._is_content_relevant(query, qa_match.page_content):
+                        best_confidence = confidence
+                        best_match = qa_match
+
+                if best_match and best_confidence >= settings.QA_MATCH_THRESHOLD:
                     qa_match_found = True
                     
                     # Extract answer from the QA pair
-                    content_parts = best_qa_match.page_content.split("\nAnswer: ")
+                    content_parts = best_match.page_content.split("\nAnswer: ")
                     if len(content_parts) > 1:
                         qa_answer = content_parts[1]
                     
                     # Format QA sources
-                    for doc, score in qa_results:
-                        if "source_type" in doc.metadata and doc.metadata["source_type"] == "excel_qa":
-                            qa_sources.append({
-                                "content": doc.page_content,
-                                "source": doc.metadata.get("source", "Unknown"),
-                                "page": 0,  # Excel files don't have pages
-                                "source_type": "excel_qa",
-                                "title": doc.metadata.get("title", "")
-                            })
+                    qa_sources = [{
+                        "content": best_match.page_content,
+                        "source": best_match.metadata.get("source", "Unknown"),
+                        "page": 0,
+                        "source_type": "excel_qa",
+                        "title": best_match.metadata.get("title", "")
+                    }]
             
-            # If we have a high-confidence QA match, return it directly
+            # If we have a high-confidence relevant QA match, return it directly
             if qa_match_found and qa_answer:
                 return {
                     "answer": qa_answer,

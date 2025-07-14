@@ -27,7 +27,6 @@ class ChatRequest(BaseModel):
 
 class QueryAnalysis(BaseModel):
     """Schema for the analysis of the user's query."""
-    is_agriculture_related: bool = Field(..., description="Whether the query is related to agriculture")
     confidence_score: float = Field(..., description="Confidence score of the answer between 0.0 and 1.0")
     knowledge_source: str = Field(..., description="Source of the knowledge used for the response (knowledge_base, general_knowledge, none)")
     requires_human_referral: bool = Field(..., description="Whether the query requires human referral")
@@ -55,7 +54,6 @@ class ChatResponse(BaseModel):
         schema_extra = {
             "example": {
                 "query_analysis": {
-                    "is_agriculture_related": True,
                     "confidence_score": 0.95,
                     "knowledge_source": "knowledge_base",
                     "requires_human_referral": False,
