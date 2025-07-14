@@ -66,4 +66,5 @@ def setup_logging(
             retention="1 week",
             level=level,
             serialize=json_logs,
+            encoding="utf-8",
         )

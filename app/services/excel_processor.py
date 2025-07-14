@@ -56,8 +56,8 @@ class ExcelQAProcessor:
             Tuple containing (number of QA pairs processed, list of Document objects)
         """
         try:
-            # Read Excel file
-            df = pd.read_excel(file_path)
+            # Read Excel file with proper encoding handling
+            df = pd.read_excel(file_path, engine='openpyxl')
             
             # Validate structure
             if not self.validate_excel_structure(df):
