@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}چت - پایگاه دانش پرشین وی{% endblock %}
+
+{% block extra_css %}
+<!-- Markdown parser for formatting AI responses -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+    .chat-container {
+        height: 65vh;
+    }
+    .ai-message pre {
+        @apply bg-gray-800 text-white p-4 rounded-lg overflow-x-auto my-2;
+    }
+    .ai-message code {
+        @apply font-mono text-sm;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-col max-w-4xl mx-auto">
+    <div class="bg-white shadow-xl rounded-lg overflow-hidden">
+        <div class="bg-green-700 text-white p-4 flex justify-between items-center">
+            <h1 class="text-xl font-semibold"><i class="fas fa-comments ml-2"></i>چت با هوش مصنوعی پرشین وی</h1>
+            <button id="clear-chat-btn" class="text-white hover:text-green-200 transition-colors" title="پاک کردن تاریخچه چت">
+                <i class="fas fa-trash ml-1"></i> پاک کردن چت
+            </button>
+        </div>
+        
+        <div class="chat-container flex flex-col p-4 overflow-y-auto" id="chat-messages">
+            <!-- Initial Message -->
+            <div class="message ai-message">
+                <p>سلام! من دستیار دانش هوش مصنوعی پرشین وی شما هستم. امروز چگونه می‌توانم به شما کمک کنم؟</p>
+                <div class="message-time">{{ current_time }}</div>
+            </div>
+            <!-- Messages will be added here dynamically -->
+        </div>
+        
+        <div class="p-4 bg-gray-100 border-t border-gray-200">
+            <form id="chat-form" class="flex items-center space-x-3">
+                <input type="hidden" id="user-id" value="{{ user_id }}">
+                <input type="text" id="chat-input" class="flex-grow w-full px-4 py-2 bg-white border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-green-500 transition-shadow" placeholder="پیام خود را اینجا بنویسید..." autocomplete="off">
+                <button type="submit" class="bg-green-600 text-white rounded-full p-3 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-200 transform hover:scale-110">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="mt-8 bg-white shadow-lg rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-800 mb-4"><i class="fas fa-lightbulb text-yellow-400 ml-2"></i>نکاتی برای نتایج بهتر</h2>
+        <div class="grid md:grid-cols-2 gap-6 text-sm text-gray-600">
+            <div>
+                <h3 class="font-semibold mb-1">دقیق باشید</h3>
+                <p>برای دریافت پاسخ‌های دقیق‌تر، سؤالات واضح و مشخص بپرسید.</p>
+                
+                <h3 class="font-semibold mt-4 mb-1">از کلمات کلیدی استفاده کنید</h3>
+                <p>اصطلاحات مرتبط با موضوع را در سؤالات خود بگنجانید.</p>
+            </div>
+            <div>
+                <h3 class="font-semibold mb-1">پیگیری کنید</h3>
+                <p>برای دریافت اطلاعات دقیق‌تر، سؤالات تکمیلی بپرسید.</p>
+                
+                <h3 class="font-semibold mt-4 mb-1">نمونه سؤالات</h3>
+                <ul class="list-disc list-inside space-y-1">
+                    <li>"بهترین روش‌ها برای پرورش زعفران در ایران چیست؟"</li>
+                    <li>"آبیاری چگونه بر عملکرد پسته در استان کرمان تأثیر می‌گذارد؟"</li>
+                    <li>"بیماری‌های رایج درختان انار چیست؟"</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Additional chat-specific JavaScript can be added here if needed
+    // The main functionality is in main.js
+</script>
+{% endblock %}

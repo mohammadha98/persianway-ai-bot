@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}تنظیمات - پایگاه دانش پرشین وی{% endblock %}
+
+{% block extra_css %}
+<style>
+    .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+    .status-ready { background-color: #22c55e; } /* green-500 */
+    .status-processing { background-color: #f59e0b; } /* amber-500 */
+    .status-empty { background-color: #ef4444; } /* red-500 */
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold text-gray-800 mb-6">تنظیمات پایگاه دانش</h1>
+
+    <!-- Knowledge Base Status Card -->
+    <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+        <div class="bg-green-700 text-white p-4 flex justify-between items-center">
+            <h2 class="text-lg font-semibold">
+                <i class="fas fa-database ml-2"></i> وضعیت پایگاه دانش
+            </h2>
+            <button id="refresh-status-btn" class="text-white hover:text-green-200 transition-colors" title="به‌روزرسانی وضعیت">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+        </div>
+        <div class="p-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="text-md font-semibold text-gray-700 mb-2">وضعیت فعلی</h3>
+                    <p class="flex items-center">
+                        <span id="status-indicator" class="status-indicator status-{{ status }}"></span>
+                        <span id="kb-status-badge" class="px-3 py-1 text-sm font-medium rounded-full 
+                            {% if status == 'ready' %}bg-green-100 text-green-800
+                            {% elif status == 'processing' %}bg-yellow-100 text-yellow-800
+                            {% elif status == 'empty' %}bg-red-100 text-red-800
+                            {% endif %}">
+                            {{ status|title }}
+                        </span>
+                    </p>
+                    
+                    <h3 class="text-md font-semibold text-gray-700 mt-6 mb-2">تعداد اسناد</h3>
+                    <ul class="space-y-2">
+                        <li class="flex justify-between items-center text-gray-600">
+                            <span>کل اسناد</span>
+                            <span id="total-docs" class="px-2 py-1 text-xs font-bold text-green-800 bg-green-100 rounded-full">{{ document_counts.total }}</span>
+                        </li>
+                        <li class="flex justify-between items-center text-gray-600">
+                            <span>اسناد PDF</span>
+                            <span id="pdf-docs" class="px-2 py-1 text-xs font-bold text-green-800 bg-green-100 rounded-full">{{ document_counts.pdf }}</span>
+                        </li>
+                        <li class="flex justify-between items-center text-gray-600">
+                            <span>جفت‌های پرسش و پاسخ اکسل</span>
+                            <span id="excel-qa" class="px-2 py-1 text-xs font-bold text-green-800 bg-green-100 rounded-full">{{ document_counts.excel_qa }}</span>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="text-md font-semibold text-gray-700 mb-2">اطلاعات سیستم</h3>
+                    <div class="text-sm text-gray-600 space-y-2">
+                        <div class="flex justify-between">
+                            <span class="font-medium text-gray-800">پیکربندی RAG:</span>
+                            <span>{{ rag_config }}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="font-medium text-gray-800">وضعیت پردازش:</span>
+                            <span>{{ processing_status }}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="font-medium text-gray-800">آخرین به‌روزرسانی:</span>
+                            <span>{{ last_updated }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Document Processing Forms -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <!-- Process PDF Document Card -->
+        <div class="bg-white rounded-lg shadow-md overflow-hidden">
+            <div class="bg-green-700 text-white p-4">
+                <h2 class="text-lg font-semibold"><i class="fas fa-file-pdf ml-2"></i> پردازش سند PDF</h2>
+            </div>
+            <div class="p-6">
+                <form id="process-pdf-form" enctype="multipart/form-data">
+                    <div class="mb-4">
+                        <label for="pdf_file" class="block text-sm font-medium text-gray-700 mb-1">بارگذاری سند PDF</label>
+                        <input type="file" id="pdf_file" name="file" accept=".pdf" required class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100">
+                        <p class="text-xs text-gray-500 mt-1">یک فایل PDF برای افزودن به پایگاه دانش بارگذاری کنید.</p>
+                    </div>
+                    <div class="mb-4">
+                        <label for="pdf_description" class="block text-sm font-medium text-gray-700 mb-1">توضیحات سند (اختیاری)</label>
+                        <textarea id="pdf_description" name="description" rows="2" placeholder="توضیح مختصری از سند" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-green-500"></textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition-colors">
+                        <i class="fas fa-upload ml-2"></i> پردازش PDF
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Process Excel QA Card -->
+        <div class="bg-white rounded-lg shadow-md overflow-hidden">
+            <div class="bg-green-700 text-white p-4">
+                <h2 class="text-lg font-semibold"><i class="fas fa-file-excel ml-2"></i> پردازش فایل پرسش و پاسخ اکسل</h2>
+            </div>
+            <div class="p-6">
+                <form id="process-excel-form" enctype="multipart/form-data">
+                    <div class="mb-4">
+                        <label for="excel_file" class="block text-sm font-medium text-gray-700 mb-1">بارگذاری فایل پرسش و پاسخ اکسل</label>
+                        <input type="file" id="excel_file" name="file" accept=".xlsx,.xls" required class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100">
+                        <p class="text-xs text-gray-500 mt-1">یک فایل اکسل با جفت‌های پرسش و پاسخ بارگذاری کنید.</p>
+                    </div>
+                    <div class="mb-4">
+                        <label for="excel_description" class="block text-sm font-medium text-gray-700 mb-1">توضیحات فایل (اختیاری)</label>
+                        <textarea id="excel_description" name="description" rows="2" placeholder="توضیح مختصری از جفت‌های پرسش و پاسخ" class="w-full px-3 py-2 text-gray-700 border rounded-lg focus:outline-none focus:border-green-500"></textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition-colors">
+                        <i class="fas fa-upload ml-2"></i> پردازش اکسل
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Settings Card -->
+    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+        <div class="bg-green-700 text-white p-4">
+            <h2 class="text-lg font-semibold"><i class="fas fa-sliders-h ml-2"></i> تنظیمات سیستم</h2>
+        </div>
+        <div class="p-6">
+            <div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6" role="alert">
+                <p class="font-bold">اطلاعاتی</p>
+                <p>تنظیمات سیستم از طریق فایل‌های پیکربندی مدیریت می‌شوند. پیکربندی مبتنی بر رابط کاربری برای به‌روزرسانی آینده برنامه‌ریزی شده است.</p>
+            </div>
+
+            <h3 class="text-md font-semibold text-gray-700 mb-2">پیکربندی فعلی</h3>
+            <div class="bg-gray-50 rounded-lg p-4">
+                <div class="text-sm text-gray-600 space-y-2">
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-800">مدل Embedding:</span>
+                        <span>{{ embedding_model }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-800">ذخیره‌سازی برداری:</span>
+                        <span>{{ vector_store }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-800">اندازه قطعه:</span>
+                        <span>{{ chunk_size }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="font-medium text-gray-800">همپوشانی قطعه:</span>
+                        <span>{{ chunk_overlap }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', path='/js/settings.js') }}"></script>
+{% endblock %}
