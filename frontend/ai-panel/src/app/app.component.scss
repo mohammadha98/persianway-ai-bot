@@ -1,0 +1,136 @@
+// Persian/RTL App Styles
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Vazir', 'Tahoma', sans-serif;
+  direction: rtl;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  
+  .header-content {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 16px;
+  }
+  
+  .app-title {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: white;
+  }
+  
+  .spacer {
+    flex: 1;
+  }
+  
+  .nav-links {
+    display: flex;
+    gap: 8px;
+    direction: rtl;
+    
+    a {
+      color: white;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 4px;
+      transition: background-color 0.3s;
+      direction: rtl;
+      
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+      }
+      
+      &.active {
+        background-color: rgba(255, 255, 255, 0.2);
+        font-weight: bold;
+      }
+      
+      mat-icon {
+        margin-left: 0;
+        margin-right: 8px;
+        order: -1;
+      }
+    }
+  }
+}
+
+.main-content {
+  flex: 1;
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.app-footer {
+  background-color: #f5f5f5;
+  border-top: 1px solid #e0e0e0;
+  padding: 16px;
+  
+  .footer-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+  }
+}
+
+// Responsive design
+@media (max-width: 768px) {
+  .app-header {
+    .header-content {
+      padding: 0 8px;
+    }
+    
+    .nav-links {
+      gap: 4px;
+      
+      a {
+        padding: 6px 12px;
+        font-size: 0.9rem;
+        
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+      }
+    }
+  }
+  
+  .main-content {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    .app-title {
+      font-size: 1.2rem;
+    }
+    
+    .nav-links {
+      a {
+        padding: 4px 8px;
+        
+        span {
+          display: none; // Hide text on very small screens, show only icons
+        }
+      }
+    }
+  }
+}

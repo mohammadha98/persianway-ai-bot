@@ -1,0 +1,308 @@
+.contribute-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 16px;
+  direction: rtl;
+}
+
+.header-card {
+  margin-bottom: 24px;
+  
+  .header-icon {
+    background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.form-card {
+  .form-icon {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+  
+  .contribution-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    direction: rtl;
+    
+    .full-width {
+      width: 100%;
+    }
+  }
+  
+  .submit-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    direction: rtl;
+    
+    .button-spinner {
+      margin-left: 0;
+      margin-right: 8px;
+    }
+  }
+}
+
+.upload-card {
+  .upload-icon {
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+  
+  .upload-area {
+    .file-drop-zone {
+      border: 2px dashed #ddd;
+      border-radius: 12px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      background: #fafafa;
+      
+      &:hover {
+        border-color: #4CAF50;
+        background: #f0f8f0;
+      }
+      
+      .upload-icon-large {
+        font-size: 48px;
+        width: 48px;
+        height: 48px;
+        color: #4CAF50;
+        margin-bottom: 16px;
+      }
+      
+      .upload-text {
+        margin: 0 0 8px 0;
+        color: #333;
+        
+        strong {
+          color: #4CAF50;
+        }
+      }
+      
+      .upload-hint {
+        margin: 0;
+        color: #666;
+        font-size: 0.9rem;
+      }
+    }
+    
+    .selected-file {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: #e8f5e8;
+      border-radius: 8px;
+      margin-top: 16px;
+      direction: rtl;
+      text-align: right;
+      
+      mat-icon {
+        color: #4CAF50;
+        order: -1;
+      }
+      
+      span {
+        flex: 1;
+        color: #333;
+        text-align: right;
+      }
+    }
+  }
+  
+  .upload-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    direction: rtl;
+    
+    .button-spinner {
+      margin-left: 0;
+      margin-right: 8px;
+    }
+  }
+}
+
+.guidelines-card {
+  .guidelines-icon {
+    background: linear-gradient(135deg, #FFA726 0%, #FF7043 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+  
+  .guidelines-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    
+    .guideline-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      direction: rtl;
+      text-align: right;
+      
+      mat-icon {
+        color: #4CAF50;
+        margin-top: 4px;
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+        order: -1;
+      }
+      
+      div {
+        flex: 1;
+        text-align: right;
+        
+        h4 {
+          margin: 0 0 8px 0;
+          color: #333;
+          font-size: 1.1rem;
+          text-align: right;
+        }
+        
+        p {
+          margin: 0;
+          color: #666;
+          line-height: 1.5;
+          text-align: right;
+        }
+      }
+    }
+  }
+}
+
+// Snackbar styles
+::ng-deep .success-snackbar {
+  background: #4CAF50 !important;
+  color: white !important;
+}
+
+::ng-deep .error-snackbar {
+  background: #f44336 !important;
+  color: white !important;
+}
+
+// Responsive design
+@media (max-width: 968px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .contribute-container {
+    padding: 0 8px;
+  }
+  
+  .header-card {
+    margin-bottom: 16px;
+  }
+  
+  .content-grid {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  
+  .upload-area {
+    .file-drop-zone {
+      padding: 30px 15px;
+      
+      .upload-icon-large {
+        font-size: 36px;
+        width: 36px;
+        height: 36px;
+      }
+    }
+  }
+  
+  .guidelines-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .form-card {
+    .contribution-form {
+      gap: 12px;
+    }
+  }
+  
+  .upload-area {
+    .file-drop-zone {
+      padding: 20px 10px;
+      
+      .upload-text {
+        font-size: 0.9rem;
+      }
+      
+      .upload-hint {
+        font-size: 0.8rem;
+      }
+    }
+  }
+  
+  .guidelines-card {
+    .guideline-item {
+      gap: 8px;
+      
+      div {
+        h4 {
+          font-size: 1rem;
+        }
+        
+        p {
+          font-size: 0.9rem;
+        }
+      }
+    }
+  }
+}

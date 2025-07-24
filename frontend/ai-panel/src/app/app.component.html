@@ -1,0 +1,39 @@
+<!-- Persianway AI Application -->
+<div class="app-container" dir="rtl">
+  <!-- Header -->
+  <mat-toolbar color="primary" class="app-header">
+    <div class="header-content">
+      <span class="app-title">Persianway AI</span>
+      <span class="spacer"></span>
+      <nav class="nav-links">
+        <a mat-button routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
+          <mat-icon>home</mat-icon>
+          
+        </a>
+        <a mat-button routerLink="/chat" routerLinkActive="active">
+          <mat-icon>chat</mat-icon>
+        </a>
+        <a mat-button routerLink="/contribute" routerLinkActive="active">
+          <mat-icon>add_circle</mat-icon>
+          
+        </a>
+        <a mat-button routerLink="/settings" routerLinkActive="active">
+          <mat-icon>settings</mat-icon>
+          
+        </a>
+      </nav>
+    </div>
+  </mat-toolbar>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <router-outlet></router-outlet>
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div class="footer-content">
+      <p>&copy; ۱۴۰۳ Persianway AI - سیستم هوش مصنوعی کشاورزی ایران</p>
+    </div>
+  </footer>
+</div>

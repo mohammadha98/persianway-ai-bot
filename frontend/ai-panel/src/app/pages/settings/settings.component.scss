@@ -1,0 +1,343 @@
+.settings-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 16px;
+  direction: rtl;
+}
+
+.header-card {
+  margin-bottom: 24px;
+  
+  .header-icon {
+    background: linear-gradient(135deg, #9C27B0 0%, #673AB7 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.settings-card {
+  .settings-icon {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+  
+  .settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    direction: rtl;
+    
+    .full-width {
+      width: 100%;
+    }
+    
+    .toggle-settings {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 16px;
+      direction: rtl;
+      
+      .toggle-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        direction: rtl;
+        
+        .toggle-info {
+          flex: 1;
+          text-align: right;
+          
+          h4 {
+            margin: 0 0 4px 0;
+            color: #333;
+            font-size: 1rem;
+            text-align: right;
+          }
+          
+          p {
+            margin: 0;
+            color: #666;
+            font-size: 0.9rem;
+            text-align: right;
+          }
+        }
+      }
+    }
+  }
+}
+
+.advanced-card {
+  .advanced-icon {
+    background: linear-gradient(135deg, #FF9800 0%, #FF5722 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+  
+  .advanced-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    direction: rtl;
+    
+    .full-width {
+      width: 100%;
+    }
+  }
+}
+
+.system-info-card {
+  margin-bottom: 24px;
+  
+  .system-icon {
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+  
+  .system-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    
+    .info-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      direction: rtl;
+      text-align: right;
+      
+      mat-icon {
+        color: #4CAF50;
+        margin-top: 4px;
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+        order: -1;
+      }
+      
+      div {
+        flex: 1;
+        text-align: right;
+        
+        h4 {
+          margin: 0 0 4px 0;
+          color: #333;
+          font-size: 0.9rem;
+          font-weight: 500;
+          text-align: right;
+        }
+        
+        p {
+          margin: 0;
+          color: #666;
+          font-size: 1rem;
+          text-align: right;
+          
+          &.status-active {
+            color: #4CAF50;
+            font-weight: 500;
+          }
+        }
+      }
+    }
+  }
+}
+
+.actions-card {
+  .actions-icon {
+    background: linear-gradient(135deg, #607D8B 0%, #455A64 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+  }
+  
+  .actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    direction: rtl;
+    
+    button, .import-button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: center;
+      min-height: 40px;
+      direction: rtl;
+      
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        margin-left: 0;
+        margin-right: 8px;
+      }
+    }
+    
+    .import-button {
+      button {
+        width: 100%;
+        margin: 0;
+        direction: rtl;
+      }
+    }
+  }
+}
+
+// Snackbar styles
+::ng-deep .success-snackbar {
+  background: #4CAF50 !important;
+  color: white !important;
+}
+
+::ng-deep .error-snackbar {
+  background: #f44336 !important;
+  color: white !important;
+}
+
+// Responsive design
+@media (max-width: 968px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .settings-container {
+    padding: 0 8px;
+  }
+  
+  .header-card {
+    margin-bottom: 16px;
+  }
+  
+  .content-grid {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  
+  .system-info-card {
+    margin-bottom: 16px;
+    
+    .system-grid {
+      grid-template-columns: 1fr;
+      gap: 12px;
+      
+      .info-item {
+        padding: 12px;
+      }
+    }
+  }
+  
+  .actions-card {
+    .actions-grid {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .settings-card {
+    .settings-form {
+      gap: 12px;
+      
+      .toggle-settings {
+        gap: 12px;
+        
+        .toggle-item {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 8px;
+          
+          .toggle-info {
+            h4 {
+              font-size: 0.9rem;
+            }
+            
+            p {
+              font-size: 0.8rem;
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  .advanced-card {
+    .advanced-form {
+      gap: 12px;
+    }
+  }
+  
+  .system-info-card {
+    .system-grid {
+      .info-item {
+        padding: 10px;
+        
+        div {
+          h4 {
+            font-size: 0.8rem;
+          }
+          
+          p {
+            font-size: 0.9rem;
+          }
+        }
+      }
+    }
+  }
+}

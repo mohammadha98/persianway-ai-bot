@@ -1,0 +1,214 @@
+<div class="settings-container">
+  <!-- Header Section -->
+  <mat-card class="header-card">
+    <mat-card-header>
+      <div mat-card-avatar class="header-icon">
+        <mat-icon>settings</mat-icon>
+      </div>
+      <mat-card-title>تنظیمات سیستم</mat-card-title>
+      <mat-card-subtitle>تنظیمات و پیکربندی دستیار هوش مصنوعی</mat-card-subtitle>
+    </mat-card-header>
+  </mat-card>
+
+  <div class="content-grid">
+    <!-- User Settings -->
+    <mat-card class="settings-card">
+      <mat-card-header>
+        <div mat-card-avatar class="settings-icon">
+          <mat-icon>person_outline</mat-icon>
+        </div>
+        <mat-card-title>تنظیمات کاربری</mat-card-title>
+        <mat-card-subtitle>تنظیمات شخصی‌سازی رابط کاربری</mat-card-subtitle>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <div class="settings-form">
+          <!-- Language -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>زبان</mat-label>
+            <mat-select [(ngModel)]="settings.language">
+              <mat-option *ngFor="let lang of languages" [value]="lang.value">
+                {{ lang.label }}
+              </mat-option>
+            </mat-select>
+          </mat-form-field>
+
+          <!-- Theme -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>تم</mat-label>
+            <mat-select [(ngModel)]="settings.theme">
+              <mat-option *ngFor="let theme of themes" [value]="theme.value">
+                {{ theme.label }}
+              </mat-option>
+            </mat-select>
+          </mat-form-field>
+
+          <!-- Response Length -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>طول پاسخ</mat-label>
+            <mat-select [(ngModel)]="settings.responseLength">
+              <mat-option *ngFor="let length of responseLengths" [value]="length.value">
+                {{ length.label }}
+              </mat-option>
+            </mat-select>
+          </mat-form-field>
+
+          <mat-divider></mat-divider>
+
+          <!-- Toggle Settings -->
+          <div class="toggle-settings">
+            <div class="toggle-item">
+              <div class="toggle-info">
+                <h4>اعلان‌ها</h4>
+                <p>دریافت اعلان‌های سیستم</p>
+              </div>
+              <mat-slide-toggle [(ngModel)]="settings.notifications"></mat-slide-toggle>
+            </div>
+
+            <div class="toggle-item">
+              <div class="toggle-info">
+                <h4>ذخیره خودکار</h4>
+                <p>ذخیره خودکار گفتگوها</p>
+              </div>
+              <mat-slide-toggle [(ngModel)]="settings.autoSave"></mat-slide-toggle>
+            </div>
+          </div>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+    <!-- Advanced Settings -->
+    <mat-card class="advanced-card">
+      <mat-card-header>
+        <div mat-card-avatar class="advanced-icon">
+          <mat-icon>tune</mat-icon>
+        </div>
+        <mat-card-title>تنظیمات پیشرفته</mat-card-title>
+        <mat-card-subtitle>تنظیمات فنی و عملکرد</mat-card-subtitle>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <div class="advanced-form">
+          <!-- API Timeout -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>مهلت زمانی API (ثانیه)</mat-label>
+            <input matInput type="number" [(ngModel)]="settings.apiTimeout" 
+                   min="10" max="120">
+            <mat-hint>مهلت زمانی برای دریافت پاسخ از سرور</mat-hint>
+          </mat-form-field>
+
+          <!-- Max Tokens -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>حداکثر توکن</mat-label>
+            <input matInput type="number" [(ngModel)]="settings.maxTokens" 
+                   min="512" max="4096">
+            <mat-hint>حداکثر طول پاسخ تولید شده</mat-hint>
+          </mat-form-field>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </div>
+
+  <!-- System Information -->
+  <mat-card class="system-info-card">
+    <mat-card-header>
+      <div mat-card-avatar class="system-icon">
+        <mat-icon>info_outline</mat-icon>
+      </div>
+      <mat-card-title>اطلاعات سیستم</mat-card-title>
+    </mat-card-header>
+    
+    <mat-card-content>
+      <div class="system-grid">
+        <div class="info-item">
+          <mat-icon>code</mat-icon>
+          <div>
+            <h4>نسخه سیستم</h4>
+            <p>{{ systemInfo.version }}</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>update</mat-icon>
+          <div>
+            <h4>آخرین بروزرسانی</h4>
+            <p>{{ systemInfo.lastUpdate }}</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>library_books</mat-icon>
+          <div>
+            <h4>تعداد دانش</h4>
+            <p>{{ systemInfo.totalKnowledge }} مورد</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>people</mat-icon>
+          <div>
+            <h4>کاربران فعال</h4>
+            <p>{{ systemInfo.activeUsers }} نفر</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>health_and_safety</mat-icon>
+          <div>
+            <h4>وضعیت سیستم</h4>
+            <p class="status-active">{{ systemInfo.systemStatus }}</p>
+          </div>
+        </div>
+      </div>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Action Buttons -->
+  <mat-card class="actions-card">
+    <mat-card-header>
+      <div mat-card-avatar class="actions-icon">
+        <mat-icon>build</mat-icon>
+      </div>
+      <mat-card-title>عملیات</mat-card-title>
+    </mat-card-header>
+    
+    <mat-card-content>
+      <div class="actions-grid">
+        <button mat-raised-button color="primary" 
+                (click)="saveSettings()"
+                [disabled]="isSaving">
+          <mat-icon>save</mat-icon>
+          {{ isSaving ? 'در حال ذخیره...' : 'ذخیره تنظیمات' }}
+        </button>
+        
+        <button mat-raised-button color="warn" 
+                (click)="resetSettings()">
+          <mat-icon>restore</mat-icon>
+          بازگردانی به پیش‌فرض
+        </button>
+        
+        <button mat-raised-button color="accent" 
+                (click)="exportSettings()">
+          <mat-icon>download</mat-icon>
+          صادر کردن تنظیمات
+        </button>
+        
+        <label for="importFile" class="import-button">
+          <input type="file" id="importFile" 
+                 (change)="importSettings($event)"
+                 accept=".json" style="display: none;">
+          <button mat-raised-button type="button">
+            <mat-icon>upload</mat-icon>
+            وارد کردن تنظیمات
+          </button>
+        </label>
+        
+        <button mat-raised-button 
+                (click)="clearCache()">
+          <mat-icon>clear_all</mat-icon>
+          پاک کردن کش
+        </button>
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>
