@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     OPENAI_TEMPERATURE: float = 0.7
     OPENAI_MAX_TOKENS: int = 500
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-ada-002"
+    OPENROUTER_API_KEY: Optional[str] = None
+    OPENROUTER_API_BASE: str = "https://openrouter.ai/api/v1"
+    
+    # Model parameters
+    TEMPERATURE: float = 0.7
+    TOP_P: float = 1.0
+    MAX_TOKENS: int = 256
+
     
     # Human referral settings
     KNOWLEDGE_BASE_CONFIDENCE_THRESHOLD: float = 0.5  # Minimum confidence score to consider an answer adequate

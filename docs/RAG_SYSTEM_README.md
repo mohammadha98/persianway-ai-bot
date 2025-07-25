@@ -1,4 +1,4 @@
-# Persian Agriculture Knowledge Base RAG System
+# Persian Way Knowledge Base RAG System
 
 ## Overview
 

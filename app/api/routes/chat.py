@@ -19,7 +19,9 @@ async def create_chat(request: ChatRequest, chat_service=Depends(get_chat_servic
         # Process the message
         result = await chat_service.process_message(
             user_id=request.user_id,
-            message=request.message
+            message=request.message,
+            model=request.model,
+            parameters=request.parameters.dict() if request.parameters else None
         )
         
         # Get conversation history

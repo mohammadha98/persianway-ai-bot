@@ -3,7 +3,7 @@ import uuid
 import logging
 from datetime import datetime
 from langchain.chains import RetrievalQA
-from langchain.chat_models import ChatOpenAI
+from app.services.chat_service import get_llm
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 
@@ -35,12 +35,7 @@ class KnowledgeBaseService:
         self.system_prompt = settings.SYSTEM_PROMPT
         
         # Initialize the language model
-        self.llm = ChatOpenAI(
-            openai_api_key=settings.OPENAI_API_KEY,
-            model_name=settings.OPENAI_MODEL_NAME,
-            temperature=settings.OPENAI_TEMPERATURE,
-            max_tokens=settings.OPENAI_MAX_TOKENS
-        )
+        self.llm = get_llm(temperature=0.1)
         
         # Initialize the retrieval QA chain
         self._qa_chain = None

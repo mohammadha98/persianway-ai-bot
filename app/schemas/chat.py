@@ -13,14 +13,26 @@ class ChatRequest(BaseModel):
     
     This defines the expected input format for the chat API.
     """
+    class RequestParameters(BaseModel):
+        """Optional parameters to override the model's default settings."""
+        temperature: Optional[float] = Field(None, description="The temperature setting for the model.")
+        top_p: Optional[float] = Field(None, description="The top_p setting for the model.")
+        max_tokens: Optional[int] = Field(None, description="The maximum number of tokens for the response.")
+
     user_id: str = Field(..., description="Unique identifier for the user session")
     message: str = Field(..., description="The message from the user")
+    model: Optional[str] = Field(None, description="The model to use for the response, overriding the default.")
+    parameters: Optional[RequestParameters] = Field(None, description="Parameters to override model settings.")
     
     class Config:
         schema_extra = {
             "example": {
                 "user_id": "user123",
-                "message": "Hello, how can you help me today?"
+                "message": "Hello, how can you help me today?",
+                "model": "gpt-4-turbo",
+                "parameters": {
+                    "temperature": 0.5
+                }
             }
         }
 

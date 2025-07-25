@@ -6,7 +6,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+
 import { ChatService } from '../../services/chat.service';
 
 interface Message {
@@ -27,7 +27,7 @@ interface Message {
     MatIconModule,
     MatInputModule,
     MatFormFieldModule,
-    MatProgressSpinnerModule
+
   ],
   templateUrl: './chat.component.html',
   styleUrl: './chat.component.scss'
@@ -58,7 +58,11 @@ export class ChatComponent implements OnInit, AfterViewChecked {
       isUser: false,
       timestamp: new Date()
     };
-    this.messages.push(welcomeMessage);
+    // Use immutable update pattern
+    this.messages = [welcomeMessage];
+    
+    // Ensure UI updates
+    setTimeout(() => this.scrollToBottom(), 0);
   }
 
   sendMessage() {
@@ -66,21 +70,26 @@ export class ChatComponent implements OnInit, AfterViewChecked {
       return;
     }
 
+    // Store message content before clearing the input
+    const messageContent = this.currentMessage.trim();
+    
     // Add user message
     const userMessage: Message = {
       id: this.generateId(),
-      content: this.currentMessage,
+      content: messageContent,
       isUser: true,
       timestamp: new Date()
     };
-    this.messages.push(userMessage);
-
-    const messageToSend = this.currentMessage;
+    
+    // Add to messages array and force change detection
+    this.messages = [...this.messages, userMessage];
+    
+    // Clear input field
     this.currentMessage = '';
     this.isLoading = true;
 
     // Send to API
-    this.chatService.sendMessage(messageToSend, this.conversationId)
+    this.chatService.sendMessage(messageContent, this.conversationId)
       .subscribe({
         next: (response) => {
           this.isLoading = false;
@@ -92,12 +101,17 @@ export class ChatComponent implements OnInit, AfterViewChecked {
             isUser: false,
             timestamp: new Date()
           };
-          this.messages.push(aiMessage);
+          
+          // Use immutable update pattern for better change detection
+          this.messages = [...this.messages, aiMessage];
           
           // Update conversation ID if provided
           if (response.conversation_id) {
             this.conversationId = response.conversation_id;
           }
+          
+          // Ensure UI updates by triggering change detection
+          setTimeout(() => this.scrollToBottom(), 0);
         },
         error: (error) => {
           this.isLoading = false;
@@ -109,7 +123,12 @@ export class ChatComponent implements OnInit, AfterViewChecked {
             isUser: false,
             timestamp: new Date()
           };
-          this.messages.push(errorMessage);
+          
+          // Use immutable update pattern for better change detection
+          this.messages = [...this.messages, errorMessage];
+          
+          // Ensure UI updates by triggering change detection
+          setTimeout(() => this.scrollToBottom(), 0);
         }
       });
   }
@@ -124,6 +143,7 @@ export class ChatComponent implements OnInit, AfterViewChecked {
   clearChat() {
     this.messages = [];
     this.conversationId = null;
+    this.currentMessage = '';
     this.addWelcomeMessage();
   }
 

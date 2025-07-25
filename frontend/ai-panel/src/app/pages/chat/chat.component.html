@@ -1,85 +1,73 @@
 <div class="chat-container">
-  <!-- Chat Header -->
-  <mat-card class="chat-header">
-    <mat-card-header>
-      <div mat-card-avatar class="chat-avatar">
-        <mat-icon>smart_toy</mat-icon>
+  <!-- Header -->
+  <header class="chat-header">
+    <div class="header-content">
+      <div class="header-info">
+        <div class="avatar">
+          <mat-icon>agriculture</mat-icon>
+        </div>
+        <div class="title-section">
+          <h1>دستیار کشاورزی</h1>
+          <p>پاسخگوی سوالات کشاورزی شما</p>
+        </div>
       </div>
-      <mat-card-title>گفتگو با دستیار هوش مصنوعی</mat-card-title>
-      <mat-card-subtitle>دستیار کشاورزی فارسی</mat-card-subtitle>
-    </mat-card-header>
-    <mat-card-actions>
-      <button mat-icon-button (click)="clearChat()" matTooltip="پاک کردن گفتگو">
-        <mat-icon>clear_all</mat-icon>
+      <button mat-icon-button (click)="clearChat()" class="clear-btn" matTooltip="شروع مجدد">
+        <mat-icon>refresh</mat-icon>
       </button>
-    </mat-card-actions>
-  </mat-card>
+    </div>
+  </header>
 
-  <!-- Messages Container -->
-  <div class="messages-container" #messagesContainer>
-    <div *ngFor="let message of messages" 
-         class="message-wrapper"
-         [ngClass]="{'user-message': message.isUser, 'ai-message': !message.isUser}">
-      
-      <div class="message-bubble">
+  <!-- Messages -->
+  <main class="messages-area" #messagesContainer>
+    <div class="messages-list">
+      <div *ngFor="let message of messages" 
+           class="message"
+           [class.user]="message.isUser"
+           [class.assistant]="!message.isUser">
+        
         <div class="message-content">
-          {{ message.content }}
-        </div>
-        <div class="message-time">
-          {{ formatTime(message.timestamp) }}
+          <p>{{ message.content }}</p>
+          <time>{{ formatTime(message.timestamp) }}</time>
         </div>
       </div>
+
+      <!-- Typing indicator -->
+      <div *ngIf="isLoading" class="message assistant typing">
+        <div class="message-content">
+          <div class="typing-indicator">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Input -->
+  <footer class="input-section">
+    <div class="input-container">
+      <mat-form-field appearance="fill" class="message-field">
+        <textarea
+        matTextareaAutosize
+          #messageInput
+          [(ngModel)]="currentMessage"
+          (keydown)="onKeyPress($event)"
+          [disabled]="isLoading"
+          placeholder="سوال خود را بپرسید..."
+          rows="1"
+          class="message-input">
+        </textarea>
+      </mat-form-field>
       
-      <div class="message-avatar">
-        <mat-icon *ngIf="message.isUser">person</mat-icon>
-        <mat-icon *ngIf="!message.isUser">smart_toy</mat-icon>
-      </div>
+      <button 
+        mat-icon-button 
+        (click)="sendMessage()"
+        [disabled]="!currentMessage.trim() || isLoading"
+        class="send-btn"
+        [class.active]="currentMessage.trim() && !isLoading">
+        <mat-icon>send</mat-icon>
+      </button>
     </div>
-
-    <!-- Loading indicator -->
-    <div *ngIf="isLoading" class="message-wrapper ai-message">
-      <div class="message-bubble loading-bubble">
-        <mat-spinner diameter="20"></mat-spinner>
-        <span>در حال تایپ...</span>
-      </div>
-      <div class="message-avatar">
-        <mat-icon>smart_toy</mat-icon>
-      </div>
-    </div>
-  </div>
-
-  <!-- Input Area -->
-  <mat-card class="input-area">
-    <mat-form-field class="message-input-field" appearance="outline">
-      <mat-label>پیام خود را بنویسید...</mat-label>
-      <textarea 
-        matInput 
-        #messageInput
-        [(ngModel)]="currentMessage"
-        (keydown)="onKeyPress($event)"
-        [disabled]="isLoading"
-        rows="3"
-        placeholder="سوال خود را در مورد کشاورزی بپرسید..."
-        class="message-textarea">
-      </textarea>
-    </mat-form-field>
-    
-    <button 
-      mat-fab 
-      color="primary" 
-      (click)="sendMessage()"
-      [disabled]="!currentMessage.trim() || isLoading"
-      class="send-button"
-      matTooltip="ارسال پیام">
-      <mat-icon>send</mat-icon>
-    </button>
-  </mat-card>
-
-  <!-- Help Text -->
-  <div class="help-text">
-    <p>
-      <mat-icon>info</mat-icon>
-      می‌توانید سوالات خود را در مورد کشاورزی، باغبانی، دامداری و موضوعات مرتبط بپرسید.
-    </p>
-  </div>
+  </footer>
 </div>

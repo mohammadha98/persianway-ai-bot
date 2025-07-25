@@ -1,6 +1,26 @@
 from typing import Dict, List, Optional, Any
 import re
-from langchain.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI as ChatOpenRouter
+from langchain_openai import ChatOpenAI
+
+def get_llm(model_name: str = None, temperature: float = None, max_tokens: int = None, top_p: float = None):
+    """Initializes and returns the appropriate language model client."""
+    if settings.OPENROUTER_API_KEY:
+        return ChatOpenRouter(
+            model_name=model_name or settings.DEFAULT_MODEL,
+            temperature=temperature if temperature is not None else settings.TEMPERATURE,
+            max_tokens=max_tokens if max_tokens is not None else settings.MAX_TOKENS,
+            top_p=top_p if top_p is not None else settings.TOP_P,
+            openai_api_key=settings.OPENROUTER_API_KEY,
+            openai_api_base=settings.OPENROUTER_API_BASE,
+        )
+    else:
+        return ChatOpenAI(
+            model_name=model_name or settings.OPENAI_MODEL_NAME,
+            temperature=temperature if temperature is not None else settings.OPENAI_TEMPERATURE,
+            max_tokens=max_tokens if max_tokens is not None else settings.OPENAI_MAX_TOKENS,
+            openai_api_key=settings.OPENAI_API_KEY,
+        )
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationChain
@@ -22,19 +42,15 @@ class ChatService:
         self._sessions: Dict[str, ConversationChain] = {}
         self._memories: Dict[str, ConversationBufferMemory] = {}
         
-        # Validate OpenAI API key
-        if not settings.OPENAI_API_KEY:
+        # Validate API key
+        if not settings.OPENAI_API_KEY and not settings.OPENROUTER_API_KEY:
+            raise ValueError("Either OPENAI_API_KEY or OPENROUTER_API_KEY must be set")
             raise ValueError("OPENAI_API_KEY must be set in environment variables or .env file")
         
         # Initialize semantic evaluator LLM
-        self._evaluator_llm = ChatOpenAI(
-            openai_api_key=settings.OPENAI_API_KEY,
-            model_name="gpt-4",  # Use GPT-4 for better evaluation
-            temperature=0.1,  # Low temperature for consistent evaluation
-            max_tokens=200
-        )
+        self._evaluator_llm = get_llm(model_name="openai/gpt-4", temperature=0.1, max_tokens=200)
     
-    def _get_or_create_session(self, user_id: str) -> ConversationChain:
+    def _get_or_create_session(self, user_id: str, model: str = None, parameters: dict = None) -> ConversationChain:
         """Get an existing chat session or create a new one.
         
         Args:
@@ -49,11 +65,12 @@ class ChatService:
             self._memories[user_id] = memory
             
             # Create a new chat model with the configured settings
-            llm = ChatOpenAI(
-                openai_api_key=settings.OPENAI_API_KEY,
-                model_name=settings.OPENAI_MODEL_NAME,
-                temperature=settings.OPENAI_TEMPERATURE,
-                max_tokens=settings.OPENAI_MAX_TOKENS
+            params = parameters or {}
+            llm = get_llm(
+                model_name=model,
+                temperature=params.get("temperature"),
+                max_tokens=params.get("max_tokens"),
+                top_p=params.get("top_p")
             )
             
             # Create a conversation chain with the memory
@@ -333,7 +350,7 @@ class ChatService:
                 "requires_human_referral": False
             }
 
-    async def process_message(self, user_id: str, message: str) -> Dict[str, Any]:
+    async def process_message(self, user_id: str, message: str, model: str = None, parameters: dict = None) -> Dict[str, Any]:
         """Process a user message using a hybrid approach.
 
         This service implements a three-tier approach:
@@ -357,10 +374,12 @@ class ChatService:
             "requires_human_referral": False,
             "reasoning": ""
         }
+        params = parameters or {}
         response_parameters = {
-            "model": settings.OPENAI_MODEL_NAME,
-            "temperature": settings.OPENAI_TEMPERATURE,
-            "max_tokens": settings.OPENAI_MAX_TOKENS
+            "model": model or (settings.DEFAULT_MODEL if settings.OPENROUTER_API_KEY else settings.OPENAI_MODEL_NAME),
+            "temperature": params.get("temperature", settings.TEMPERATURE if settings.OPENROUTER_API_KEY else settings.OPENAI_TEMPERATURE),
+            "max_tokens": params.get("max_tokens", settings.MAX_TOKENS if settings.OPENROUTER_API_KEY else settings.OPENAI_MAX_TOKENS),
+            "top_p": params.get("top_p", settings.TOP_P)
         }
         answer = ""
 
@@ -402,7 +421,7 @@ class ChatService:
                         
                 else:
                     # Low KB confidence but domain-related - try general knowledge as fallback
-                    conversation = self._get_or_create_session(user_id)
+                    conversation = self._get_or_create_session(user_id, model, parameters)
                     
                     # Enhanced context-aware prompt for general knowledge
                     context_prompt = f"""
@@ -456,7 +475,7 @@ class ChatService:
                             query_analysis["knowledge_source"] = "none"
 
             # Add the interaction to the conversation history
-            conversation = self._get_or_create_session(user_id)
+            conversation = self._get_or_create_session(user_id, model, parameters)
             conversation.memory.chat_memory.add_user_message(message)
             conversation.memory.chat_memory.add_ai_message(answer)
 
