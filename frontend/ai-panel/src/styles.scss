@@ -1,0 +1,368 @@
+/* You can add global styles to this file, and also import other style files */
+
+// Import Angular Material prebuilt theme
+@import '@angular/material/prebuilt-themes/indigo-pink.css';
+
+// Import modern Persian fonts
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100;200;300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@100;200;300;400;500;600;700;800;900&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/rastikerdar/shabnam-font@v5.0.1/dist/font-face.css');
+
+// Global styles
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', 'Tahoma', sans-serif;
+  direction: rtl;
+  text-align: right;
+  font-weight: 400;
+  font-display: swap;
+}
+
+body {
+  background-color: #fafafa;
+  color: #333;
+  line-height: 1.7;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+// RTL support for Angular Material components
+.mat-drawer-container {
+  direction: rtl;
+}
+
+.mat-toolbar {
+  direction: rtl;
+  
+  .mat-toolbar-row {
+    direction: rtl;
+  }
+}
+
+.mat-card {
+  direction: rtl;
+  
+  .mat-card-header {
+    direction: rtl;
+    text-align: right;
+    
+    .mat-card-title {
+      text-align: right;
+    }
+    
+    .mat-card-subtitle {
+      text-align: right;
+    }
+  }
+  
+  .mat-card-content {
+    direction: rtl;
+    text-align: right;
+  }
+  
+  .mat-card-actions {
+    direction: rtl;
+    justify-content: flex-start;
+  }
+}
+
+.mat-form-field {
+  direction: rtl;
+  
+  .mat-form-field-label {
+    text-align: right;
+  }
+  
+  .mat-input-element {
+    text-align: right;
+  }
+  
+  textarea.mat-input-element {
+    text-align: right;
+  }
+}
+
+.mat-button, .mat-raised-button, .mat-fab {
+  direction: rtl;
+  
+  .mat-button-wrapper {
+    direction: rtl;
+  }
+}
+
+// Fix icon positioning in RTL
+.mat-icon {
+  direction: ltr;
+}
+
+// Fix button icons in RTL
+.mat-button .mat-icon,
+.mat-raised-button .mat-icon,
+.mat-fab .mat-icon {
+  margin-left: 0;
+  margin-right: 8px;
+}
+
+// Fix list items in RTL
+.mat-list-item {
+  direction: rtl;
+  text-align: right;
+}
+
+// Fix menu items in RTL
+.mat-menu-panel {
+  direction: rtl;
+}
+
+.mat-menu-item {
+  direction: rtl;
+  text-align: right;
+}
+
+// Custom scrollbar
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+// Typography enhancements for Persian text
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 0.5em;
+  color: #2c3e50;
+}
+
+h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+}
+
+h2 {
+  font-size: 2rem;
+  font-weight: 600;
+}
+
+h3 {
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+
+h4 {
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+h5 {
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+h6 {
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+p {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif;
+  line-height: 1.8;
+  margin-bottom: 1em;
+  color: #34495e;
+}
+
+// Enhanced button typography
+.mat-button, .mat-raised-button, .mat-fab, .mat-stroked-button {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.02em !important;
+}
+
+// Enhanced form field typography
+.mat-form-field {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+  
+  .mat-form-field-label {
+    font-weight: 400 !important;
+    color: #546e7a !important;
+  }
+  
+  .mat-input-element {
+    font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+    font-weight: 400 !important;
+  }
+}
+
+// Enhanced card typography with higher specificity
+.mat-card .mat-card-title,
+.mat-mdc-card .mat-mdc-card-title,
+mat-card-title,
+.mat-card-title {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+  font-weight: 600 !important;
+  color: #2c3e50 !important;
+  font-size: 1.5rem !important;
+  line-height: 1.4 !important;
+}
+
+.mat-card .mat-card-subtitle,
+.mat-mdc-card .mat-mdc-card-subtitle,
+mat-card-subtitle,
+.mat-card-subtitle {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+  font-weight: 400 !important;
+  color: #7f8c8d !important;
+  font-size: 1rem !important;
+  line-height: 1.5 !important;
+}
+
+// Additional specificity for Angular Material card content
+.mat-card .mat-card-content,
+.mat-mdc-card .mat-mdc-card-content,
+mat-card-content,
+.mat-card-content {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+}
+
+// Enhanced toolbar typography
+.mat-toolbar {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+  font-weight: 500 !important;
+}
+
+// Force Persian fonts on all Angular Material text elements
+.mat-card h1, .mat-card h2, .mat-card h3, .mat-card h4, .mat-card h5, .mat-card h6,
+.mat-mdc-card h1, .mat-mdc-card h2, .mat-mdc-card h3, .mat-mdc-card h4, .mat-mdc-card h5, .mat-mdc-card h6 {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+}
+
+.mat-card p, .mat-card span, .mat-card div,
+.mat-mdc-card p, .mat-mdc-card span, .mat-mdc-card div {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+}
+
+// Override Angular Material's default typography
+.mat-typography h1, .mat-typography h2, .mat-typography h3, .mat-typography h4, .mat-typography h5, .mat-typography h6 {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+}
+
+.mat-typography p, .mat-typography span, .mat-typography div {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+}
+
+// Ensure all Material Design Components use Persian fonts
+.mdc-typography--headline1, .mdc-typography--headline2, .mdc-typography--headline3,
+.mdc-typography--headline4, .mdc-typography--headline5, .mdc-typography--headline6,
+.mdc-typography--subtitle1, .mdc-typography--subtitle2,
+.mdc-typography--body1, .mdc-typography--body2 {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif !important;
+}
+
+// Utility classes
+.text-center {
+  text-align: center;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.margin-top {
+  margin-top: 16px;
+}
+
+.margin-bottom {
+  margin-bottom: 16px;
+}
+
+.padding {
+  padding: 16px;
+}
+
+// Persian number styling
+.persian-numbers {
+  font-feature-settings: 'ss01' on;
+  font-variant-numeric: proportional-nums;
+}
+
+// Responsive typography
+@media (max-width: 768px) {
+  body {
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  
+  h1 {
+    font-size: 2rem;
+  }
+  
+  h2 {
+    font-size: 1.75rem;
+  }
+  
+  h3 {
+    font-size: 1.5rem;
+  }
+  
+  h4 {
+    font-size: 1.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: 0.01em;
+  }
+  
+  h1 {
+    font-size: 1.75rem;
+  }
+  
+  h2 {
+    font-size: 1.5rem;
+  }
+  
+  h3 {
+    font-size: 1.25rem;
+  }
+  
+  h4 {
+    font-size: 1.125rem;
+  }
+  
+  .mat-button, .mat-raised-button {
+    font-size: 14px !important;
+  }
+}

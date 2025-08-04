@@ -1,0 +1,15 @@
+<div class="alert {% if result.success %}alert-success{% else %}alert-danger{% endif %} mt-3">
+    <h5>{% if result.success %}Success!{% else %}Error!{% endif %}</h5>
+    <p>{{ result.message }}</p>
+    
+    {% if result.details %}
+    <div class="mt-2">
+        <strong>Details:</strong>
+        <ul>
+            {% for detail in result.details %}
+            <li>{{ detail }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>

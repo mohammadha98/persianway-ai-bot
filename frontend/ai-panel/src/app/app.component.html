@@ -1,0 +1,91 @@
+<!-- Persianway AI Application -->
+<div class="app-container" dir="rtl">
+  <!-- Header -->
+  <mat-toolbar color="primary" class="app-header">
+    <div class="header-content">
+      <span class="app-title">Persianway AI</span>
+      <span class="spacer"></span>
+      
+      <!-- Navigation for authenticated users -->
+      <nav class="nav-links" *ngIf="isAuthenticated$ | async">
+        <a mat-button routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
+          <mat-icon>home</mat-icon>
+          خانه
+        </a>
+        <a mat-button routerLink="/chat" routerLinkActive="active">
+          <mat-icon>chat</mat-icon>
+          گفتگو
+        </a>
+        <a mat-button routerLink="/contribute" routerLinkActive="active">
+          <mat-icon>add_circle</mat-icon>
+          مشارکت
+        </a>
+        <a mat-button routerLink="/settings" routerLinkActive="active">
+          <mat-icon>settings</mat-icon>
+          تنظیمات
+        </a>
+        <a mat-button routerLink="/knowledge" routerLinkActive="active">
+          <mat-icon>school</mat-icon>
+          راهنما
+        </a>
+        <a mat-button routerLink="/llm-settings" routerLinkActive="active" *ngIf="hasRole('admin')">
+          <mat-icon>psychology</mat-icon>
+          LLM
+        </a>
+        <a mat-button routerLink="/rag-settings" routerLinkActive="active" *ngIf="hasRole('admin')">
+          <mat-icon>storage</mat-icon>
+          RAG
+        </a>
+           <a mat-button routerLink="/users" routerLinkActive="active" *ngIf="hasRole('admin')">
+          <mat-icon>people</mat-icon>
+          کاربران
+        </a>
+        <a mat-button href="/docs" target="_blank" routerLinkActive="active" *ngIf="hasRole('admin')">
+          <mat-icon>description</mat-icon>
+          مستندات
+        </a>
+      </nav>
+      
+      <!-- User menu for authenticated users -->
+      <div class="user-section" *ngIf="isAuthenticated$ | async">
+        <span class="welcome-text">خوش آمدید، {{ currentUser?.username }}</span>
+        <button mat-icon-button [matMenuTriggerFor]="userMenu" >
+          <mat-icon style="display: flex; align-items: center; justify-content: center; left:3px;bottom:2px">account_circle</mat-icon>
+        </button>
+        
+        <mat-menu #userMenu="matMenu" direction="rtl">
+          <div class="user-info">
+            <div class="user-name">{{ currentUser?.username }}</div>
+            <div class="user-role">{{ currentUser?.role }}</div>
+            <div class="user-email">{{ currentUser?.email }}</div>
+          </div>
+          <mat-divider></mat-divider>
+          <button mat-menu-item (click)="logout()">
+            <mat-icon>logout</mat-icon>
+            <span>خروج</span>
+          </button>
+        </mat-menu>
+      </div>
+      
+      <!-- Login button for unauthenticated users -->
+      <div class="auth-section" *ngIf="!(isAuthenticated$ | async)">
+        <button mat-button (click)="navigateToLogin()">
+          <mat-icon>login</mat-icon>
+          ورود
+        </button>
+      </div>
+    </div>
+  </mat-toolbar>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <router-outlet></router-outlet>
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div class="footer-content">
+      <p>&copy; 2025 Persianway AI - سیستم هوش مصنوعی  </p>
+    </div>
+  </footer>
+</div>

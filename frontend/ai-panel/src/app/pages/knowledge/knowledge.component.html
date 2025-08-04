@@ -1,0 +1,111 @@
+<div class="knowledge-container">
+  <div class="header">
+    <h1 class="title">راهنمای جامع سیستم هوش مصنوعی</h1>
+    <p class="subtitle">این راهنما به شما کمک می‌کند تا با مفاهیم کلیدی و تنظیمات سیستم هوش مصنوعی آشنا شوید</p>
+  </div>
+
+  <div class="section-container">
+    <h2 class="section-title">
+      <mat-icon>psychology</mat-icon>
+      مفاهیم مدل زبان بزرگ (LLM)
+    </h2>
+    <p class="section-description">مدل‌های زبان بزرگ و پارامترهای مرتبط با آن‌ها که در بخش تنظیمات LLM قابل پیکربندی هستند</p>
+    
+    <div class="concepts-grid">
+      <mat-card class="concept-card" *ngFor="let concept of llmConcepts">
+        <mat-card-header>
+          <div mat-card-avatar class="concept-icon">
+            <mat-icon>{{concept.icon}}</mat-icon>
+          </div>
+          <mat-card-title>{{concept.title}}</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>{{concept.description}}</p>
+          <mat-expansion-panel class="details-panel">
+            <mat-expansion-panel-header>
+              <mat-panel-title>جزئیات بیشتر</mat-panel-title>
+            </mat-expansion-panel-header>
+            <ul>
+              <li *ngFor="let detail of concept.details">{{detail}}</li>
+            </ul>
+          </mat-expansion-panel>
+        </mat-card-content>
+      </mat-card>
+    </div>
+  </div>
+
+  <mat-divider></mat-divider>
+
+  <div class="section-container">
+    <h2 class="section-title">
+      <mat-icon>auto_awesome</mat-icon>
+      مفاهیم بازیابی و تولید تقویت شده (RAG)
+    </h2>
+    <p class="section-description">مفاهیم و تنظیمات مرتبط با سیستم RAG که در بخش تنظیمات RAG قابل پیکربندی هستند</p>
+    
+    <div class="concepts-grid">
+      <mat-card class="concept-card" *ngFor="let concept of ragConcepts">
+        <mat-card-header>
+          <div mat-card-avatar class="concept-icon">
+            <mat-icon>{{concept.icon}}</mat-icon>
+          </div>
+          <mat-card-title>{{concept.title}}</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>{{concept.description}}</p>
+          <mat-expansion-panel class="details-panel">
+            <mat-expansion-panel-header>
+              <mat-panel-title>جزئیات بیشتر</mat-panel-title>
+            </mat-expansion-panel-header>
+            <ul>
+              <li *ngFor="let detail of concept.details">{{detail}}</li>
+            </ul>
+          </mat-expansion-panel>
+        </mat-card-content>
+      </mat-card>
+    </div>
+  </div>
+
+  <mat-divider></mat-divider>
+
+  <div class="section-container">
+    <h2 class="section-title">
+      <mat-icon>smart_toy</mat-icon>
+      مفاهیم عمومی هوش مصنوعی
+    </h2>
+    <p class="section-description">مفاهیم پایه و اصطلاحات مهم در حوزه هوش مصنوعی و یادگیری ماشین</p>
+    
+    <div class="concepts-grid">
+      <mat-card class="concept-card" *ngFor="let concept of generalConcepts">
+        <mat-card-header>
+          <div mat-card-avatar class="concept-icon">
+            <mat-icon>{{concept.icon}}</mat-icon>
+          </div>
+          <mat-card-title>{{concept.title}}</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>{{concept.description}}</p>
+          <mat-expansion-panel class="details-panel">
+            <mat-expansion-panel-header>
+              <mat-panel-title>جزئیات بیشتر</mat-panel-title>
+            </mat-expansion-panel-header>
+            <ul>
+              <li *ngFor="let detail of concept.details">{{detail}}</li>
+            </ul>
+          </mat-expansion-panel>
+        </mat-card-content>
+      </mat-card>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button mat-button color="primary" [routerLink]="['/llm-settings']">
+      <mat-icon>settings</mat-icon>
+      رفتن به تنظیمات LLM
+    </button>
+    <button mat-button color="primary" [routerLink]="['/rag-settings']">
+      <mat-icon>settings</mat-icon>
+      رفتن به تنظیمات RAG
+    </button>
+  </div>
+</div>

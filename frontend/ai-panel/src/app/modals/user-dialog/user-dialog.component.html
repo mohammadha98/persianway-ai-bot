@@ -1,0 +1,81 @@
+<div class="user-dialog-container">
+  <h1 mat-dialog-title class="dialog-title">
+    <mat-icon>{{ isEditMode ? 'edit' : 'person_add' }}</mat-icon>
+    {{ isEditMode ? 'ویرایش کاربر' : 'افزودن کاربر جدید' }}
+  </h1>
+
+  <mat-dialog-content>
+    <form [formGroup]="form" class="dialog-form">
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="form-field">
+          <mat-label>نام</mat-label>
+          <input matInput formControlName="firstName" required>
+          <mat-error *ngIf="form.get('firstName')?.hasError('required')">نام الزامی است.</mat-error>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="form-field">
+          <mat-label>نام خانوادگی</mat-label>
+          <input matInput formControlName="lastName" required>
+          <mat-error *ngIf="form.get('lastName')?.hasError('required')">نام خانوادگی الزامی است.</mat-error>
+        </mat-form-field>
+      </div>
+
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="form-field">
+          <mat-label>نام کاربری</mat-label>
+          <input matInput formControlName="username" required dir="ltr">
+          <mat-error *ngIf="form.get('username')?.hasError('required')">نام کاربری الزامی است.</mat-error>
+          <mat-error *ngIf="form.get('username')?.hasError('pattern')">نام کاربری فقط میتواند شامل حروف انگلیسی، اعداد و _ باشد.</mat-error>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="form-field">
+          <mat-label>ایمیل</mat-label>
+          <input matInput formControlName="email" required type="email" dir="ltr">
+          <mat-error *ngIf="form.get('email')?.hasError('required')">ایمیل الزامی است.</mat-error>
+          <mat-error *ngIf="form.get('email')?.hasError('email')">فرمت ایمیل نامعتبر است.</mat-error>
+        </mat-form-field>
+      </div>
+
+      <div class="form-row">
+        <mat-form-field appearance="outline" class="form-field">
+          <mat-label>بخش</mat-label>
+          <input matInput formControlName="department">
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="form-field">
+          <mat-label>نقش</mat-label>
+          <mat-select formControlName="role" required>
+            <mat-option *ngFor="let role of roleOptions" [value]="role.value">
+              {{role.label}}
+            </mat-option>
+          </mat-select>
+          <mat-error *ngIf="form.get('role')?.hasError('required')">انتخاب نقش الزامی است.</mat-error>
+        </mat-form-field>
+      </div>
+
+      <div class="form-row single-row">
+        <mat-form-field appearance="outline" class="form-field" *ngIf="!isEditMode">
+          <mat-label>رمز عبور</mat-label>
+          <input matInput formControlName="password" required type="password">
+          <mat-error *ngIf="form.get('password')?.hasError('required')">رمز عبور الزامی است.</mat-error>
+          <mat-error *ngIf="form.get('password')?.hasError('minlength')">رمز عبور باید حداقل 8 کاراکتر باشد.</mat-error>
+        </mat-form-field>
+      </div>
+
+      <div class="form-row single-row" *ngIf="isEditMode">
+        <mat-slide-toggle formControlName="isActive" color="primary">
+          وضعیت فعال
+        </mat-slide-toggle>
+      </div>
+
+    </form>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="dialog-actions">
+    <button mat-stroked-button (click)="onCancel()">لغو</button>
+    <button mat-raised-button color="primary" (click)="onSave()" [disabled]="form.invalid">
+      <mat-icon>save</mat-icon>
+      ذخیره
+    </button>
+  </mat-dialog-actions>
+</div>
