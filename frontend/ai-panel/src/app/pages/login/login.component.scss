@@ -1,0 +1,457 @@
+// Login Component Styles - Persian/RTL Design
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  direction: rtl;
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 50%, rgba(255, 255, 255, 0.08) 0%, transparent 50%);
+    z-index: 1;
+  }
+}
+
+.login-card {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 450px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+
+
+  
+  .login-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 32px 24px 24px;
+    text-align: center;
+    position: relative;
+    
+    &::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: radial-gradient(circle at center, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+    }
+    
+    .mat-card-title {
+      position: relative;
+      z-index: 1;
+      font-size: 1.8rem !important;
+      font-weight: 700 !important;
+      margin-bottom: 8px !important;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    .mat-card-subtitle {
+      position: relative;
+      z-index: 1;
+      color: rgba(255, 255, 255, 0.9) !important;
+      font-size: 1rem !important;
+      font-weight: 400 !important;
+    }
+  }
+  
+  .login-content {
+    padding: 24px;
+  }
+
+// Demo credentials section
+.demo-credentials {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: rgba(102, 126, 234, 0.05);
+  border-radius: 12px;
+  border: 1px solid rgba(102, 126, 234, 0.1);
+  
+  h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: #2c3e50;
+  }
+}
+
+.demo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.demo-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  
+  &:hover {
+    background: rgba(102, 126, 234, 0.1);
+    border-color: rgba(102, 126, 234, 0.2);
+    transform: translateY(-1px);
+  }
+  
+  .demo-username {
+    font-weight: 500;
+    color: #2c3e50;
+    font-size: 13px;
+  }
+  
+  .demo-role {
+    font-size: 12px;
+    color: #7f8c8d;
+    background: rgba(102, 126, 234, 0.1);
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+}
+  
+  .login-footer {
+    padding: 16px 24px 24px;
+    text-align: center;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+  }
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.mat-mdc-form-field {
+  .mat-mdc-text-field-wrapper {
+    border-radius: 12px;
+  }
+  
+  .mat-mdc-form-field-focus-overlay {
+    border-radius: 12px;
+  }
+  
+  &.mat-form-field-invalid {
+    .mat-mdc-text-field-wrapper {
+      border-color: #f44336;
+    }
+  }
+}
+
+.is-invalid {
+  border-color: #f44336 !important;
+}
+
+.mat-form-field {
+  .mat-form-field-outline {
+    border-radius: 12px;
+  }
+  
+  .mat-form-field-outline-thick {
+    border-width: 2px;
+  }
+  
+  &.mat-focused {
+    .mat-form-field-outline-thick {
+      border-color: #667eea;
+    }
+    
+    .mat-form-field-label {
+      color: #667eea !important;
+    }
+  }
+  
+  .mat-input-element {
+    padding: 16px 12px;
+    font-size: 1rem;
+  }
+  
+  .mat-form-field-label {
+    font-weight: 500;
+  }
+  
+  .mat-icon {
+    color: #667eea;
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.login-options {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.remember-me {
+  .mat-checkbox-label {
+    font-size: 0.9rem;
+    color: #546e7a;
+  }
+  
+  .mat-mdc-checkbox-label {
+    font-size: 14px;
+    color: #5a6c7d;
+  }
+  
+  .mat-checkbox-checked {
+    .mat-checkbox-background {
+      background-color: #667eea;
+    }
+  }
+}
+
+.login-actions {
+  margin-top: 16px;
+}
+
+.login-button {
+  height: 48px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 500;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s ease;
+  }
+  
+  &:hover:not(:disabled) {
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    
+    &::before {
+      left: 100%;
+    }
+  }
+  
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+  
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+  
+  .mat-icon {
+    margin-left: 8px;
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+  }
+  
+  mat-icon {
+    margin-left: 8px;
+  }
+}
+
+.login-spinner {
+  margin-left: 8px;
+  
+  ::ng-deep .mat-mdc-progress-spinner circle {
+    stroke: white;
+  }
+}
+
+.forgot-password {
+  color: #667eea;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.3s ease;
+  
+  &:hover {
+    color: #5a6fd8;
+    text-decoration: underline;
+  }
+}
+
+// Snackbar styles
+::ng-deep {
+  .success-snackbar {
+    background-color: #4caf50 !important;
+    color: white !important;
+  }
+  
+  .error-snackbar {
+    background-color: #f44336 !important;
+    color: white !important;
+  }
+}
+
+// Responsive design
+@media (max-width: 768px) {
+  .login-container {
+    padding: 16px;
+  }
+  
+  .login-card {
+    max-width: 100%;
+    
+    .login-header {
+      padding: 24px 20px 20px;
+      
+      .mat-card-title {
+        font-size: 1.6rem !important;
+      }
+      
+      .mat-card-subtitle {
+        font-size: 0.9rem !important;
+      }
+    }
+    
+    .login-content {
+      padding: 20px;
+    }
+    
+    .login-footer {
+      padding: 12px 20px 20px;
+    }
+  }
+  
+  .login-form {
+    gap: 16px;
+    
+    .mat-form-field {
+      .mat-input-element {
+        padding: 14px 12px;
+        font-size: 0.95rem;
+      }
+    }
+  }
+  
+  .login-actions {
+    .login-button {
+      height: 44px;
+      font-size: 0.95rem;
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .login-container {
+    padding: 16px;
+  }
+  
+  .login-card {
+    max-width: 100%;
+    
+    .login-header {
+      padding: 24px 20px 12px;
+      
+      .mat-card-title {
+        font-size: 1.4rem !important;
+      }
+      
+      mat-card-title {
+        font-size: 20px;
+      }
+      
+      .mat-card-subtitle {
+        font-size: 0.85rem !important;
+      }
+    }
+    
+    .login-content {
+      padding: 20px;
+    }
+    
+    .login-footer {
+      padding: 12px 16px 16px;
+    }
+  }
+  
+  .login-form {
+    gap: 14px;
+    
+    .mat-form-field {
+      .mat-input-element {
+        padding: 12px 10px;
+        font-size: 0.9rem;
+      }
+    }
+  }
+  
+  .login-actions {
+    margin-top: 20px;
+    
+    .login-button {
+      height: 42px;
+      font-size: 0.9rem;
+    }
+  }
+  
+  .demo-credentials {
+    margin-bottom: 20px;
+    padding: 12px;
+  }
+  
+  .demo-item {
+    padding: 6px 10px;
+    
+    .demo-username {
+      font-size: 12px;
+    }
+    
+    .demo-role {
+      font-size: 11px;
+      padding: 1px 6px;
+    }
+  }
+  
+  .forgot-password {
+    font-size: 0.85rem;
+  }
+}
+
+// RTL specific adjustments
+[dir="rtl"] {
+  .login-button mat-icon {
+    margin-left: 0;
+    margin-right: 8px;
+  }
+  
+  .login-spinner {
+    margin-left: 0;
+    margin-right: 8px;
+  }
+}

@@ -1,0 +1,192 @@
+<div class="contribute-container">
+  <!-- Header Section -->
+  <mat-card class="header-card">
+    <mat-card-header>
+      <div mat-card-avatar class="header-icon">
+        <mat-icon>volunteer_activism</mat-icon>
+      </div>
+      <mat-card-title>مشارکت در پایگاه دانش</mat-card-title>
+      <mat-card-subtitle>دانش  خود را با دیگران به اشتراک بگذارید</mat-card-subtitle>
+    </mat-card-header>
+  </mat-card>
+
+  <div class="content-grid">
+    <!-- Knowledge Contribution Form -->
+    <mat-card class="form-card">
+      <mat-card-header>
+        <div mat-card-avatar class="form-icon">
+          <mat-icon>article</mat-icon>
+        </div>
+        <mat-card-title>ثبت دانش جدید</mat-card-title>
+        <mat-card-subtitle>اطلاعات  خود را به پایگاه دانش اضافه کنید</mat-card-subtitle>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <form class="contribution-form">
+          <!-- Title -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>عنوان *</mat-label>
+            <input matInput [(ngModel)]="form.title" name="title" 
+                   placeholder="عنوان مطلب را وارد کنید" required>
+          </mat-form-field>
+
+          <!-- Category -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>دسته‌بندی *</mat-label>
+            <mat-select [(ngModel)]="form.category" name="category" required>
+              <mat-option *ngFor="let category of categories" [value]="category.value">
+                {{ category.label }}
+              </mat-option>
+            </mat-select>
+          </mat-form-field>
+
+          <!-- Content -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>محتوا *</mat-label>
+            <textarea matInput [(ngModel)]="form.content" name="content"
+                      rows="8" placeholder="محتوای دانش خود را به تفصیل بنویسید..." required>
+            </textarea>
+          </mat-form-field>
+
+          <!-- Tags -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>برچسب‌ها</mat-label>
+            <input matInput [(ngModel)]="form.tags" name="tags"
+                   placeholder="برچسب‌ها را با کامه جدا کنید (مثال: گندم، کود، آبیاری)">
+            <mat-hint>برچسب‌ها به بهتر پیدا شدن مطلب کمک می‌کنند</mat-hint>
+          </mat-form-field>
+
+          <!-- Source -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>منبع</mat-label>
+            <input matInput [(ngModel)]="form.source" name="source"
+                   placeholder="منبع اطلاعات (اختیاری)">
+            <mat-hint>نام کتاب، مقاله، یا منبع دیگر</mat-hint>
+          </mat-form-field>
+
+          <!-- Author -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>نویسنده</mat-label>
+            <input matInput [(ngModel)]="form.author" name="author"
+                   placeholder="نام نویسنده یا منبع (اختیاری)">
+          </mat-form-field>
+
+          <!-- Additional References -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>منابع تکمیلی</mat-label>
+            <textarea matInput [(ngModel)]="form.additionalReferences" name="additionalReferences"
+                      rows="2" placeholder="لینک‌ها یا منابع تکمیلی (اختیاری)">
+            </textarea>
+          </mat-form-field>
+        </form>
+      </mat-card-content>
+      
+      <mat-card-actions>
+        <button mat-raised-button color="primary" 
+                (click)="submitContribution()"
+                [disabled]="!isFormValid() || isSubmitting"
+                class="submit-button">
+          <mat-spinner *ngIf="isSubmitting" diameter="20" class="button-spinner"></mat-spinner>
+          <mat-icon *ngIf="!isSubmitting">send</mat-icon>
+          {{ isSubmitting ? 'در حال ارسال...' : 'ثبت مشارکت' }}
+        </button>
+      </mat-card-actions>
+    </mat-card>
+
+    <!-- File Upload Section -->
+    <mat-card class="upload-card">
+      <mat-card-header>
+        <div mat-card-avatar class="upload-icon">
+          <mat-icon>cloud_upload</mat-icon>
+        </div>
+        <mat-card-title>آپلود فایل</mat-card-title>
+        <mat-card-subtitle>فایل‌های PDF یا Excel خود را آپلود کنید</mat-card-subtitle>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <div class="upload-area">
+          <input type="file" id="fileInput" 
+                 (change)="onFileSelected($event)"
+                 accept=".pdf,.xls,.xlsx"
+                 style="display: none;">
+          
+          <div class="file-drop-zone" (click)="onFileDropZoneClick()">
+            <mat-icon class="upload-icon-large">cloud_upload</mat-icon>
+            <p class="upload-text">
+              <strong>فایل را انتخاب کنید</strong><br>
+              یا اینجا بکشید و رها کنید
+            </p>
+            <p class="upload-hint">
+              فرمت‌های پذیرفته شده: PDF, Excel (.xls, .xlsx)
+            </p>
+          </div>
+          
+          <div *ngIf="selectedFile" class="selected-file">
+            <mat-icon>description</mat-icon>
+            <span>{{ selectedFile.name }}</span>
+            <button mat-icon-button (click)="selectedFile = null">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+        </div>
+      </mat-card-content>
+      
+      <mat-card-actions>
+        <button mat-raised-button color="accent" 
+                (click)="uploadFile()"
+                [disabled]="!selectedFile || isSubmitting"
+                class="upload-button">
+          <mat-spinner *ngIf="isSubmitting" diameter="20" class="button-spinner"></mat-spinner>
+          <mat-icon *ngIf="!isSubmitting">upload</mat-icon>
+          {{ isSubmitting ? 'در حال آپلود...' : 'آپلود فایل' }}
+        </button>
+      </mat-card-actions>
+    </mat-card>
+  </div>
+
+  <!-- Guidelines Section -->
+  <mat-card class="guidelines-card">
+    <mat-card-header>
+      <div mat-card-avatar class="guidelines-icon">
+        <mat-icon>help_outline</mat-icon>
+      </div>
+      <mat-card-title>راهنمای مشارکت</mat-card-title>
+    </mat-card-header>
+    
+    <mat-card-content>
+      <div class="guidelines-grid">
+        <div class="guideline-item">
+          <mat-icon>check_circle</mat-icon>
+          <div>
+            <h4>محتوای مفید</h4>
+            <p>اطلاعات عملی و کاربردی در زمینه  ارائه دهید</p>
+          </div>
+        </div>
+        
+        <div class="guideline-item">
+          <mat-icon>check_circle</mat-icon>
+          <div>
+            <h4>زبان ساده</h4>
+            <p>از زبان ساده و قابل فهم استفاده کنید</p>
+          </div>
+        </div>
+        
+        <div class="guideline-item">
+          <mat-icon>check_circle</mat-icon>
+          <div>
+            <h4>منابع معتبر</h4>
+            <p>در صورت امکان منبع اطلاعات خود را ذکر کنید</p>
+          </div>
+        </div>
+        
+        <div class="guideline-item">
+          <mat-icon>check_circle</mat-icon>
+          <div>
+            <h4>دسته‌بندی صحیح</h4>
+            <p>مطلب خود را در دسته‌بندی مناسب قرار دهید</p>
+          </div>
+        </div>
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>

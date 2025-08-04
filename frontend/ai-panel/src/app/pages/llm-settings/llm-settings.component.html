@@ -1,0 +1,365 @@
+<div class="llm-settings-container">
+  <!-- Header Section -->
+  <mat-card class="header-card">
+    <mat-card-header>
+      <div mat-card-avatar class="header-icon">
+        <mat-icon>psychology</mat-icon>
+      </div>
+      <mat-card-title>تنظیمات مدل زبان بزرگ (LLM)</mat-card-title>
+      <mat-card-subtitle>پیکربندی و تنظیمات مدل‌های هوش مصنوعی</mat-card-subtitle>
+    </mat-card-header>
+  </mat-card>
+
+  <!-- Loading Spinner -->
+  <div *ngIf="isLoading" class="loading-container">
+    <mat-spinner></mat-spinner>
+    <p>در حال بارگذاری تنظیمات...</p>
+  </div>
+
+  <!-- Settings Content -->
+  <div *ngIf="!isLoading && llmSettings" class="content-grid">
+    <!-- API Provider Settings -->
+    <mat-card class="provider-card">
+      <mat-card-header>
+        <div mat-card-avatar class="provider-icon">
+          <mat-icon>cloud</mat-icon>
+        </div>
+        <mat-card-title>تنظیمات ارائه‌دهنده API</mat-card-title>
+        <mat-card-subtitle>انتخاب و پیکربندی ارائه‌دهنده سرویس</mat-card-subtitle>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <div class="provider-form">
+          <!-- API Provider -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>ارائه‌دهنده API</mat-label>
+            <mat-select [(ngModel)]="llmSettings.preferred_api_provider">
+              <mat-option *ngFor="let provider of apiProviders" [value]="provider.value">
+                {{ provider.label }}
+              </mat-option>
+            </mat-select>
+          </mat-form-field>
+
+          <!-- Default Model -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>مدل پیش‌فرض</mat-label>
+            <input matInput [(ngModel)]="llmSettings.default_model">
+            <mat-hint>نام مدل پیش‌فرض برای پردازش</mat-hint>
+          </mat-form-field>
+
+          <!-- OpenAI API Key -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>کلید API OpenAI</mat-label>
+            <input matInput type="password" [(ngModel)]="llmSettings.openai_api_key">
+            <mat-hint>کلید API برای دسترسی به سرویس‌های OpenAI</mat-hint>
+          </mat-form-field>
+
+          <!-- OpenRouter API Key -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>کلید API OpenRouter</mat-label>
+            <input matInput type="password" [(ngModel)]="llmSettings.openrouter_api_key">
+            <mat-hint>کلید API برای دسترسی به سرویس‌های OpenRouter</mat-hint>
+          </mat-form-field>
+
+          <!-- OpenRouter API Base -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>آدرس پایه API OpenRouter</mat-label>
+            <input matInput [(ngModel)]="llmSettings.openrouter_api_base">
+            <mat-hint>آدرس پایه برای درخواست‌های OpenRouter</mat-hint>
+          </mat-form-field>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+    <!-- Model Parameters -->
+    <mat-card class="parameters-card">
+      <mat-card-header>
+        <div mat-card-avatar class="parameters-icon">
+          <mat-icon>tune</mat-icon>
+        </div>
+        <mat-card-title>پارامترهای مدل</mat-card-title>
+        <mat-card-subtitle>تنظیمات رفتار و عملکرد مدل</mat-card-subtitle>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <div class="parameters-form">
+          <!-- Temperature -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>دما (Temperature)</mat-label>
+            <input matInput type="number" [(ngModel)]="llmSettings.temperature" 
+                   min="0" max="2" step="0.1">
+            <mat-hint>کنترل خلاقیت پاسخ‌ها (0.0 - 2.0)</mat-hint>
+          </mat-form-field>
+
+          <!-- Top P -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>Top P</mat-label>
+            <input matInput type="number" [(ngModel)]="llmSettings.top_p" 
+                   min="0" max="1" step="0.1">
+            <mat-hint>کنترل تنوع کلمات انتخابی (0.0 - 1.0)</mat-hint>
+          </mat-form-field>
+
+          <!-- Max Tokens -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>حداکثر توکن</mat-label>
+            <input matInput type="number" [(ngModel)]="llmSettings.max_tokens" 
+                   min="1" max="4096">
+            <mat-hint>حداکثر طول پاسخ تولید شده</mat-hint>
+          </mat-form-field>
+
+          <!-- Embedding Model -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>مدل Embedding</mat-label>
+            <input matInput [(ngModel)]="llmSettings.openai_embedding_model">
+            <mat-hint>مدل تبدیل متن به بردار برای جستجو</mat-hint>
+          </mat-form-field>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </div>
+
+  <!-- Available Models Info -->
+  <mat-card class="models-card">
+    <mat-card-header>
+      <div mat-card-avatar class="models-icon">
+        <mat-icon>psychology</mat-icon>
+      </div>
+      <mat-card-title>مدل‌های هوش مصنوعی</mat-card-title>
+      <mat-card-subtitle *ngIf="paginatedResponse">
+        <mat-icon class="subtitle-icon">inventory</mat-icon>
+        {{ paginatedResponse.total }} مدل در دسترس
+      </mat-card-subtitle>
+      <div class="card-actions">
+        <button mat-icon-button 
+                (click)="toggleModelsExpanded()" 
+                class="expand-toggle"
+                [attr.aria-label]="isModelsExpanded ? 'بستن بخش مدل‌ها' : 'باز کردن بخش مدل‌ها'"
+                matTooltip="{{ isModelsExpanded ? 'بستن' : 'باز کردن' }}">
+          <mat-icon [class.rotated]="isModelsExpanded">expand_more</mat-icon>
+        </button>
+      </div>
+    </mat-card-header>
+    
+    <mat-card-content [@expandCollapse]="isModelsExpanded ? 'expanded' : 'collapsed'" class="expandable-content">
+      <!-- Search and Controls -->
+      <div class="models-controls">
+        <div class="search-container">
+          <mat-form-field appearance="outline" class="search-field">
+            <mat-label>
+              <mat-icon class="label-icon">search</mat-icon>
+              جستجو در مدل‌ها
+            </mat-label>
+            <input matInput 
+                   [(ngModel)]="searchTerm" 
+                   (input)="onSearchChange()"
+                   placeholder="نام مدل، سازنده، یا ویژگی‌ها...">
+            <mat-icon matSuffix class="search-suffix">search</mat-icon>
+          </mat-form-field>
+        </div>
+        
+        <div class="controls-row">
+          <div class="page-size-selector">
+            <mat-form-field appearance="outline">
+              <mat-label>
+                <mat-icon class="label-icon">view_module</mat-icon>
+                تعداد در صفحه
+              </mat-label>
+              <mat-select [value]="pageSize" (selectionChange)="onPageSizeChange($event.value)">
+                <mat-option [value]="6">
+                  <mat-icon>view_agenda</mat-icon>
+                  6 مدل
+                </mat-option>
+                <mat-option [value]="12">
+                  <mat-icon>view_module</mat-icon>
+                  12 مدل
+                </mat-option>
+                <mat-option [value]="24">
+                  <mat-icon>view_comfy</mat-icon>
+                  24 مدل
+                </mat-option>
+                <mat-option [value]="48">
+                  <mat-icon>view_compact</mat-icon>
+                  48 مدل
+                </mat-option>
+              </mat-select>
+            </mat-form-field>
+          </div>
+          
+          <button mat-stroked-button (click)="clearCache()" class="cache-button">
+            <mat-icon>cached</mat-icon>
+            <span>بروزرسانی کش</span>
+          </button>
+        </div>
+      </div>
+      
+      <!-- Loading State -->
+      <div *ngIf="isLoadingModels" class="loading-container">
+        <div class="loading-content">
+          <mat-spinner diameter="48" strokeWidth="4"></mat-spinner>
+          <div class="loading-text">
+            <h4>در حال بارگذاری مدل‌ها</h4>
+            <p>لطفاً صبر کنید...</p>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Models Grid -->
+      <div *ngIf="!isLoadingModels" class="models-grid">
+        <div class="model-card" 
+             *ngFor="let model of availableModels; trackBy: trackByModelId" 
+             (click)="onModelClick(model)"
+             [attr.data-model-id]="model.id">
+          <div class="model-header">
+            <div class="model-avatar">
+              <mat-icon>smart_toy</mat-icon>
+            </div>
+            <div class="model-info">
+              <h4 class="model-name">{{ model.name }}</h4>
+              <p class="model-id">{{ model.id }}</p>
+            </div>
+            <div class="model-badge">
+              <mat-icon>info</mat-icon>
+            </div>
+          </div>
+          
+          <div class="model-details">
+            <div class="detail-item" *ngIf="model.context_length">
+              <mat-icon>memory</mat-icon>
+              <span>{{ formatContextLength(model.context_length) }}</span>
+            </div>
+            <div class="detail-item" *ngIf="model.pricing?.prompt">
+              <mat-icon>attach_money</mat-icon>
+              <span>{{ formatPrice(model.pricing.prompt) }}</span>
+            </div>
+          </div>
+          
+          <div class="model-footer">
+            <span class="provider-tag">{{ getProviderName(model.id) }}</span>
+            <mat-icon class="arrow-icon">arrow_forward_ios</mat-icon>
+          </div>
+        </div>
+        
+        <!-- Empty State -->
+        <div *ngIf="availableModels.length === 0" class="empty-state">
+          <div class="empty-content">
+            <mat-icon class="empty-icon">search_off</mat-icon>
+            <h3>هیچ مدلی یافت نشد</h3>
+            <p>لطفاً عبارت جستجو را تغییر دهید یا فیلترها را بازنشانی کنید</p>
+            <button mat-stroked-button (click)="searchTerm = ''; onSearchChange()" class="reset-button">
+              <mat-icon>refresh</mat-icon>
+              بازنشانی جستجو
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Enhanced Pagination Controls -->
+      <div *ngIf="!isLoadingModels && totalPages > 1" class="pagination-container">
+        <div class="pagination-info">
+          <div class="info-content">
+            <mat-icon>info</mat-icon>
+            <span>صفحه {{ currentPage }} از {{ totalPages }} • نمایش {{ availableModels.length }} از {{ paginatedResponse?.total }} مدل</span>
+          </div>
+        </div>
+        
+        <div class="pagination-controls">
+          <!-- First Page -->
+          <button mat-fab 
+                  color="primary"
+                  [disabled]="currentPage === 1"
+                  (click)="onPageChange(1)"
+                  matTooltip="صفحه اول"
+                  class="nav-button first-page">
+            <mat-icon>first_page</mat-icon>
+          </button>
+          
+          <!-- Previous Page -->
+          <button mat-fab 
+                  color="primary"
+                  [disabled]="currentPage === 1"
+                  (click)="onPageChange(currentPage - 1)"
+                  matTooltip="صفحه قبل"
+                  class="nav-button prev-page">
+            <mat-icon>chevron_left</mat-icon>
+          </button>
+          
+          <!-- Page Numbers -->
+          <div class="page-numbers">
+            <button *ngFor="let page of getPageNumbers()" 
+                    mat-raised-button
+                    [color]="page === currentPage ? 'primary' : ''"
+                    [class.current-page]="page === currentPage"
+                    (click)="onPageChange(page)"
+                    class="page-number"
+                    >
+              {{ page }}
+            </button>
+          </div>
+          
+          <!-- Next Page -->
+          <button mat-fab 
+                  color="primary"
+                  [disabled]="currentPage === totalPages"
+                  (click)="onPageChange(currentPage + 1)"
+                  matTooltip="صفحه بعد"
+                  class="nav-button next-page">
+            <mat-icon>chevron_right</mat-icon>
+          </button>
+          
+          <!-- Last Page -->
+          <button mat-fab 
+                  color="primary"
+                  [disabled]="currentPage === totalPages"
+                  (click)="onPageChange(totalPages)"
+                  matTooltip="صفحه آخر"
+                  class="nav-button last-page">
+            <mat-icon>last_page</mat-icon>
+          </button>
+        </div>
+      </div>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Action Buttons -->
+  <mat-card *ngIf="!isLoading" class="actions-card">
+    <mat-card-header>
+      <div mat-card-avatar class="actions-icon">
+        <mat-icon>build</mat-icon>
+      </div>
+      <mat-card-title>عملیات</mat-card-title>
+    </mat-card-header>
+    
+    <mat-card-content>
+      <div class="actions-grid">
+        <button mat-raised-button color="primary" 
+                (click)="saveSettings()"
+                [disabled]="isSaving || !llmSettings">
+          <mat-icon>save</mat-icon>
+          {{ isSaving ? 'در حال ذخیره...' : 'ذخیره تنظیمات' }}
+        </button>
+        
+        <button mat-raised-button color="warn" 
+                (click)="resetSettings()"
+                [disabled]="isSaving">
+          <mat-icon>restore</mat-icon>
+          بازیابی تنظیمات
+        </button>
+      </div>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Error State -->
+  <mat-card *ngIf="!isLoading && !llmSettings" class="error-card">
+    <mat-card-content>
+      <div class="error-content">
+        <mat-icon>error_outline</mat-icon>
+        <h3>خطا در بارگذاری تنظیمات</h3>
+        <p>امکان دریافت تنظیمات LLM وجود ندارد. لطفاً دوباره تلاش کنید.</p>
+        <button mat-raised-button color="primary" (click)="loadLlmSettings()">
+          <mat-icon>refresh</mat-icon>
+          تلاش مجدد
+        </button>
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>

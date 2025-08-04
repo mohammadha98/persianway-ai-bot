@@ -1,0 +1,175 @@
+<div class="chat-container">
+  <!-- Header -->
+  <header class="chat-header">
+    <div class="header-content">
+      <div class="header-info">
+        <div class="avatar">
+          <mat-icon>agriculture</mat-icon>
+        </div>
+        <div class="title-section">
+          <h1>دستیار هوشمند</h1>
+          <p>پاسخگوی سوالات در مورد محصولات و مشاوره با تحلیل پیشرفته</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button mat-icon-button (click)="toggleAnalysisDetails()" 
+                class="analysis-toggle" 
+                [class.active]="showAnalysisDetails"
+                matTooltip="نمایش جزئیات تحلیل">
+          <mat-icon>analytics</mat-icon>
+        </button>
+        <button mat-icon-button (click)="clearChat()" class="clear-btn" matTooltip="شروع مجدد">
+          <mat-icon>refresh</mat-icon>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Messages -->
+  <main class="messages-area" #messagesContainer>
+    <!-- Empty State Placeholder -->
+    <div *ngIf="messages.length === 0 && !isLoading" class="empty-state">
+      <div class="empty-state-content">
+        <div class="empty-state-icon">
+          <mat-icon>chat_bubble_outline</mat-icon>
+        </div>
+        <h2>به دستیار کشاورزی هوشمند خوش آمدید</h2>
+        <p>سوالات خود را در مورد کشاورزی، محصولات و مشاوره بپرسید</p>
+        <div class="suggestion-chips">
+          <div class="suggestion-chip" (click)="sendSuggestion('نحوه کاشت گوجه فرنگی چیست؟')">
+            <mat-icon>eco</mat-icon>
+            نحوه کاشت گوجه فرنگی
+          </div>
+          <div class="suggestion-chip" (click)="sendSuggestion('بهترین کود برای گندم چیست؟')">
+            <mat-icon>grass</mat-icon>
+            کودهای مناسب گندم
+          </div>
+          <div class="suggestion-chip" (click)="sendSuggestion('انواع روش های کوددهی خاک')">
+            <mat-icon>bug_report</mat-icon>
+            کوددهی خاک
+          </div>
+          <div class="suggestion-chip" (click)="sendSuggestion('زمان مناسب برداشت محصولات چه زمانی است؟')">
+            <mat-icon>schedule</mat-icon>
+            زمان برداشت
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="messages-list">
+      <div *ngFor="let message of messages" 
+           class="message"
+           [class.user]="message.isUser"
+           [class.assistant]="!message.isUser">
+        
+        <div class="message-content">
+          <p>{{ message.content }}</p>
+          
+          <!-- Enhanced data for assistant messages -->
+          <div *ngIf="!message.isUser && message.queryAnalysis && showAnalysisDetails" class="message-analysis">
+            <mat-expansion-panel class="analysis-panel">
+              <mat-expansion-panel-header>
+                <mat-panel-title>
+                  <mat-icon>analytics</mat-icon>
+                  تحلیل پاسخ
+                </mat-panel-title>
+                <mat-panel-description>
+                  اعتماد: {{ getConfidenceText(message.queryAnalysis.confidence_score) }}
+                  <mat-chip [style.background-color]="getConfidenceColor(message.queryAnalysis.confidence_score)" 
+                           class="confidence-chip">
+                    {{ (message.queryAnalysis.confidence_score * 100).toFixed(0) }}%
+                  </mat-chip>
+                </mat-panel-description>
+              </mat-expansion-panel-header>
+              
+              <div class="analysis-content">
+                <div class="analysis-item">
+                  <strong>منبع دانش:</strong>
+                  <mat-chip class="source-chip">{{ getKnowledgeSourceText(message.queryAnalysis.knowledge_source) }}</mat-chip>
+                </div>
+                
+                <div class="analysis-item">
+                  <strong>نیاز به ارجاع انسانی:</strong>
+                  <mat-chip [class]="message.queryAnalysis.requires_human_referral ? 'warning-chip' : 'success-chip'">
+                    {{ message.queryAnalysis.requires_human_referral ? 'بله' : 'خیر' }}
+                  </mat-chip>
+                </div>
+                
+                <div class="analysis-item" *ngIf="message.queryAnalysis.reasoning">
+                  <strong>دلیل:</strong>
+                  <p class="reasoning-text">{{ message.queryAnalysis.reasoning }}</p>
+                </div>
+                
+                <!-- Response Parameters -->
+                <div class="parameters-section" *ngIf="message.responseParameters">
+                  <h4>پارامترهای پاسخ</h4>
+                  <div class="parameters-grid">
+                    <div class="param-item">
+                      <span class="param-label">مدل:</span>
+                      <mat-chip class="param-chip">{{ message.responseParameters.model }}</mat-chip>
+                    </div>
+                    <div class="param-item">
+                      <span class="param-label">دما:</span>
+                      <mat-chip class="param-chip">{{ message.responseParameters.temperature }}</mat-chip>
+                    </div>
+                    <div class="param-item">
+                      <span class="param-label">حداکثر توکن:</span>
+                      <mat-chip class="param-chip">{{ message.responseParameters.max_tokens }}</mat-chip>
+                    </div>
+                    <div class="param-item">
+                      <span class="param-label">Top P:</span>
+                      <mat-chip class="param-chip">{{ message.responseParameters.top_p }}</mat-chip>
+                    </div>
+                  </div>
+                </div>
+                
+              
+              </div>
+            </mat-expansion-panel>
+          </div>
+          
+          <time>{{ formatTime(message.timestamp) }}</time>
+        </div>
+      </div>
+
+      <!-- Typing indicator -->
+      <div *ngIf="isLoading" class="message assistant typing">
+        <div class="message-content">
+          <div class="typing-indicator">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Input -->
+  <footer class="input-section">
+    <div class="input-container">
+      <mat-form-field appearance="fill" class="message-field">
+        <textarea
+          matInput
+          matTextareaAutosize
+          #messageInput
+          [(ngModel)]="currentMessage"
+          (keydown)="onKeyPress($event)"
+          [disabled]="isLoading"
+          placeholder="سوال خود را بپرسید..."
+          rows="1"
+          class="message-input">
+        </textarea>
+      </mat-form-field>
+      
+      <button 
+        mat-icon-button 
+        (click)="sendMessage()"
+        [disabled]="!currentMessage.trim() || isLoading"
+        class="send-btn"
+        [class.active]="currentMessage.trim() && !isLoading">
+        <mat-icon>send</mat-icon>
+      </button>
+    </div>
+  </footer>
+</div>

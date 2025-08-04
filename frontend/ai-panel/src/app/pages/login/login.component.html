@@ -1,0 +1,79 @@
+<div class="login-container">
+  <mat-card class="login-card">
+    <mat-card-header class="login-header">
+      <mat-card-title>ورود به پنل مدیریت</mat-card-title>
+      <mat-card-subtitle>برای دسترسی به داشبورد وارد شوید</mat-card-subtitle>
+    </mat-card-header>
+
+    <mat-card-content class="login-content">
+      <!-- Demo Credentials Section -->
+      <!-- <div class="demo-credentials" *ngIf="demoCredentials.length > 0">
+        <h4>اطلاعات ورود نمونه:</h4>
+        <div class="demo-list">
+          <div class="demo-item" *ngFor="let demo of demoCredentials" 
+               (click)="fillDemoCredentials(demo)">
+            <span class="demo-username">{{ demo.username }}</span>
+            <span class="demo-role">{{ demo.role }}</span>
+          </div>
+        </div>
+      </div> -->
+
+      <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="login-form">
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>نام کاربری</mat-label>
+          <input matInput 
+                 formControlName="username"
+                 placeholder="نام کاربری خود را وارد کنید" 
+                 [class.is-invalid]="loginForm.get('username')?.invalid && loginForm.get('username')?.touched">
+          <mat-icon matSuffix>person_outline</mat-icon>
+          <mat-error *ngIf="loginForm.get('username')?.invalid && loginForm.get('username')?.touched">
+            {{ getErrorMessage('username') }}
+          </mat-error>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>رمز عبور</mat-label>
+          <input matInput 
+                 [type]="hidePassword ? 'password' : 'text'"
+                 formControlName="password"
+                 placeholder="رمز عبور خود را وارد کنید"
+                 [class.is-invalid]="loginForm.get('password')?.invalid && loginForm.get('password')?.touched">
+          <button mat-icon-button matSuffix 
+                  (click)="hidePassword = !hidePassword" 
+                  [attr.aria-label]="'Hide password'" 
+                  [attr.aria-pressed]="hidePassword"
+                  type="button">
+            <mat-icon>{{hidePassword ? 'visibility_off' : 'visibility'}}</mat-icon>
+          </button>
+          <mat-error *ngIf="loginForm.get('password')?.invalid && loginForm.get('password')?.touched">
+            {{ getErrorMessage('password') }}
+          </mat-error>
+        </mat-form-field>
+
+        <div class="login-options">
+          <mat-checkbox formControlName="rememberMe" class="remember-me">
+            مرا به خاطر بسپار
+          </mat-checkbox>
+        </div>
+
+        <div class="login-actions">
+          <button mat-raised-button 
+                  color="primary" 
+                  class="full-width login-button"
+                  type="submit"
+                  [disabled]="isLoading">
+            <mat-spinner *ngIf="isLoading" diameter="20" class="login-spinner"></mat-spinner>
+            <mat-icon *ngIf="!isLoading">login</mat-icon>
+            {{ isLoading ? 'در حال ورود...' : 'ورود' }}
+          </button>
+        </div>
+      </form>
+    </mat-card-content>
+
+    <mat-card-footer class="login-footer">
+      <a href="#" (click)="onForgotPassword(); $event.preventDefault()" class="forgot-password">
+        رمز عبور خود را فراموش کرده‌اید؟
+      </a>
+    </mat-card-footer>
+  </mat-card>
+</div>

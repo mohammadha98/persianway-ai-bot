@@ -1,0 +1,169 @@
+@import '../../../styles.scss';
+
+.knowledge-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  direction: rtl;
+  font-family: 'Vazirmatn', sans-serif;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 3rem;
+
+  .title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: var(--primary-color);
+  }
+
+  .subtitle {
+    font-size: 1.2rem;
+    color: var(--text-secondary-color);
+    max-width: 800px;
+    margin: 0 auto;
+  }
+}
+
+.section-container {
+  margin-bottom: 3rem;
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    font-size: 1.8rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--primary-color);
+
+    mat-icon {
+      margin-left: 0.5rem;
+      font-size: 2rem;
+      height: 2rem;
+      width: 2rem;
+    }
+  }
+
+  .section-description {
+    font-size: 1.1rem;
+    color: var(--text-secondary-color);
+    margin-bottom: 2rem;
+  }
+}
+
+.concepts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 1.5rem;
+}
+
+.concept-card {
+  height: 100%;
+  border-radius: 8px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  overflow: hidden;
+
+  &:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  }
+
+  mat-card-header {
+    padding: 1rem 1rem 0.5rem;
+    
+    .concept-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: var(--primary-light-color);
+      color: var(--primary-color);
+      border-radius: 50%;
+      
+      mat-icon {
+        font-size: 1.5rem;
+        height: 1.5rem;
+        width: 1.5rem;
+      }
+    }
+
+    mat-card-title {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+  }
+
+  mat-card-content {
+    padding: 0 1rem 1rem;
+    
+    p {
+      margin-bottom: 1rem;
+      line-height: 1.6;
+      color: var(--text-primary-color);
+    }
+
+    .details-panel {
+      margin-top: 0.5rem;
+      background-color: var(--background-light-color);
+      
+      ul {
+        padding-right: 1.5rem;
+        margin: 0.5rem 0;
+        
+        li {
+          margin-bottom: 0.5rem;
+          line-height: 1.5;
+        }
+      }
+    }
+  }
+}
+
+mat-divider {
+  margin: 3rem 0;
+}
+
+.footer {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 3rem;
+  
+  button {
+    padding: 0.5rem 1.5rem;
+    font-size: 1rem;
+    
+    mat-icon {
+      margin-left: 0.5rem;
+    }
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .knowledge-container {
+    padding: 1.5rem;
+  }
+  
+  .header {
+    margin-bottom: 2rem;
+    
+    .title {
+      font-size: 2rem;
+    }
+    
+    .subtitle {
+      font-size: 1rem;
+    }
+  }
+  
+  .concepts-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .section-title {
+    font-size: 1.5rem;
+  }
+}

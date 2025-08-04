@@ -1,0 +1,249 @@
+.dashboard-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  direction: rtl;
+  font-family: 'Vazir', 'Tahoma', sans-serif;
+}
+
+.dashboard-header {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+
+  .header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+  }
+
+  .logo-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    .logo-icon {
+      font-size: 32px;
+      color: #667eea;
+    }
+
+    .app-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #333;
+    }
+  }
+
+  .user-section {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    .welcome-text {
+      font-size: 14px;
+      color: #666;
+      font-weight: 500;
+    }
+
+    button {
+      color: #667eea;
+    }
+  }
+}
+
+.user-info {
+  padding: 16px;
+  text-align: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  margin: -8px -8px 8px -8px;
+
+  .user-name {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .user-role {
+    font-size: 12px;
+    opacity: 0.9;
+    margin-bottom: 4px;
+  }
+
+  .user-email {
+    font-size: 12px;
+    opacity: 0.8;
+  }
+}
+
+.dashboard-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 20px;
+
+  .welcome-section {
+    text-align: center;
+    margin-bottom: 40px;
+    color: white;
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+  }
+
+  .nav-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 24px;
+    margin-top: 40px;
+  }
+}
+
+.nav-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  overflow: hidden;
+
+  &:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+    background: rgba(255, 255, 255, 1);
+  }
+
+  mat-card-header {
+    padding: 20px 20px 16px;
+    
+    mat-icon[mat-card-avatar] {
+      font-size: 40px;
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    mat-card-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 4px;
+    }
+
+    mat-card-subtitle {
+      font-size: 14px;
+      color: #666;
+    }
+  }
+
+  mat-card-content {
+    padding: 0 20px 16px;
+    
+    p {
+      font-size: 14px;
+      color: #555;
+      line-height: 1.6;
+      margin: 0;
+    }
+  }
+
+  mat-card-actions {
+    padding: 16px 20px 20px;
+    
+    button {
+      font-weight: 500;
+      
+      mat-icon {
+        margin-left: 8px;
+      }
+    }
+  }
+}
+
+// Responsive Design
+@media (max-width: 768px) {
+  .dashboard-header {
+    .header-content {
+      padding: 0 16px;
+    }
+
+    .logo-section {
+      .app-title {
+        font-size: 16px;
+      }
+    }
+
+    .user-section {
+      .welcome-text {
+        display: none;
+      }
+    }
+  }
+
+  .dashboard-content {
+    padding: 20px 16px;
+
+    .welcome-section {
+      h1 {
+        font-size: 2rem;
+      }
+
+      p {
+        font-size: 1rem;
+      }
+    }
+
+    .nav-cards {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-content {
+    .welcome-section {
+      h1 {
+        font-size: 1.8rem;
+      }
+    }
+  }
+
+  .nav-card {
+    mat-card-header {
+      mat-icon[mat-card-avatar] {
+        font-size: 32px;
+        width: 32px;
+        height: 32px;
+      }
+
+      mat-card-title {
+        font-size: 16px;
+      }
+    }
+  }
+}

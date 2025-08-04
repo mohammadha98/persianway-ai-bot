@@ -1,0 +1,127 @@
+<div class="dashboard-container">
+  <!-- Header -->
+  <mat-toolbar class="dashboard-header">
+    <div class="header-content">
+      <div class="logo-section">
+        <mat-icon class="logo-icon">agriculture</mat-icon>
+        <span class="app-title">پنل مدیریت کشاورزی</span>
+      </div>
+      
+      <div class="user-section">
+        <span class="welcome-text">خوش آمدید، {{ currentUser?.username }}</span>
+        <button mat-icon-button [matMenuTriggerFor]="userMenu">
+          <mat-icon>account_circle</mat-icon>
+        </button>
+        
+        <mat-menu #userMenu="matMenu" direction="rtl">
+          <div class="user-info">
+            <div class="user-name">{{ currentUser?.username }}</div>
+            <div class="user-role">{{ getRoleDisplayName(currentUser?.role || '') }}</div>
+            <div class="user-email">{{ currentUser?.email }}</div>
+          </div>
+          <mat-divider></mat-divider>
+          <button mat-menu-item (click)="logout()">
+            <mat-icon>logout</mat-icon>
+            <span>خروج</span>
+          </button>
+        </mat-menu>
+      </div>
+    </div>
+  </mat-toolbar>
+
+  <!-- Main Content -->
+  <div class="dashboard-content">
+    <div class="welcome-section">
+      <h1>داشبورد مدیریت</h1>
+      <p>به پنل مدیریت سیستم هوش مصنوعی کشاورزی خوش آمدید</p>
+    </div>
+
+    <!-- Navigation Cards -->
+    <div class="nav-cards">
+      <mat-card class="nav-card" (click)="navigateTo('/chat')">
+        <mat-card-header>
+          <mat-icon mat-card-avatar>chat</mat-icon>
+          <mat-card-title>گفتگو با هوش مصنوعی</mat-card-title>
+          <mat-card-subtitle>پرسش و پاسخ در زمینه کشاورزی</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <p>با سیستم هوش مصنوعی در مورد مسائل کشاورزی گفتگو کنید</p>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button color="primary">
+            <mat-icon>arrow_back</mat-icon>
+            ورود به چت
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <mat-card class="nav-card" (click)="navigateTo('/contribute')">
+        <mat-card-header>
+          <mat-icon mat-card-avatar>add_circle</mat-icon>
+          <mat-card-title>مشارکت در محتوا</mat-card-title>
+          <mat-card-subtitle>افزودن اطلاعات جدید</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <p>اطلاعات و دانش خود را به سیستم اضافه کنید</p>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button color="primary">
+            <mat-icon>arrow_back</mat-icon>
+            مشارکت
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <mat-card class="nav-card" (click)="navigateTo('/settings')">
+        <mat-card-header>
+          <mat-icon mat-card-avatar>settings</mat-icon>
+          <mat-card-title>تنظیمات عمومی</mat-card-title>
+          <mat-card-subtitle>پیکربندی سیستم</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <p>تنظیمات کلی سیستم را مدیریت کنید</p>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button color="primary">
+            <mat-icon>arrow_back</mat-icon>
+            تنظیمات
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <mat-card class="nav-card" (click)="navigateTo('/llm-settings')" *ngIf="currentUser?.role === 'admin'">
+        <mat-card-header>
+          <mat-icon mat-card-avatar>psychology</mat-icon>
+          <mat-card-title>تنظیمات مدل زبانی</mat-card-title>
+          <mat-card-subtitle>پیکربندی LLM</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <p>تنظیمات مدل‌های هوش مصنوعی را مدیریت کنید</p>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button color="primary">
+            <mat-icon>arrow_back</mat-icon>
+            تنظیمات LLM
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <mat-card class="nav-card" (click)="navigateTo('/rag-settings')" *ngIf="currentUser?.role === 'admin'">
+        <mat-card-header>
+          <mat-icon mat-card-avatar>storage</mat-icon>
+          <mat-card-title>تنظیمات RAG</mat-card-title>
+          <mat-card-subtitle>پیکربندی بازیابی اطلاعات</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <p>تنظیمات سیستم بازیابی و تولید پاسخ را مدیریت کنید</p>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button color="primary">
+            <mat-icon>arrow_back</mat-icon>
+            تنظیمات RAG
+          </button>
+        </mat-card-actions>
+      </mat-card>
+    </div>
+  </div>
+</div>

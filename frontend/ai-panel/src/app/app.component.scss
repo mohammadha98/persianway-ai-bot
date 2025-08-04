@@ -1,0 +1,413 @@
+// Persian/RTL App Styles
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Vazir', 'Tahoma', sans-serif;
+  direction: rtl;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 50%, rgba(255, 255, 255, 0.08) 0%, transparent 50%);
+    z-index: 1;
+  }
+  
+  .header-content {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 24px;
+    height: 70px;
+  }
+  
+  .app-title {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: white;
+    padding-left: 12px;
+  
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    background: linear-gradient(45deg, #fff, #f0f0f0);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .spacer {
+    flex: 1;
+  }
+  
+  .nav-links {
+    display: flex;
+    gap: 8px;
+    direction: rtl;
+    
+    a {
+      color: white;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      border-radius: 25px;
+      transition: all 0.3s ease;
+      direction: rtl;
+      font-weight: 500;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      position: relative;
+      overflow: hidden;
+      
+      &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+        transition: left 0.5s ease;
+      }
+      
+      &:hover {
+        background: rgba(255, 255, 255, 0.2);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        
+        &::before {
+          left: 100%;
+        }
+      }
+      
+      &.active {
+        background: rgba(255, 255, 255, 0.25);
+        font-weight: 600;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.4);
+      }
+      
+      mat-icon {
+        margin-left: 0;
+        margin-right: 8px;
+        order: -1;
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+      }
+    }
+  }
+  
+  .user-section {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-right: 20px;
+    
+    .welcome-text {
+      color: white;
+      font-weight: 500;
+      font-size: 0.95rem;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+    
+    button {
+      color: white;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      transition: all 0.3s ease;
+      
+      &:hover {
+        background: rgba(255, 255, 255, 0.2);
+        transform: scale(1.05);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+      }
+      
+      mat-icon {
+        font-size: 24px;
+        width: 24px;
+        height: 24px;
+      }
+    }
+  }
+  
+  .auth-section {
+    margin-right: 20px;
+    
+    button {
+      color: white;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 25px;
+      padding: 12px 24px;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      
+      &:hover {
+        background: rgba(255, 255, 255, 0.2);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+      }
+      
+      mat-icon {
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+      }
+    }
+  }
+}
+
+// User Menu Styles
+.user-info {
+  padding: 16px;
+  text-align: center;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 8px 8px 0 0;
+  
+  .user-name {
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: #333;
+    margin-bottom: 4px;
+  }
+  
+  .user-role {
+    font-size: 0.85rem;
+    color: #666;
+    background: rgba(102, 126, 234, 0.1);
+    padding: 4px 12px;
+    border-radius: 12px;
+    display: inline-block;
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+  
+  .user-email {
+    font-size: 0.8rem;
+    color: #888;
+    direction: ltr;
+    text-align: center;
+  }
+}
+
+::ng-deep .mat-mdc-menu-panel {
+  direction: rtl;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  
+  .mat-mdc-menu-content {
+    padding: 0;
+  }
+  
+  .mat-mdc-menu-item {
+    direction: rtl;
+    padding: 12px 20px;
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+    
+    &:hover {
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+      color: white;
+      
+      mat-icon {
+        color: white;
+      }
+    }
+    
+    mat-icon {
+      margin-left: 12px;
+      margin-right: 0;
+      color: #666;
+      transition: color 0.2s ease;
+    }
+  }
+  
+  .mat-divider {
+    margin: 0;
+    border-top-color: rgba(0, 0, 0, 0.08);
+  }
+}
+
+.main-content {
+  flex: 1;
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.app-footer {
+  background-color: #f5f5f5;
+  border-top: 1px solid #e0e0e0;
+  padding: 16px;
+  
+  .footer-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    text-align: center;
+    color: #666;
+    font-size: 0.9rem;
+  }
+}
+
+// Responsive design
+@media (max-width: 768px) {
+  .app-header {
+    .header-content {
+      padding: 0 16px;
+      height: 60px;
+    }
+    
+    .app-title {
+      font-size: 1.4rem;
+    }
+    
+    .nav-links {
+      gap: 8px;
+      
+      a {
+        padding: 8px 16px;
+        font-size: 0.9rem;
+        border-radius: 20px;
+        
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+      }
+    }
+    
+    .user-section {
+      gap: 12px;
+      margin-right: 16px;
+      
+      .welcome-text {
+        font-size: 0.85rem;
+      }
+      
+      button {
+        width: 40px;
+        height: 40px;
+        
+        mat-icon {
+          font-size: 22px;
+          width: 22px;
+          height: 22px;
+        }
+      }
+    }
+    
+    .auth-section {
+      margin-right: 16px;
+      
+      button {
+        padding: 10px 20px;
+        font-size: 0.9rem;
+      }
+    }
+  }
+  
+  .main-content {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    .header-content {
+      padding: 0 12px;
+      height: 56px;
+    }
+    
+    .app-title {
+      font-size: 1.2rem;
+    }
+    
+    .nav-links {
+      gap: 6px;
+      
+      a {
+        padding: 8px 12px;
+        border-radius: 18px;
+        
+        span {
+          display: none; // Hide text on very small screens, show only icons
+        }
+        
+        mat-icon {
+          margin-right: 0;
+        }
+      }
+    }
+    
+    .user-section {
+      gap: 8px;
+      margin-right: 12px;
+      
+      .welcome-text {
+        display: none; // Hide welcome text on very small screens
+      }
+      
+      button {
+        width: 36px;
+        height: 36px;
+        
+        mat-icon {
+          font-size: 20px;
+          width: 20px;
+          height: 20px;
+        }
+      }
+    }
+    
+    .auth-section {
+      margin-right: 12px;
+      
+      button {
+        padding: 8px 16px;
+        font-size: 0.85rem;
+        
+        span {
+          display: none; // Hide text, show only icon
+        }
+        
+        mat-icon {
+          margin-right: 0;
+        }
+      }
+    }
+  }
+}

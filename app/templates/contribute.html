@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}مشارکت در دانش - پایگاه دانش پرشین وی{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold text-gray-800 mb-6">مشارکت در پایگاه دانش</h1>
+    
+    <div class="bg-white shadow-xl rounded-lg overflow-hidden">
+        <div class="bg-green-700 text-white p-4">
+            <h2 class="text-xl font-semibold"><i class="fas fa-upload ml-2"></i>فرم مشارکت در دانش</h2>
+        </div>
+        <div class="p-6">
+            <p class="text-gray-600 mb-6">دانش خود را برای کمک به رشد پایگاه داده ما به اشتراک بگذارید. مشارکت شما بررسی و به پایگاه دانش ما اضافه خواهد شد.</p>
+            
+            <!-- Step Indicator -->
+            <div class="flex items-center justify-center mb-8">
+                <div class="step-indicator flex items-center">
+                    <div class="step active flex items-center justify-center w-10 h-10 rounded-full bg-green-600 text-white font-bold" data-step="1">1</div>
+                    <div class="flex-auto border-t-2 border-gray-300 mx-4"></div>
+                    <div class="step flex items-center justify-center w-10 h-10 rounded-full bg-gray-300 text-gray-600 font-bold" data-step="2">2</div>
+                    <div class="flex-auto border-t-2 border-gray-300 mx-4"></div>
+                    <div class="step flex items-center justify-center w-10 h-10 rounded-full bg-gray-300 text-gray-600 font-bold" data-step="3">3</div>
+                </div>
+            </div>
+            
+            <form id="contribution-form">
+                <!-- Step 1: Basic Information -->
+                <div class="form-step active" data-step="1">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-4">اطلاعات پایه</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="title" class="block text-sm font-medium text-gray-700">عنوان</label>
+                            <input type="text" id="title" name="title" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500" placeholder="یک عنوان توصیفی وارد کنید" required>
+                            <p class="mt-2 text-sm text-gray-500">یک عنوان واضح و مختصر برای ورودی دانش شما.</p>
+                        </div>
+                        <div>
+                            <label for="content" class="block text-sm font-medium text-gray-700">محتوا</label>
+                            <textarea id="content" name="content" rows="6" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500" placeholder="محتوای اصلی ورودی دانش خود را وارد کنید" required></textarea>
+                            <p class="mt-2 text-sm text-gray-500">بدنه اصلی دانش. تا حد امکان دقیق و با جزئیات باشید.</p>
+                        </div>
+                    </div>
+                    <div class="flex justify-end mt-6">
+                        <button type="button" class="next-step bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition">بعدی <i class="fas fa-arrow-left mr-2"></i></button>
+                    </div>
+                </div>
+                
+                <!-- Step 2: Source and Metadata -->
+                <div class="form-step hidden" data-step="2">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-4">منبع و فراداده</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="source_type" class="block text-sm font-medium text-gray-700">نوع منبع</label>
+                            <select id="source_type" name="source_type" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500">
+                                <option value="research_paper">مقاله پژوهشی</option>
+                                <option value="book">کتاب</option>
+                                <option value="article">مقاله</option>
+                                <option value="website">وب‌سایت</option>
+                                <option value="personal_experience">تجربه شخصی</option>
+                                <option value="other">دیگر</option>
+                            </select>
+                            <p class="mt-2 text-sm text-gray-500">نوع منبعی که این اطلاعات از آنجا آمده است.</p>
+                        </div>
+                        <div>
+                            <label for="source_name" class="block text-sm font-medium text-gray-700">نام منبع</label>
+                            <input type="text" id="source_name" name="source_name" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500" placeholder="مثال: مجله علوم کشاورزی">
+                            <p class="mt-2 text-sm text-gray-500">نام منبع (مثال: نام مجله، عنوان کتاب، نام وب‌سایت).</p>
+                        </div>
+                        <div>
+                            <label for="tags" class="block text-sm font-medium text-gray-700">برچسب‌ها</label>
+                            <input type="text" id="tags" name="tags" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500" placeholder="مثال: آبیاری، زعفران، خاک">
+                            <p class="mt-2 text-sm text-gray-500">کلمات کلیدی مرتبط با این ورودی دانش، جدا شده با کاما.</p>
+                        </div>
+                    </div>
+                    <div class="flex justify-between mt-6">
+                        <button type="button" class="prev-step bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 transition"><i class="fas fa-arrow-right ml-2"></i> قبلی</button>
+                        <button type="button" class="next-step bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition">بعدی <i class="fas fa-arrow-left mr-2"></i></button>
+                    </div>
+                </div>
+                
+                <!-- Step 3: Additional Information -->
+                <div class="form-step hidden" data-step="3">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-4">اطلاعات تکمیلی</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="author" class="block text-sm font-medium text-gray-700">نویسنده</label>
+                            <input type="text" id="author" name="author" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500" placeholder="نام نویسنده را وارد کنید">
+                            <p class="mt-2 text-sm text-gray-500">نویسنده منبع (اختیاری).</p>
+                        </div>
+                        <div>
+                            <label for="publication_date" class="block text-sm font-medium text-gray-700">تاریخ انتشار</label>
+                            <input type="date" id="publication_date" name="publication_date" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500">
+                            <p class="mt-2 text-sm text-gray-500">تاریخ انتشار منبع (اختیاری).</p>
+                        </div>
+                        <div>
+                            <label for="notes" class="block text-sm font-medium text-gray-700">یادداشت‌ها</label>
+                            <textarea id="notes" name="notes" rows="3" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500" placeholder="هرگونه یادداشت یا مرجع اضافی را وارد کنید"></textarea>
+                            <p class="mt-2 text-sm text-gray-500">هرگونه یادداشت، مرجع یا زمینه اضافی برای این ورودی دانش.</p>
+                        </div>
+                    </div>
+                    <div class="flex justify-between mt-6">
+                        <button type="button" class="prev-step bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400 transition"><i class="fas fa-arrow-right ml-2"></i> قبلی</button>
+                        <button type="submit" class="bg-green-500 text-white px-6 py-2 rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition"><i class="fas fa-check ml-2"></i> ارسال مشارکت</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div class="mt-8 bg-white shadow-lg rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">راهنمای مشارکت</h3>
+        <div class="grid md:grid-cols-2 gap-6">
+            <div>
+                <h4 class="font-semibold text-green-700 mb-2"><i class="fas fa-check-circle ml-2"></i>انجام دهید</h4>
+                <ul class="list-disc list-inside space-y-1 text-gray-600">
+                    <li>اطلاعات دقیق و واقعی ارائه دهید</li>
+                    <li>در صورت امکان، منابع و مراجع را ذکر کنید</li>
+                    <li>در محتوای خود دقیق و با جزئیات باشید</li>
+                    <li>از زبان واضح و مختصر استفاده کنید</li>
+                </ul>
+            </div>
+            <div>
+                <h4 class="font-semibold text-red-700 mb-2"><i class="fas fa-times-circle ml-2"></i>انجام ندهید</h4>
+                <ul class="list-disc list-inside space-y-1 text-gray-600">
+                    <li>مطالب دارای حق چاپ را بدون اجازه ارسال نکنید</li>
+                    <li>نظرات شخصی را به عنوان واقعیت درج نکنید</li>
+                    <li>اطلاعات تکراری یا اضافی ارسال نکنید</li>
+                    <li>محتوای تبلیغاتی یا تجاری را شامل نکنید</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

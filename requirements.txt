@@ -1,0 +1,37 @@
+# Core dependencies
+fastapi>=0.95.0
+uvicorn>=0.22.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.5
+loguru>=0.7.0
+jinja2>=3.1.2
+aiofiles>=23.1.0  # For async file operations with static files
+# ML dependencies
+scikit-learn>=1.2.2
+numpy>=1.24.3
+pandas>=2.0.0
+joblib>=1.2.0
+
+# Chat dependencies
+langchain>=0.0.267
+openai>=0.27.8
+langchain-community>=0.0.267
+
+# RAG dependencies
+chromadb>=0.4.6
+tiktoken>=0.4.0
+pypdf>=3.0.0
+openpyxl>=3.1.0  # Required for Excel file processing
+# Optional: Deep learning
+# tensorflow>=2.12.0
+# torch>=2.0.0
+
+# MongoDB dependencies
+motor>=3.3.0
+pymongo>=4.5.0
+
+# Testing
+pytest>=7.3.1
+httpx>=0.24.0

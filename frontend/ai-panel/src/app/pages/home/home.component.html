@@ -1,0 +1,179 @@
+<div class="home-container">
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-background">
+      <div class="floating-elements">
+        <div class="floating-icon" style="top: 10%; left: 15%; animation-delay: 0s;">
+          <mat-icon>grass</mat-icon>
+        </div>
+        <div class="floating-icon" style="top: 20%; right: 20%; animation-delay: 1s;">
+          <mat-icon>psychology</mat-icon>
+        </div>
+        <div class="floating-icon" style="bottom: 30%; left: 10%; animation-delay: 2s;">
+          <mat-icon>biotech</mat-icon>
+        </div>
+        <div class="floating-icon" style="bottom: 20%; right: 15%; animation-delay: 3s;">
+          <mat-icon>eco</mat-icon>
+        </div>
+      </div>
+    </div>
+    
+    <div class="hero-content">
+      <div class="hero-badge">
+        <mat-icon>stars</mat-icon>
+        <span>سیستم RAG پیشرفته</span>
+        <div class="badge-glow"></div>
+      </div>
+      
+      <h1 class="hero-title">
+        <span class="title-highlight">پایگاه دانش و هوش مصنوعی</span>
+        <span class="title-main">Persianway</span>
+      </h1>
+      
+      <div class="hero-subtitle">
+        <p style="color: white;">سیستم تولید تقویت‌شده بازیابی (RAG) با پشتیبانی از ارجاع به کارشناسان انسانی</p>
+      </div>
+      
+      <div class="hero-features">
+        <div class="feature-pill">
+          <mat-icon>android</mat-icon>
+          <span>هوش مصنوعی پیشرفته</span>
+        </div>
+        <div class="feature-pill">
+          <mat-icon>language</mat-icon>
+          <span>پشتیبانی کامل فارسی</span>
+        </div>
+        <div class="feature-pill">
+          <mat-icon>support_agent</mat-icon>
+          <span>ارجاع به متخصص</span>
+        </div>
+      </div>
+      
+      <div class="hero-actions">
+        <button mat-raised-button color="primary" [routerLink]="'/chat'" class="cta-button">
+          <mat-icon>chat</mat-icon>
+          شروع گفتگو
+          <div class="button-glow"></div>
+        </button>
+        
+        <button mat-stroked-button [routerLink]="'/contribute'" class="secondary-button">
+          <mat-icon>add_circle</mat-icon>
+          مشارکت در دانش
+        </button>
+      </div>
+      
+    
+    </div>
+  </section>
+
+  <!-- Quick Actions -->
+  <section class="quick-actions-section">
+    <div class="quick-actions-grid">
+      <mat-card *ngFor="let feature of features" class="quick-action-card">
+        <mat-card-header>
+          <div mat-card-avatar class="action-icon">
+            <mat-icon>{{ feature.icon }}</mat-icon>
+          </div>
+          <mat-card-title>{{ feature.title }}</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>{{ feature.description }}</p>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button color="primary" [routerLink]="feature.route">
+            {{ feature.buttonText }}
+            <mat-icon>arrow_forward</mat-icon>
+          </button>
+        </mat-card-actions>
+      </mat-card>
+    </div>
+  </section>
+
+  <!-- System Features -->
+  <section class="system-features-section">
+    <div class="section-header">
+      <h2>ویژگی‌های سیستم</h2>
+      <p>قابلیت‌های پیشرفته RAG </p>
+    </div>
+    <div class="system-features-grid">
+      <div *ngFor="let feature of systemFeatures" class="system-feature-card">
+        <div class="feature-icon-wrapper" [style.background-color]="feature.color">
+          <mat-icon>{{ feature.icon }}</mat-icon>
+        </div>
+        <h3>{{ feature.title }}</h3>
+        <p>{{ feature.description }}</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Technical Specifications -->
+  <section class="technical-specs-section">
+    <div class="section-header">
+      <h2>مشخصات فنی</h2>
+      <p>تکنولوژی‌های استفاده شده در سیستم</p>
+    </div>
+    <div class="tech-specs-grid">
+      <mat-card *ngFor="let spec of technicalSpecs" class="tech-spec-card">
+        <mat-card-content>
+          <h4>{{ spec.title }}</h4>
+          <p>{{ spec.description }}</p>
+        </mat-card-content>
+      </mat-card>
+    </div>
+  </section>
+
+  <!-- API Endpoints -->
+  <section class="api-section">
+    <div class="section-header">
+      <h2>API Endpoints</h2>
+      <p>رابط‌های برنامه‌نویسی در دسترس</p>
+    </div>
+    <div class="api-endpoints">
+      <div *ngFor="let endpoint of apiEndpoints" class="api-endpoint">
+        <div class="method-badge" [class]="'method-' + endpoint.method.toLowerCase()">{{ endpoint.method }}</div>
+        <div class="endpoint-info">
+          <code class="endpoint-path">{{ endpoint.path }}</code>
+          <p class="endpoint-description">{{ endpoint.description }}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Human Referral Info -->
+  <section class="human-referral-section">
+    <mat-card class="referral-info-card">
+      <mat-card-header>
+        <div mat-card-avatar class="referral-icon">
+          <mat-icon>support_agent</mat-icon>
+        </div>
+        <mat-card-title>سیستم ارجاع به کارشناس انسانی</mat-card-title>
+        <mat-card-subtitle>پشتیبانی هوشمند با ترکیب AI و تخصص انسانی</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        <div class="referral-features">
+          <div class="referral-feature">
+            <mat-icon>psychology</mat-icon>
+            <div>
+              <h4>تشخیص خودکار اعتماد</h4>
+              <p>ارزیابی خودکار میزان اعتماد به پاسخ‌ها و تشخیص نیاز به مشاوره انسانی</p>
+            </div>
+          </div>
+          <div class="referral-feature">
+            <mat-icon>assignment_turned_in</mat-icon>
+            <div>
+              <h4>ثبت و پیگیری سوالات</h4>
+              <p>ثبت سوالات نیازمند بررسی انسانی با شناسه منحصر به فرد برای پیگیری</p>
+            </div>
+          </div>
+          <div class="referral-feature">
+            <mat-icon>settings</mat-icon>
+            <div>
+              <h4>پارامترهای قابل تنظیم</h4>
+              <p>امکان تنظیم آستانه اعتماد و پیام‌های ارجاع از طریق متغیرهای محیطی</p>
+            </div>
+          </div>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </section>
+</div>

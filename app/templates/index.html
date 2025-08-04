@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}خانه - پایگاه دانش پرشین وی{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="text-center mb-12">
+        <h1 class="text-5xl font-bold text-gray-800 mb-4">پایگاه دانش پرشین وی</h1>
+        <p class="text-xl text-gray-600">به پایگاه دانش ما دسترسی پیدا کنید، سوال بپرسید و در رشد آن مشارکت کنید.</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
+        <div class="bg-white p-8 rounded-lg shadow-lg hover:shadow-2xl transition-shadow duration-300">
+            <i class="fas fa-comments text-4xl text-green-500 mb-4"></i>
+            <h3 class="text-2xl font-semibold mb-2">رابط چت</h3>
+            <p class="text-gray-600 mb-4">با دستیار هوش مصنوعی ما برای دریافت پاسخ سوالات خود در تعامل باشید.</p>
+            <a href="/ui/chat" class="text-green-500 hover:text-green-600 font-semibold">
+                شروع چت <i class="fas fa-arrow-left ml-2"></i>
+            </a>
+        </div>
+
+        <div class="bg-white p-8 rounded-lg shadow-lg hover:shadow-2xl transition-shadow duration-300">
+            <i class="fas fa-cogs text-4xl text-green-500 mb-4"></i>
+            <h3 class="text-2xl font-semibold mb-2">تنظیمات</h3>
+            <p class="text-gray-600 mb-4">پایگاه دانش را مدیریت کنید، اسناد را پردازش کنید و وضعیت سیستم را مشاهده کنید.</p>
+            <a href="/ui/settings" class="text-green-500 hover:text-green-600 font-semibold">
+                مدیریت تنظیمات <i class="fas fa-arrow-left ml-2"></i>
+            </a>
+        </div>
+
+        <div class="bg-white p-8 rounded-lg shadow-lg hover:shadow-2xl transition-shadow duration-300">
+            <i class="fas fa-database text-4xl text-green-500 mb-4"></i>
+            <h3 class="text-2xl font-semibold mb-2">مشارکت در داده‌ها</h3>
+            <p class="text-gray-600 mb-4">دانش خود را برای بهبود پایگاه دانش ما اضافه کنید.</p>
+            <a href="/ui/contribute" class="text-green-500 hover:text-green-600 font-semibold">
+                اکنون مشارکت کنید <i class="fas fa-arrow-left ml-2"></i>
+            </a>
+        </div>
+    </div>
+
+    <div class="mt-16 bg-gray-50 p-8 rounded-lg shadow-inner">
+        <h3 class="text-3xl font-bold text-center text-gray-800 mb-6">درباره این سیستم</h3>
+        <p class="text-lg text-gray-700 leading-relaxed text-center max-w-4xl mx-auto">
+            پایگاه دانش پرشین وی یک سیستم بازیابی-افزوده (RAG) است که برای ارائه اطلاعات دقیق و مرتبط طراحی شده است. این سیستم قدرت مدل‌های زبان بزرگ را با یک پایگاه دانش تخصصی ترکیب می‌کند تا پاسخ‌های دقیقی به سوالات شما ارائه دهد.
+        </p>
+        
+        <h4 class="text-2xl font-semibold text-center text-gray-800 mt-8 mb-4">ویژگی‌های کلیدی:</h4>
+        <ul class="list-disc list-inside text-lg text-gray-700 max-w-2xl mx-auto space-y-2">
+            <li><strong>چت هوشمند:</strong> سوالات را به زبان طبیعی بپرسید و پاسخ‌های دقیق و با جزئیات دریافت کنید.</li>
+            <li><strong>مدیریت دانش:</strong> اسناد PDF و زوج‌های پرسش و پاسخ اکسل را برای گسترش پایگاه دانش پردازش کنید.</li>
+            <li><strong>مشارکت در داده‌ها:</strong> ورودی‌های دانشی خود را برای کمک به رشد پایگاه دانش ما اضافه کنید.</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}
