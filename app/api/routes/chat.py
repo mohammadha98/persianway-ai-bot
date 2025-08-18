@@ -1,27 +1,49 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any
+import time
 
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.chat_service import get_chat_service
+from app.services.conversation_service import get_conversation_service
 
 # Create router for chat endpoints
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("/", response_model=ChatResponse)
-async def create_chat(request: ChatRequest, chat_service=Depends(get_chat_service)):
+async def create_chat(
+    request: ChatRequest, 
+    chat_service=Depends(get_chat_service),
+    conversation_service=Depends(get_conversation_service)
+):
     """Process a chat message and get a response from the AI.
     
     This endpoint accepts a user message and returns an AI-generated response.
     It maintains conversation history for each user session.
     """
     try:
+        # Record start time for response time calculation
+        start_time = time.time()
+        
         # Process the message
         result = await chat_service.process_message(
             user_id=request.user_id,
             message=request.message,
-            model=request.model,
-            parameters=request.parameters.dict() if request.parameters else {}
+        )
+        
+        # Calculate response time
+        response_time_ms = (time.time() - start_time) * 1000
+        
+        # # Store the conversation in the database
+        await conversation_service.store_conversation(
+            session_id=request.session_id,
+            user_email=request.user_email,
+            user_id=request.user_id,
+            user_question=request.message,
+            system_response=result["answer"],
+            query_analysis=result["query_analysis"],
+            response_parameters=result["response_parameters"],
+            response_time_ms=response_time_ms
         )
         
         # Get conversation history

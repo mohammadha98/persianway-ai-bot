@@ -20,20 +20,18 @@ class ChatRequest(BaseModel):
     This defines the expected input format for the chat API.
     """
     user_id: str = Field(..., description="Unique identifier for the user session")
+    session_id: Optional[str] = Field(None, description="Session identifier for conversation continuity")
+    user_email: Optional[str] = Field(None, description="Email address of the user")
     message: str = Field(..., description="The message from the user")
-    model: Optional[str] = Field(None, description="The model to use for the response, overriding the default.")
-    parameters: Optional[RequestParameters] = Field(None, description="Parameters to override model settings.")
-    
+   
     class Config:
         schema_extra = {
             "example": {
                 "user_id": "user123",
+                "session_id": "session_abc123",
+                "user_email": "user@example.com",
                 "message": "Hello, how can you help me today?",
-                "model": "openai/gpt-4.1",
-                "parameters": {
-                    "temperature": 0.5,
-                    "max_tokens": 1024
-                }
+            
             }
         }
 

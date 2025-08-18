@@ -27,8 +27,8 @@ html, body {
 body {
   background-color: #fafafa;
   color: #333;
-  line-height: 1.7;
-  font-size: 16px;
+  line-height: 1.6;
+  font-size: 14px;
   letter-spacing: 0.02em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -157,27 +157,27 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 h1 {
-  font-size: 2.5rem;
+  font-size: 2rem;
   font-weight: 700;
 }
 
 h2 {
-  font-size: 2rem;
-  font-weight: 600;
-}
-
-h3 {
   font-size: 1.75rem;
   font-weight: 600;
 }
 
-h4 {
+h3 {
   font-size: 1.5rem;
+  font-weight: 600;
+}
+
+h4 {
+  font-size: 1.25rem;
   font-weight: 500;
 }
 
 h5 {
-  font-size: 1.25rem;
+  font-size: 1.125rem;
   font-weight: 500;
 }
 
@@ -318,32 +318,8 @@ mat-card-content,
 // Responsive typography
 @media (max-width: 768px) {
   body {
-    font-size: 15px;
-    line-height: 1.6;
-  }
-  
-  h1 {
-    font-size: 2rem;
-  }
-  
-  h2 {
-    font-size: 1.75rem;
-  }
-  
-  h3 {
-    font-size: 1.5rem;
-  }
-  
-  h4 {
-    font-size: 1.25rem;
-  }
-}
-
-@media (max-width: 480px) {
-  body {
-    font-size: 14px;
-    line-height: 1.6;
-    letter-spacing: 0.01em;
+    font-size: 13px;
+    line-height: 1.5;
   }
   
   h1 {
@@ -361,8 +337,32 @@ mat-card-content,
   h4 {
     font-size: 1.125rem;
   }
+}
+
+@media (max-width: 480px) {
+  body {
+    font-size: 12px;
+    line-height: 1.5;
+    letter-spacing: 0.01em;
+  }
+  
+  h1 {
+    font-size: 1.5rem;
+  }
+  
+  h2 {
+    font-size: 1.25rem;
+  }
+  
+  h3 {
+    font-size: 1.125rem;
+  }
+  
+  h4 {
+    font-size: 1rem;
+  }
   
   .mat-button, .mat-raised-button {
-    font-size: 14px !important;
+    font-size: 12px !important;
   }
 }

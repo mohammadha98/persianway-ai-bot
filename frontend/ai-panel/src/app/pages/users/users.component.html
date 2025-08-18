@@ -10,221 +10,194 @@
         <p class="page-subtitle">مدیریت و نظارت بر کاربران سیستم</p>
       </div>
       <div class="header-actions">
-        <button mat-raised-button color="primary" (click)="openCreateUserDialog()" class="create-btn">
+        <button mat-flat-button color="primary" (click)="openCreateUserDialog()" class="create-btn">
           <mat-icon>person_add</mat-icon>
-          افزودن کاربر جدید
+          افزودن کاربر
         </button>
       </div>
     </div>
   </div>
 
   <!-- Filters Section -->
-  <mat-card class="filters-card">
-    <mat-card-header>
-      <mat-card-title>
-        <mat-icon>filter_list</mat-icon>
-        فیلترها و جستجو
-      </mat-card-title>
-    </mat-card-header>
-    <mat-card-content>
-      <div class="filters-grid">
-        <!-- Search Field -->
-        <mat-form-field appearance="outline" class="search-field">
-          <mat-label>جستجو در کاربران</mat-label>
-          <input matInput 
-                 [value]="searchTerm" 
-                 (input)="onSearchChange('')" 
-                 placeholder="نام، ایمیل، نام کاربری...">
-          <mat-icon matSuffix>search</mat-icon>
-        </mat-form-field>
+  <div class="filters-section">
+    <div class="filters-grid">
+      <!-- Search Field -->
+      <mat-form-field appearance="outline" class="search-field">
+        <mat-label>جستجو در کاربران</mat-label>
+        <input matInput 
+               [value]="searchTerm" 
+               (input)="onSearchChange('')" 
+               placeholder="نام، ایمیل، نام کاربری...">
+        <mat-icon matSuffix>search</mat-icon>
+      </mat-form-field>
 
-        <!-- Role Filter -->
-        <mat-form-field appearance="outline">
-          <mat-label>نقش</mat-label>
-          <mat-select [(value)]="selectedRole" (selectionChange)="onFilterChange()">
-            <mat-option *ngFor="let role of roleOptions" [value]="role.value">
-              {{role.label}}
-            </mat-option>
-          </mat-select>
-          <mat-icon matSuffix>badge</mat-icon>
-        </mat-form-field>
+      <!-- Role Filter -->
+      <mat-form-field appearance="outline">
+        <mat-label>نقش</mat-label>
+        <mat-select [(value)]="selectedRole" (selectionChange)="onFilterChange()">
+          <mat-option *ngFor="let role of roleOptions" [value]="role.value">
+            {{role.label}}
+          </mat-option>
+        </mat-select>
+        <mat-icon matSuffix>badge</mat-icon>
+      </mat-form-field>
 
-        <!-- Status Filter -->
-        <mat-form-field appearance="outline">
-          <mat-label>وضعیت</mat-label>
-          <mat-select [(value)]="selectedStatus" (selectionChange)="onFilterChange()">
-            <mat-option *ngFor="let status of statusOptions" [value]="status.value">
-              {{status.label}}
-            </mat-option>
-          </mat-select>
-          <mat-icon matSuffix>toggle_on</mat-icon>
-        </mat-form-field>
+      <!-- Status Filter -->
+      <mat-form-field appearance="outline">
+        <mat-label>وضعیت</mat-label>
+        <mat-select [(value)]="selectedStatus" (selectionChange)="onFilterChange()">
+          <mat-option *ngFor="let status of statusOptions" [value]="status.value">
+            {{status.label}}
+          </mat-option>
+        </mat-select>
+        <mat-icon matSuffix>toggle_on</mat-icon>
+      </mat-form-field>
 
-        <!-- Department Filter -->
-        <mat-form-field appearance="outline">
-          <mat-label>بخش</mat-label>
-          <mat-select [(value)]="selectedDepartment" (selectionChange)="onFilterChange()">
-            <mat-option *ngFor="let dept of departmentOptions" [value]="dept.value">
-              {{dept.label}}
-            </mat-option>
-          </mat-select>
-          <mat-icon matSuffix>business</mat-icon>
-        </mat-form-field>
+      <!-- Clear Filters Button -->
+      <button mat-stroked-button (click)="clearFilters()" class="clear-filters-btn">
+        <mat-icon>clear</mat-icon>
+        پاک کردن
+      </button>
+    </div>
+  </div>
 
-        <!-- Clear Filters Button -->
-        <button mat-stroked-button (click)="clearFilters()" class="clear-filters-btn">
-          <mat-icon>clear_all</mat-icon>
+  <!-- Users Table Section -->
+  <div class="table-section">
+    <div class="table-header">
+      <h2 class="table-title">
+        <span>لیست کاربران</span>
+        <span class="users-count" *ngIf="!loading">({{totalUsers}} کاربر)</span>
+      </h2>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div *ngIf="loading" class="loading-container">
+      <mat-spinner diameter="40"></mat-spinner>
+      <p>در حال بارگذاری...</p>
+    </div>
+
+    <!-- Users Table -->
+    <div *ngIf="!loading" class="table-container">
+      <table mat-table [dataSource]="users" class="users-table">
+        <!-- Avatar Column -->
+        <ng-container matColumnDef="avatar">
+          <th mat-header-cell *matHeaderCellDef>تصویر</th>
+          <td mat-cell *matCellDef="let user">
+            <div class="user-avatar">
+              <div class="avatar-circle" [style.background-color]="getRoleColor(user.role)">
+                {{getInitials(user.full_name)}}
+              </div>
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Name Column -->
+        <ng-container matColumnDef="name">
+          <th mat-header-cell *matHeaderCellDef>نام و نام کاربری</th>
+          <td mat-cell *matCellDef="let user">
+            <div class="user-name-cell">
+              <div class="name">{{user.full_name}}</div>
+              <div class="username">{{user.username}}</div>
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Email Column -->
+        <ng-container matColumnDef="email">
+          <th mat-header-cell *matHeaderCellDef>ایمیل</th>
+          <td mat-cell *matCellDef="let user">
+            <div class="email-cell" dir="ltr">{{user.email}}</div>
+          </td>
+        </ng-container>
+
+        <!-- Role Column -->
+        <ng-container matColumnDef="role">
+          <th mat-header-cell *matHeaderCellDef>نقش</th>
+          <td mat-cell *matCellDef="let user">
+            <div class="role-chip" [ngClass]="getRoleColor(user.role)">
+              {{getRoleLabel(user.role)}}
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Status Column -->
+        <ng-container matColumnDef="status">
+          <th mat-header-cell *matHeaderCellDef>وضعیت</th>
+          <td mat-cell *matCellDef="let user">
+            <div class="status-indicator" [ngClass]="{active: user.is_active, inactive: !user.is_active}">
+              <span class="status-dot"></span>
+              <span class="status-text">{{getStatusLabel(user.is_active)}}</span>
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Last Login Column -->
+        <ng-container matColumnDef="lastLogin">
+          <th mat-header-cell *matHeaderCellDef>آخرین ورود</th>
+          <td mat-cell *matCellDef="let user">
+            <div class="date-cell">
+              {{formatDate(user.last_login)}}
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Actions Column -->
+        <ng-container matColumnDef="actions">
+          <th mat-header-cell *matHeaderCellDef>عملیات</th>
+          <td mat-cell *matCellDef="let user">
+            <div class="actions-cell">
+              <button mat-icon-button 
+                      (click)="openEditUserDialog(user)" 
+                      matTooltip="ویرایش کاربر">
+                <mat-icon>edit</mat-icon>
+              </button>
+              
+              <button mat-icon-button 
+                      (click)="openPermissionsDialog(user)" 
+                      matTooltip="تنظیم دسترسی‌ها">
+                <mat-icon>security</mat-icon>
+              </button>
+              
+              <button mat-icon-button 
+                      (click)="toggleUserStatus(user)" 
+                      [matTooltip]="user.is_active ? 'غیرفعال کردن' : 'فعال کردن'">
+                <mat-icon>{{user.is_active ? 'block' : 'check_circle'}}</mat-icon>
+              </button>
+              
+              <button mat-icon-button 
+                      (click)="deleteUser(user)" 
+                      matTooltip="حذف کاربر"
+                      [disabled]="user.role === 'admin'">
+                <mat-icon>delete</mat-icon>
+              </button>
+            </div>
+          </td>
+        </ng-container>
+
+        <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+        <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+      </table>
+
+      <!-- No Data Message -->
+      <div *ngIf="users && users.length === 0" class="no-data">
+        <mat-icon>people_outline</mat-icon>
+        <h3>کاربری یافت نشد</h3>
+        <p>با فیلترهای انتخابی هیچ کاربری پیدا نشد.</p>
+        <button mat-flat-button color="primary" (click)="clearFilters()">
           پاک کردن فیلترها
         </button>
       </div>
-    </mat-card-content>
-  </mat-card>
+    </div>
 
-  <!-- Users Table -->
-  <mat-card class="table-card">
-    <mat-card-header>
-      <mat-card-title>
-        <mat-icon>list</mat-icon>
-        لیست کاربران
-        <span class="users-count" *ngIf="!loading">({{totalUsers}} کاربر)</span>
-      </mat-card-title>
-    </mat-card-header>
-    <mat-card-content>
-      <!-- Loading Spinner -->
-      <div *ngIf="loading" class="loading-container">
-        <mat-spinner diameter="50"></mat-spinner>
-        <p>در حال بارگذاری کاربران...</p>
-      </div>
-
-      <!-- Users Table -->
-      <div *ngIf="!loading" class="table-container">
-        <table mat-table [dataSource]="users" class="users-table">
-          <!-- Avatar Column -->
-          <ng-container matColumnDef="avatar">
-            <th mat-header-cell *matHeaderCellDef>تصویر</th>
-            <td mat-cell *matCellDef="let user">
-              <div class="user-avatar">
-                <div class="avatar-circle" [style.background-color]="getRoleColor(user.role)">
-                  {{getInitials(user.firstName, user.lastName)}}
-                </div>
-              </div>
-            </td>
-          </ng-container>
-
-          <!-- Name Column -->
-          <ng-container matColumnDef="name">
-            <th mat-header-cell *matHeaderCellDef>نام و نام خانوادگی</th>
-            <td mat-cell *matCellDef="let user">
-              <div class="user-name-cell">
-                <div class="name">{{user.firstName}} {{user.lastName}}</div>
-                <div class="username">{{user.username}}</div>
-              </div>
-            </td>
-          </ng-container>
-
-          <!-- Email Column -->
-          <ng-container matColumnDef="email">
-            <th mat-header-cell *matHeaderCellDef>ایمیل</th>
-            <td mat-cell *matCellDef="let user">
-              <div class="email-cell" dir="ltr">{{user.email}}</div>
-            </td>
-          </ng-container>
-
-          <!-- Role Column -->
-          <ng-container matColumnDef="role">
-            <th mat-header-cell *matHeaderCellDef>نقش</th>
-            <td mat-cell *matCellDef="let user">
-              <mat-chip [color]="getRoleColor(user.role)" selected>
-                {{getRoleLabel(user.role)}}
-              </mat-chip>
-            </td>
-          </ng-container>
-
-          <!-- Department Column -->
-          <ng-container matColumnDef="department">
-            <th mat-header-cell *matHeaderCellDef>بخش</th>
-            <td mat-cell *matCellDef="let user">
-              <span class="department-cell">{{user.department || '-'}}</span>
-            </td>
-          </ng-container>
-
-          <!-- Status Column -->
-          <ng-container matColumnDef="status">
-            <th mat-header-cell *matHeaderCellDef>وضعیت</th>
-            <td mat-cell *matCellDef="let user">
-              <mat-chip [color]="getStatusColor(user.isActive)" selected>
-                <mat-icon>{{user.isActive ? 'check_circle' : 'cancel'}}</mat-icon>
-                {{getStatusLabel(user.isActive)}}
-              </mat-chip>
-            </td>
-          </ng-container>
-
-          <!-- Last Login Column -->
-          <ng-container matColumnDef="lastLogin">
-            <th mat-header-cell *matHeaderCellDef>آخرین ورود</th>
-            <td mat-cell *matCellDef="let user">
-              <div class="date-cell">
-                <mat-icon class="date-icon">schedule</mat-icon>
-                {{formatDate(user.lastLogin)}}
-              </div>
-            </td>
-          </ng-container>
-
-          <!-- Actions Column -->
-          <ng-container matColumnDef="actions">
-            <th mat-header-cell *matHeaderCellDef>عملیات</th>
-            <td mat-cell *matCellDef="let user">
-              <div class="actions-cell">
-                <button mat-icon-button 
-                        (click)="openEditUserDialog(user)" 
-                        matTooltip="ویرایش کاربر"
-                        color="primary">
-                  <mat-icon>edit</mat-icon>
-                </button>
-                
-                <button mat-icon-button 
-                        (click)="toggleUserStatus(user)" 
-                        [matTooltip]="user.isActive ? 'غیرفعال کردن' : 'فعال کردن'"
-                        [color]="user.isActive ? 'warn' : 'primary'">
-                  <mat-icon>{{user.isActive ? 'block' : 'check_circle'}}</mat-icon>
-                </button>
-                
-                <button mat-icon-button 
-                        (click)="deleteUser(user)" 
-                        matTooltip="حذف کاربر"
-                        color="warn"
-                        [disabled]="user.role === 'admin'">
-                  <mat-icon>delete</mat-icon>
-                </button>
-              </div>
-            </td>
-          </ng-container>
-
-          <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-          <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
-        </table>
-
-        <!-- No Data Message -->
-        <div *ngIf="users.length === 0" class="no-data">
-          <mat-icon>people_outline</mat-icon>
-          <h3>کاربری یافت نشد</h3>
-          <p>با فیلترهای انتخابی هیچ کاربری پیدا نشد.</p>
-          <button mat-raised-button color="primary" (click)="clearFilters()">
-            پاک کردن فیلترها
-          </button>
-        </div>
-      </div>
-
-      <!-- Pagination -->
-      <mat-paginator *ngIf="!loading && users.length > 0"
-                     [length]="totalUsers"
-                     [pageSize]="pageSize"
-                     [pageIndex]="currentPage - 1"
-                     [pageSizeOptions]="[5, 10, 25, 50]"
-                     (page)="onPageChange($event)"
-                     showFirstLastButtons
-                     class="users-paginator">
-      </mat-paginator>
-    </mat-card-content>
-  </mat-card>
+    <!-- Pagination -->
+    <mat-paginator *ngIf="!loading && users && users.length > 0"
+                   [length]="totalUsers"
+                   [pageSize]="pageSize"
+                   [pageIndex]="currentPage - 1"
+                   [pageSizeOptions]="[5, 10, 25, 50]"
+                   (page)="onPageChange($event)"
+                   showFirstLastButtons
+                   class="users-paginator">
+    </mat-paginator>
+  </div>
 </div>

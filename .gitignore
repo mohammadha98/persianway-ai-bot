@@ -70,3 +70,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+
+
+RAG_Product_Analysis.txt

@@ -30,7 +30,23 @@ def mock_chat_service():
         yield mock_service
 
 
-def test_create_chat(mock_chat_service):
+@pytest.fixture
+def mock_conversation_service():
+    """Mock the conversation service for testing."""
+    with patch("app.api.routes.chat.get_conversation_service") as mock_get_service:
+        # Create a mock service
+        mock_service = MagicMock()
+        
+        # Configure the mock to return a predefined response
+        mock_service.store_conversation.return_value = "test_conversation_id"
+        
+        # Configure the get_conversation_service function to return our mock
+        mock_get_service.return_value = mock_service
+        
+        yield mock_service
+
+
+def test_create_chat(mock_chat_service, mock_conversation_service):
     """Test the chat endpoint."""
     # Test data
     test_request = {
@@ -54,9 +70,12 @@ def test_create_chat(mock_chat_service):
         message="Test message"
     )
     mock_chat_service.get_conversation_history.assert_called_once_with("test_user")
+    
+    # Verify the conversation service was called
+    mock_conversation_service.store_conversation.assert_called_once()
 
 
-def test_chat_error_handling(mock_chat_service):
+def test_chat_error_handling(mock_chat_service, mock_conversation_service):
     """Test error handling in the chat endpoint."""
     # Configure the mock to raise an exception
     mock_chat_service.process_message.side_effect = Exception("Test error")
@@ -75,3 +94,6 @@ def test_chat_error_handling(mock_chat_service):
     data = response.json()
     assert "detail" in data
     assert "Test error" in data["detail"]
+    
+    # Verify the conversation service was not called due to the error
+    mock_conversation_service.store_conversation.assert_not_called()

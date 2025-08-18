@@ -131,16 +131,7 @@
         </div>
       </mat-card-content>
       
-      <mat-card-actions>
-        <button mat-raised-button color="accent" 
-                (click)="uploadFile()"
-                [disabled]="!selectedFile || isSubmitting"
-                class="upload-button">
-          <mat-spinner *ngIf="isSubmitting" diameter="20" class="button-spinner"></mat-spinner>
-          <mat-icon *ngIf="!isSubmitting">upload</mat-icon>
-          {{ isSubmitting ? 'در حال آپلود...' : 'آپلود فایل' }}
-        </button>
-      </mat-card-actions>
+  
     </mat-card>
   </div>
 

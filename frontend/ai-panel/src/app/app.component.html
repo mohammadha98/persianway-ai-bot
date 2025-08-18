@@ -12,35 +12,39 @@
           <mat-icon>home</mat-icon>
           خانه
         </a>
-        <a mat-button routerLink="/chat" routerLinkActive="active">
+        <a mat-button routerLink="/chat" routerLinkActive="active" *ngIf="hasPermission(PermissionType.Chat)">
           <mat-icon>chat</mat-icon>
           گفتگو
         </a>
-        <a mat-button routerLink="/contribute" routerLinkActive="active">
+        <a mat-button routerLink="/contribute" routerLinkActive="active" *ngIf="hasPermission(PermissionType.Contribute)">
           <mat-icon>add_circle</mat-icon>
           مشارکت
         </a>
-        <a mat-button routerLink="/settings" routerLinkActive="active">
+        <a mat-button routerLink="/settings" routerLinkActive="active" *ngIf="hasPermission(PermissionType.Settings)">
           <mat-icon>settings</mat-icon>
           تنظیمات
         </a>
-        <a mat-button routerLink="/knowledge" routerLinkActive="active">
+        <a mat-button routerLink="/knowledge" routerLinkActive="active" *ngIf="hasPermission(PermissionType.Guide)">
           <mat-icon>school</mat-icon>
           راهنما
         </a>
-        <a mat-button routerLink="/llm-settings" routerLinkActive="active" *ngIf="hasRole('admin')">
+        <a mat-button routerLink="/conversation-search" routerLinkActive="active" *ngIf="hasPermission(PermissionType.Conversations)">
+          <mat-icon>search</mat-icon>
+         مکالمات
+        </a>
+        <a mat-button routerLink="/llm-settings" routerLinkActive="active" *ngIf="hasPermission(PermissionType.LLM)">
           <mat-icon>psychology</mat-icon>
           LLM
         </a>
-        <a mat-button routerLink="/rag-settings" routerLinkActive="active" *ngIf="hasRole('admin')">
+        <a mat-button routerLink="/rag-settings" routerLinkActive="active" *ngIf="hasPermission(PermissionType.RAG)">
           <mat-icon>storage</mat-icon>
           RAG
         </a>
-           <a mat-button routerLink="/users" routerLinkActive="active" *ngIf="hasRole('admin')">
+        <a mat-button routerLink="/users" routerLinkActive="active" *ngIf="hasRole('admin')">
           <mat-icon>people</mat-icon>
           کاربران
         </a>
-        <a mat-button href="/docs" target="_blank" routerLinkActive="active" *ngIf="hasRole('admin')">
+        <a mat-button href="/docs" target="_blank" routerLinkActive="active" *ngIf="hasPermission(PermissionType.Docs)">
           <mat-icon>description</mat-icon>
           مستندات
         </a>
@@ -82,10 +86,5 @@
     <router-outlet></router-outlet>
   </main>
 
-  <!-- Footer -->
-  <footer class="app-footer">
-    <div class="footer-content">
-      <p>&copy; 2025 Persianway AI - سیستم هوش مصنوعی  </p>
-    </div>
-  </footer>
+
 </div>

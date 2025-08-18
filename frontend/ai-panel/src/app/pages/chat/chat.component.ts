@@ -10,8 +10,12 @@ import { MatExpansionModule } from '@angular/material/expansion';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatBadgeModule } from '@angular/material/badge';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatSidenavModule } from '@angular/material/sidenav';
+import { MatListModule } from '@angular/material/list';
+import { MatDividerModule } from '@angular/material/divider';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
-import { ChatService, EnhancedChatResponse, QueryAnalysis, ResponseParameters } from '../../services/chat.service';
+import { ChatService, EnhancedChatResponse, QueryAnalysis, ResponseParameters, ConversationResponse, ConversationListResponse } from '../../services/chat.service';
 
 interface Message {
   id: string;
@@ -37,7 +41,11 @@ interface Message {
     MatExpansionModule,
     MatChipsModule,
     MatBadgeModule,
-    MatProgressBarModule
+    MatProgressBarModule,
+    MatSidenavModule,
+    MatListModule,
+    MatDividerModule,
+    MatTooltipModule
   ],
   templateUrl: './chat.component.html',
   styleUrl: './chat.component.scss'
@@ -49,13 +57,25 @@ export class ChatComponent implements OnInit, AfterViewChecked {
   messages: Message[] = [];
   currentMessage = '';
   isLoading = false;
-  userId = 'user_' + Math.random().toString(36).substr(2, 9);
+  userId = '';
   showAnalysisDetails = false;
+  
+  // Conversation history properties
+  conversationHistory: ConversationResponse[] = [];
+  showConversationHistory = true;
+  isLoadingHistory = false;
 
   constructor(private chatService: ChatService) {}
 
   ngOnInit() {
-  
+    // Initialize userId from user data
+    const user = this.chatService.getUserFromStorage();
+    if (user?.email) {
+      this.userId = this.chatService.generateUserIdFromEmail(user.email);
+    } else {
+      this.userId = 'anonymous_' + Math.random().toString(36).substr(2, 9);
+    }
+    this.loadConversationHistory();
   }
 
   ngAfterViewChecked() {
@@ -92,8 +112,9 @@ export class ChatComponent implements OnInit, AfterViewChecked {
     this.currentMessage = '';
     this.isLoading = true;
 
-    // Send to API using enhanced chat service
-    this.chatService.sendChatMessage({ user_id: this.userId, message: messageContent })
+    // Send to API using enhanced chat service with all required parameters
+    const chatRequest = this.chatService.prepareChatRequest(messageContent);
+    this.chatService.sendChatMessage(chatRequest)
       .subscribe({
         next: (response: EnhancedChatResponse) => {
           this.isLoading = false;
@@ -111,6 +132,9 @@ export class ChatComponent implements OnInit, AfterViewChecked {
           
           // Use immutable update pattern for better change detection
           this.messages = [...this.messages, aiMessage];
+          
+          // Refresh conversation history to include the new conversation
+          this.loadConversationHistory();
           
           // Ensure UI updates by triggering change detection
           setTimeout(() => this.scrollToBottom(), 0);
@@ -145,12 +169,140 @@ export class ChatComponent implements OnInit, AfterViewChecked {
   clearChat() {
     this.messages = [];
     this.currentMessage = '';
-    this.userId = 'user_' + Math.random().toString(36).substr(2, 9);
- 
+    
+    // Reset session for new conversation
+    this.chatService.resetSession();
+    
+    // Reinitialize userId from user data
+    const user = this.chatService.getUserFromStorage();
+    if (user?.email) {
+      this.userId = this.chatService.generateUserIdFromEmail(user.email);
+    } else {
+      this.userId = 'anonymous_' + Math.random().toString(36).substr(2, 9);
+    }
   }
 
   toggleAnalysisDetails() {
     this.showAnalysisDetails = !this.showAnalysisDetails;
+  }
+
+  // Conversation history is now permanently visible
+  // No toggle functionality needed
+
+  loadConversationHistory() {
+    this.isLoadingHistory = true;
+    const user = this.chatService.getUserFromStorage();
+    debugger
+    if (user?.email) {
+      // Use the new API endpoint to get conversations by email
+      this.chatService.getConversationsByEmail(user.email, 20, 0)
+        .subscribe({
+          next: (response) => {
+            this.conversationHistory = response.conversations;
+            console.log(...this.conversationHistory)
+            this.isLoadingHistory = false;
+          },
+          error: (error) => {
+            console.error('Failed to load conversation history:', error);
+            this.isLoadingHistory = false;
+          }
+        });
+    } else {
+      // Fallback: no email available, clear history
+      this.conversationHistory = [];
+      this.isLoadingHistory = false;
+    }
+  }
+
+  loadConversation(conversation: ConversationResponse) {
+    // Clear current messages
+    this.messages = [];
+    
+    // Add the selected conversation to messages
+    const userMessage: Message = {
+      id: this.generateId(),
+      content: conversation.question || '',
+      isUser: true,
+      timestamp: new Date(conversation.timestamp || Date.now())
+    };
+    
+    const assistantMessage: Message = {
+      id: this.generateId(),
+      content: conversation.response || '',
+      isUser: false,
+      timestamp: new Date(conversation.timestamp || Date.now()),
+      queryAnalysis: conversation.query_analysis,
+      responseParameters: conversation.response_parameters
+    };
+    
+    this.messages = [userMessage, assistantMessage];
+    this.showConversationHistory = false;
+  }
+
+  loadConversationsBySessionId(sessionId: string) {
+    this.isLoadingHistory = true;
+    this.chatService.getConversationsBySessionId(sessionId)
+      .subscribe({
+        next: (conversations) => {
+          // Load all conversations from this session into messages
+          this.messages = [];
+          conversations.forEach(conversation => {
+            // Process each message in the conversation
+            conversation.messages?.forEach(msg => {
+              const message: Message = {
+                id: this.generateId(),
+                content: msg.content || '',
+                isUser: msg.role === 'user',
+                timestamp: new Date(msg.timestamp || Date.now()),
+                queryAnalysis: msg.role === 'assistant' ? {
+                  confidence_score: msg.confidence_score || 0,
+                  knowledge_source: msg.knowledge_source || 'unknown',
+                  requires_human_referral: msg.requires_human_referral || false,
+                  reasoning: ''
+                } : undefined,
+                responseParameters: msg.role === 'assistant' ? {
+                  model: 'default',
+                  temperature: 0.7,
+                  max_tokens: 1000,
+                  top_p: 1
+                } : undefined
+              };
+              
+              this.messages.push(message);
+            });
+          });
+          this.isLoadingHistory = false;
+          this.showConversationHistory = false;
+        },
+        error: (error) => {
+          console.error('Failed to load conversations by session ID:', error);
+          this.isLoadingHistory = false;
+        }
+      });
+  }
+
+  formatConversationDate(timestamp: string): string {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 1) {
+      return 'امروز';
+    } else if (diffDays === 2) {
+      return 'دیروز';
+    } else if (diffDays <= 7) {
+      return `${diffDays} روز پیش`;
+    } else {
+      return date.toLocaleDateString('fa-IR');
+    }
+  }
+
+  truncateText(text: string, maxLength: number = 50): string {
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return text.substring(0, maxLength) + '...';
   }
 
   getConfidenceColor(score: number): string {

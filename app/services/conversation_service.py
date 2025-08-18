@@ -41,9 +41,12 @@ class ConversationService:
         session_id: Optional[str] = None,
         user_agent: Optional[str] = None,
         ip_address: Optional[str] = None,
-        response_time_ms: Optional[float] = None
+        response_time_ms: Optional[float] = None,
+        user_email: Optional[str] = None
     ) -> str:
-        """Store a conversation in the database using the new embedded message structure.
+        """Store or update a conversation in the database using the new embedded message structure.
+        If a conversation with the same session_id already exists, it will be updated with the new messages.
+        Otherwise, a new conversation will be created.
         
         Args:
             user_id: Unique identifier for the user
@@ -52,13 +55,14 @@ class ConversationService:
             query_analysis: Analysis data from the chat service
             response_parameters: Parameters used for the response
             sources_used: List of sources used in RAG response
-            session_id: Session identifier if applicable
+            session_id: Session identifier if applicable. Used to check for existing conversations.
             user_agent: User agent information
             ip_address: User IP address (should be hashed for privacy)
             response_time_ms: Response time in milliseconds
+            user_email: Email address of the user
             
         Returns:
-            The ID of the stored conversation
+            The ID of the stored or updated conversation
         """
         try:
             collection = await self._get_collection()
@@ -86,24 +90,70 @@ class ConversationService:
                 response_time_ms=response_time_ms
             )
             
-            # Create conversation document with embedded messages
-            conversation = ConversationDocument(
-                user_id=user_id,
-                messages=[user_message, assistant_message],
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-                session_id=session_id,
-                user_agent=user_agent,
-                ip_address=ip_address,
-                total_messages=2,
-                is_active=True
-            )
+            # Check if a conversation with the same session_id already exists
+            existing_conversation = None
+            if session_id:
+                logger.info(f"Looking for existing conversation with session_id: {session_id}")
+                existing_conversation = await collection.find_one({"session_id": session_id})
+                logger.info(f"Found existing conversation: {existing_conversation is not None}")
+                if existing_conversation:
+                    logger.info(f"Existing conversation ID: {existing_conversation['_id']}")
             
-            # Insert into database
-            result = await collection.insert_one(conversation.dict(by_alias=True, exclude={"id"}))
-            
-            logger.info(f"Stored conversation for user {user_id} with ID {result.inserted_id}")
-            return str(result.inserted_id)
+            if existing_conversation:
+                # Update existing conversation
+                existing_messages = existing_conversation.get("messages", [])
+                # Ensure proper serialization of the message documents
+                new_messages = existing_messages + [user_message.dict(by_alias=True), assistant_message.dict(by_alias=True)]
+                total_messages = len(new_messages)
+                
+                # Prepare update data
+                update_data = {
+                    "messages": new_messages,
+                    "updated_at": datetime.utcnow(),
+                    "total_messages": total_messages,
+                    "is_active": True
+                }
+                
+                # Update user_email if it's provided but was previously null
+                if user_email and not existing_conversation.get("user_email"):
+                    update_data["user_email"] = user_email
+                
+                # Update the conversation
+                update_result = await collection.update_one(
+                    {"_id": existing_conversation["_id"]},
+                    {"$set": update_data}
+                )
+                
+                logger.info(f"Updated existing conversation for user {user_id} with ID {existing_conversation['_id']}")
+                return str(existing_conversation["_id"])
+            else:
+                # Create new conversation document with embedded messages
+                logger.info(f"Creating new conversation for session_id: {session_id}")
+                
+                # Generate conversation title using ChatService
+                from app.services.chat_service import ChatService
+                chat_service = ChatService()
+                generated_title = await chat_service.generate_conversation_title(user_message.content)
+                
+                conversation = ConversationDocument(
+                    user_id=user_id,
+                    user_email=user_email,
+                    title=generated_title,
+                    messages=[user_message, assistant_message],
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                    session_id=session_id,
+                    user_agent=user_agent,
+                    ip_address=ip_address,
+                    total_messages=2,
+                    is_active=True
+                )
+                
+                # Insert into database
+                result = await collection.insert_one(conversation.dict(by_alias=True, exclude={"id"}))
+                
+                logger.info(f"Stored new conversation for user {user_id} with ID {result.inserted_id}")
+                return str(result.inserted_id)
             
         except Exception as e:
             logger.error(f"Failed to store conversation: {str(e)}")
@@ -157,6 +207,8 @@ class ConversationService:
                 conversations.append(ConversationResponse(
                     id=str(conv["_id"]),
                     user_id=conv["user_id"],
+                    user_email=conv.get("user_email"),
+                    session_id=conv.get("session_id"),
                     title=conv.get("title"),
                     messages=message_responses,
                     created_at=conv["created_at"],
@@ -226,6 +278,8 @@ class ConversationService:
                 conversations.append(ConversationResponse(
                     id=str(conv["_id"]),
                     user_id=conv["user_id"],
+                    user_email=conv.get("user_email"),
+                    session_id=conv.get("session_id"),
                     title=conv.get("title"),
                     messages=message_responses,
                     created_at=conv["created_at"],
@@ -315,6 +369,8 @@ class ConversationService:
                 conversations.append(ConversationResponse(
                     id=str(conv["_id"]),
                     user_id=conv["user_id"],
+                    user_email=conv.get("user_email"),
+                    session_id=conv.get("session_id"),
                     title=conv.get("title"),
                     messages=message_responses,
                     created_at=conv["created_at"],
@@ -344,6 +400,138 @@ class ConversationService:
                 page_size=search_request.limit,
                 has_next=False
             )
+    
+    async def get_conversations_by_email(
+        self,
+        user_email: str,
+        limit: int = 50,
+        skip: int = 0
+    ) -> ConversationListResponse:
+        """Get all conversations for a specific user email.
+        
+        Args:
+            user_email: The user email to filter by
+            limit: Maximum number of conversations to return
+            skip: Number of conversations to skip for pagination
+            
+        Returns:
+            A list of conversations for the user email
+        """
+        try:
+            collection = await self._get_collection()
+            
+            # Build query
+            query = {"user_email": user_email}
+            
+            # Get total count
+            total_count = await collection.count_documents(query)
+            
+            # Get conversations with pagination, sorted by updated_at (newest first)
+            cursor = collection.find(query).sort("updated_at", DESCENDING).skip(skip).limit(limit)
+            conversations_data = await cursor.to_list(length=limit)
+            
+            # Convert to response format
+            conversations = []
+            for conv in conversations_data:
+                # Convert messages to MessageResponse format
+                message_responses = []
+                for msg in conv.get("messages", []):
+                    message_responses.append({
+                        "role": msg["role"],
+                        "content": msg["content"],
+                        "timestamp": msg["timestamp"],
+                        "confidence_score": msg.get("confidence_score"),
+                        "knowledge_source": msg.get("knowledge_source"),
+                        "requires_human_referral": msg.get("requires_human_referral")
+                    })
+                
+                conversations.append(ConversationResponse(
+                    id=str(conv["_id"]),
+                    user_id=conv["user_id"],
+                    user_email=conv.get("user_email"),
+                    session_id=conv.get("session_id"),
+                    title=conv.get("title"),
+                    messages=message_responses,
+                    created_at=conv["created_at"],
+                    updated_at=conv["updated_at"],
+                    total_messages=conv.get("total_messages", len(conv.get("messages", []))),
+                    is_active=conv.get("is_active", True)
+                ))
+            
+            # Calculate pagination info
+            page = (skip // limit) + 1
+            has_next = (skip + limit) < total_count
+            
+            return ConversationListResponse(
+                conversations=conversations,
+                total_count=total_count,
+                page=page,
+                page_size=limit,
+                has_next=has_next
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to get conversations by email: {str(e)}")
+            return ConversationListResponse(
+                conversations=[],
+                total_count=0,
+                page=1,
+                page_size=limit,
+                has_next=False
+            )
+    
+    async def get_conversations_by_session_id(
+        self,
+        session_id: str
+    ) -> List[ConversationResponse]:
+        """Get conversations for a specific session ID.
+        
+        Args:
+            session_id: The session ID to filter by
+            
+        Returns:
+            A list of conversations for the session ID
+        """
+        try:
+            collection = await self._get_collection()
+            
+            # Get conversations with the specified session_id
+            cursor = collection.find({"session_id": session_id}).sort("updated_at", DESCENDING)
+            conversations_data = await cursor.to_list(length=None)
+            
+            # Convert to response format
+            conversations = []
+            for conv in conversations_data:
+                # Convert messages to MessageResponse format
+                message_responses = []
+                for msg in conv.get("messages", []):
+                    message_responses.append({
+                        "role": msg["role"],
+                        "content": msg["content"],
+                        "timestamp": msg["timestamp"],
+                        "confidence_score": msg.get("confidence_score"),
+                        "knowledge_source": msg.get("knowledge_source"),
+                        "requires_human_referral": msg.get("requires_human_referral")
+                    })
+                
+                conversations.append(ConversationResponse(
+                    id=str(conv["_id"]),
+                    user_id=conv["user_id"],
+                    user_email=conv.get("user_email"),
+                    session_id=conv.get("session_id"),
+                    title=conv.get("title"),
+                    messages=message_responses,
+                    created_at=conv["created_at"],
+                    updated_at=conv["updated_at"],
+                    total_messages=conv.get("total_messages", len(conv.get("messages", []))),
+                    is_active=conv.get("is_active", True)
+                ))
+            
+            return conversations
+            
+        except Exception as e:
+            logger.error(f"Failed to get conversations by session ID: {str(e)}")
+            return []
     
     async def get_conversation_stats(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """Get conversation statistics.

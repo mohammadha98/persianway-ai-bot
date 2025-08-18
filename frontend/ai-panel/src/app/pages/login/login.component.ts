@@ -45,7 +45,7 @@ export class LoginComponent implements OnInit {
 
   ngOnInit(): void {
     this.initializeForm();
-    this.loadDemoCredentials();
+
     
     // Redirect if already authenticated
     if (this.authService.isAuthenticated()) {
@@ -61,9 +61,6 @@ export class LoginComponent implements OnInit {
     });
   }
 
-  private loadDemoCredentials(): void {
-    this.demoCredentials = this.authService.getDemoCredentials();
-  }
 
   onSubmit(): void {
     if (this.loginForm.valid && !this.isLoading) {

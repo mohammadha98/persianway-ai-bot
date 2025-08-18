@@ -38,7 +38,6 @@ export class UserDialogComponent implements OnInit {
 
   roleOptions = [
     { value: 'admin', label: 'مدیر' },
-    { value: 'moderator', label: 'ناظر' },
     { value: 'user', label: 'کاربر' }
   ];
 

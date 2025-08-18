@@ -77,7 +77,8 @@ class ConversationLoggerMiddleware(BaseHTTPMiddleware):
                 user_question=message,
                 system_response="",  # Will be updated later if needed
                 query_analysis={},
-                response_parameters={}
+                response_parameters={},
+                user_email=None  # Default to None when email is not available
             )
             
             print(f"[MIDDLEWARE] Conversation stored successfully with ID: {conversation_id}")

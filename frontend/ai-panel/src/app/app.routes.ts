@@ -46,6 +46,11 @@ loadComponent: () => import('./pages/users/users.component').then(m => m.UsersCo
     loadComponent: () => import('./pages/knowledge/knowledge.component').then(m => m.KnowledgeComponent)
   },
   {
+    path: 'conversation-search',
+    canActivate: [AuthGuard],
+    loadComponent: () => import('./pages/conversation-search/conversation-search.component').then(m => m.ConversationSearchComponent)
+  },
+  {
     path: '**',
     redirectTo: '/login'
   }

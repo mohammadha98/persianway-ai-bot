@@ -1,17 +1,51 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, Observable, of } from 'rxjs';
 import { Router } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
+import { catchError, map } from 'rxjs/operators';
+import { environment } from '../../environments/environment';
+
+export enum PermissionType {
+  RAG = 'RAG',
+  LLM = 'LLM',
+  Conversations = 'Conversations',
+  Contribute = 'Contribute',
+  Chat = 'Chat',
+  Guide = 'Guide',
+  Settings = 'Settings',
+  Docs = 'Docs'
+}
+
+export interface Permission {
+  permission_type: PermissionType | string;
+  granted: boolean;
+  granted_at: string;
+  granted_by: string;
+}
 
 export interface User {
   id: string;
   username: string;
   email: string;
+  full_name: string | null;
   role: string;
+  is_active: boolean;
+  permissions: Permission[];
+  created_at: string;
+  updated_at: string;
+  last_login: string | null;
 }
 
 export interface LoginCredentials {
   username: string;
   password: string;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+  expires_in: number;
 }
 
 @Injectable({
@@ -20,35 +54,7 @@ export interface LoginCredentials {
 export class AuthService {
   private readonly STORAGE_KEY = 'auth_user';
   private readonly TOKEN_KEY = 'auth_token';
-  
-  // Static users for demonstration
-  private readonly STATIC_USERS: User[] = [
-    {
-      id: '1',
-      username: 'admin',
-      email: 'admin@persianway.com',
-      role: 'admin'
-    },
-    {
-      id: '2',
-      username: 'manager',
-      email: 'manager@persianway.com',
-      role: 'manager'
-    },
-    {
-      id: '3',
-      username: 'user',
-      email: 'user@persianway.com',
-      role: 'user'
-    }
-  ];
-
-  // Static credentials (username: password)
-  private readonly STATIC_CREDENTIALS: { [key: string]: string } = {
-    'admin': 'admin123',
-    'manager': 'manager123',
-    'user': 'user123'
-  };
+  private apiUrl = environment.apiUrl;
 
   private currentUserSubject = new BehaviorSubject<User | null>(this.getUserFromStorage());
   private isAuthenticatedSubject = new BehaviorSubject<boolean>(this.hasValidToken());
@@ -56,173 +62,113 @@ export class AuthService {
   public currentUser$ = this.currentUserSubject.asObservable();
   public isAuthenticated$ = this.isAuthenticatedSubject.asObservable();
 
-  constructor(private router: Router) {
-    // Check if user is already logged in on service initialization
+  constructor(private router: Router, private http: HttpClient) {
     this.checkAuthStatus();
   }
 
-  /**
-   * Login with static credentials
-   */
   login(credentials: LoginCredentials): Observable<{ success: boolean; message: string; user?: User }> {
-    return new Observable(observer => {
-      // Simulate API delay
-      setTimeout(() => {
-        const { username, password } = credentials;
-        
-        // Check if credentials are valid
-        if (this.STATIC_CREDENTIALS[username] === password) {
-          const user = this.STATIC_USERS.find(u => u.username === username);
-          
-          if (user) {
-            // Generate a simple token (in real app, this would come from server)
-            const token = this.generateToken(user);
-            
-            // Store user and token
-            this.setUserToStorage(user);
-            this.setTokenToStorage(token);
-            
-            // Update subjects
-            this.currentUserSubject.next(user);
-            this.isAuthenticatedSubject.next(true);
-            
-            observer.next({
-              success: true,
-              message: 'ورود موفقیت‌آمیز بود',
-              user: user
-            });
-          } else {
-            observer.next({
-              success: false,
-              message: 'خطا در سیستم'
-            });
+    return this.http.post<LoginResponse>(`${this.apiUrl}/api/users/login`, credentials).pipe(
+      map(response => {
+        this.setUserToStorage(response.user);
+        this.setTokenToStorage(response.access_token);
+        this.currentUserSubject.next(response.user);
+        this.isAuthenticatedSubject.next(true);
+        return {
+          success: true,
+          message: 'ورود موفقیت‌آمیز بود',
+          user: response.user
+        };
+      }),
+      catchError(error => {
+        let errorMessage = 'نام کاربری یا رمز عبور اشتباه است';
+        if (error.error && error.error.detail) {
+          if (typeof error.error.detail === 'string') {
+            errorMessage = error.error.detail;
+          } else if (Array.isArray(error.error.detail)) {
+            errorMessage = error.error.detail.map((err:any) => err.msg).join(', ');
           }
-        } else {
-          observer.next({
-            success: false,
-            message: 'نام کاربری یا رمز عبور اشتباه است'
-          });
         }
-        
-        observer.complete();
-      }, 1000); // Simulate 1 second delay
-    });
+        return of({
+          success: false,
+          message: errorMessage
+        });
+      })
+    );
   }
 
-  /**
-   * Logout user
-   */
   logout(): void {
-    // Clear storage
     localStorage.removeItem(this.STORAGE_KEY);
     localStorage.removeItem(this.TOKEN_KEY);
-    
-    // Update subjects
     this.currentUserSubject.next(null);
     this.isAuthenticatedSubject.next(false);
-    
-    // Redirect to login
     this.router.navigate(['/login']);
   }
 
-  /**
-   * Get current user
-   */
   getCurrentUser(): User | null {
     return this.currentUserSubject.value;
   }
 
-  /**
-   * Check if user is authenticated
-   */
   isAuthenticated(): boolean {
     return this.isAuthenticatedSubject.value;
   }
 
-  /**
-   * Check if user has specific role
-   */
   hasRole(role: string): boolean {
     const user = this.getCurrentUser();
     return user ? user.role === role : false;
   }
 
-  /**
-   * Check if user has any of the specified roles
-   */
   hasAnyRole(roles: string[]): boolean {
     const user = this.getCurrentUser();
     return user ? roles.includes(user.role) : false;
   }
 
-  /**
-   * Get authentication token
-   */
+  hasPermission(permissionType: PermissionType): boolean {
+    const user = this.getCurrentUser();
+    if (!user || !user.permissions) return false;
+    
+    return user.permissions.some(permission => 
+      permission.permission_type === permissionType && permission.granted
+    );
+  }
+
+  hasAnyPermission(permissionTypes: PermissionType[]): boolean {
+    const user = this.getCurrentUser();
+    if (!user || !user.permissions) return false;
+    
+    return permissionTypes.some(type => this.hasPermission(type));
+  }
+
+  hasAllPermissions(permissionTypes: PermissionType[]): boolean {
+    const user = this.getCurrentUser();
+    if (!user || !user.permissions) return false;
+    
+    return permissionTypes.every(type => this.hasPermission(type));
+  }
+
   getToken(): string | null {
     return localStorage.getItem(this.TOKEN_KEY);
   }
 
-  /**
-   * Check authentication status
-   */
   private checkAuthStatus(): void {
     const user = this.getUserFromStorage();
     const token = this.getToken();
-    
-    if (user && token && this.isTokenValid(token)) {
+    if (user && token) {
       this.currentUserSubject.next(user);
       this.isAuthenticatedSubject.next(true);
     } else {
-      this.logout();
+      this.currentUserSubject.next(null);
+      this.isAuthenticatedSubject.next(false);
     }
   }
 
-  /**
-   * Generate a simple token
-   */
-  private generateToken(user: User): string {
-    const timestamp = Date.now();
-    const payload = {
-      userId: user.id,
-      username: user.username,
-      role: user.role,
-      exp: timestamp + (24 * 60 * 60 * 1000) // 24 hours
-    };
-    
-    // In a real app, this would be a proper JWT token
-    return btoa(JSON.stringify(payload));
-  }
-
-  /**
-   * Check if token is valid
-   */
-  private isTokenValid(token: string): boolean {
-    try {
-      const payload = JSON.parse(atob(token));
-      return payload.exp > Date.now();
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Check if there's a valid token
-   */
   private hasValidToken(): boolean {
-    const token = this.getToken();
-    return token ? this.isTokenValid(token) : false;
+    return !!this.getToken();
   }
 
-  /**
-   * Store user to localStorage
-   */
   private setUserToStorage(user: User): void {
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(user));
   }
 
-  /**
-   * Get user from localStorage
-   */
   private getUserFromStorage(): User | null {
     const userStr = localStorage.getItem(this.STORAGE_KEY);
     if (userStr) {
@@ -235,21 +181,26 @@ export class AuthService {
     return null;
   }
 
-  /**
-   * Store token to localStorage
-   */
   private setTokenToStorage(token: string): void {
     localStorage.setItem(this.TOKEN_KEY, token);
   }
 
   /**
-   * Get available demo credentials for testing
+   * Returns all available permission types as an array
    */
-  getDemoCredentials(): { username: string; password: string; role: string }[] {
-    return [
-      { username: 'admin', password: 'admin123', role: 'مدیر سیستم' },
-      { username: 'manager', password: 'manager123', role: 'مدیر' },
-      { username: 'user', password: 'user123', role: 'کاربر' }
-    ];
+  getAllPermissionTypes(): PermissionType[] {
+    return Object.values(PermissionType);
+  }
+
+  /**
+   * Returns all granted permissions for the current user
+   */
+  getUserGrantedPermissions(): PermissionType[] {
+    const user = this.getCurrentUser();
+    if (!user || !user.permissions) return [];
+    
+    return user.permissions
+      .filter(permission => permission.granted)
+      .map(permission => permission.permission_type as PermissionType);
   }
 }

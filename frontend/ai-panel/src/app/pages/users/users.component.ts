@@ -16,8 +16,9 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
 
-import { UserService, User, UserFilters, UserListResponse } from '../../services/user.service';
+import { UserService, User, UserFilters, UserListResponse, UserRole } from '../../services/user.service';
 import { UserDialogComponent } from '../../modals/user-dialog/user-dialog.component';
+import { UserPermissionsComponent } from '../../modals/user-permissions/user-permissions.component';
 
 
 @Component({
@@ -55,18 +56,17 @@ export class UsersComponent implements OnInit, OnDestroy {
   
   // Filters
   searchTerm = '';
-  selectedRole = '';
+  selectedRole: UserRole | '' = '';
   selectedStatus = '';
-  selectedDepartment = '';
   
   // Search subject for debouncing
   private searchSubject = new Subject<string>();
   
   // Table columns
-  displayedColumns: string[] = ['avatar', 'name', 'email', 'role', 'department', 'status', 'lastLogin', 'actions'];
+  displayedColumns: string[] = ['avatar', 'name', 'email', 'role', 'status', 'lastLogin', 'actions'];
   
   // Role options
-  roleOptions = [
+  roleOptions: { value: UserRole | ''; label: string }[] = [
     { value: '', label: 'همه نقش‌ها' },
     { value: 'admin', label: 'مدیر' },
     { value: 'moderator', label: 'ناظر' },
@@ -80,11 +80,6 @@ export class UsersComponent implements OnInit, OnDestroy {
     { value: 'false', label: 'غیرفعال' }
   ];
   
-  // Department options (will be populated from users data)
-  departmentOptions: { value: string; label: string }[] = [
-    { value: '', label: 'همه بخش‌ها' }
-  ];
-
   constructor(
     private userService: UserService,
     private dialog: MatDialog,
@@ -103,7 +98,6 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadUsers();
-    this.loadDepartments();
   }
 
   ngOnDestroy(): void {
@@ -117,35 +111,22 @@ export class UsersComponent implements OnInit, OnDestroy {
     const filters: UserFilters = {
       search: this.searchTerm || undefined,
       role: this.selectedRole || undefined,
-      isActive: this.selectedStatus ? this.selectedStatus === 'true' : undefined,
-      department: this.selectedDepartment || undefined
+      is_active: this.selectedStatus ? this.selectedStatus === 'true' : undefined,
     };
 
-    this.userService.getUsers(this.currentPage, this.pageSize, filters)
+    this.userService.getUsers(filters, this.currentPage, this.pageSize)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: UserListResponse) => {
-          this.users = response.users;
+          this.users = response.data;
           this.totalUsers = response.total;
           this.loading = false;
         },
-        error: (error) => {
+        error: (error: any) => {
           console.error('Error loading users:', error);
           this.showSnackBar('خطا در بارگذاری کاربران', 'error');
           this.loading = false;
         }
-      });
-  }
-
-  loadDepartments(): void {
-    this.userService.users$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(users => {
-        const departments = [...new Set(users.map(user => user.department).filter(Boolean))];
-        this.departmentOptions = [
-          { value: '', label: 'همه بخش‌ها' },
-          ...departments.map(dept => ({ value: dept!, label: dept! }))
-        ];
       });
   }
 
@@ -168,7 +149,6 @@ export class UsersComponent implements OnInit, OnDestroy {
     this.searchTerm = '';
     this.selectedRole = '';
     this.selectedStatus = '';
-    this.selectedDepartment = '';
     this.currentPage = 1;
     this.loadUsers();
   }
@@ -189,7 +169,7 @@ export class UsersComponent implements OnInit, OnDestroy {
               this.showSnackBar('کاربر با موفقیت ایجاد شد', 'success');
               this.loadUsers();
             },
-            error: (error) => {
+            error: (error: any) => {
               console.error('Error creating user:', error);
               this.showSnackBar('خطا در ایجاد کاربر', 'error');
             }
@@ -214,7 +194,7 @@ export class UsersComponent implements OnInit, OnDestroy {
               this.showSnackBar('کاربر با موفقیت به‌روزرسانی شد', 'success');
               this.loadUsers();
             },
-            error: (error) => {
+            error: (error: any) => {
               console.error('Error updating user:', error);
               this.showSnackBar('خطا در به‌روزرسانی کاربر', 'error');
             }
@@ -224,15 +204,15 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   toggleUserStatus(user: User): void {
-    this.userService.toggleUserStatus(user.id)
+    this.userService.toggleUserStatus(user.id, user.is_active)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
-          const status = user.isActive ? 'غیرفعال' : 'فعال';
+          const status = user.is_active ? 'غیرفعال' : 'فعال';
           this.showSnackBar(`کاربر با موفقیت ${status} شد`, 'success');
           this.loadUsers();
         },
-        error: (error) => {
+        error: (error: any) => {
           console.error('Error toggling user status:', error);
           this.showSnackBar('خطا در تغییر وضعیت کاربر', 'error');
         }
@@ -240,7 +220,7 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   deleteUser(user: User): void {
-    if (confirm(`آیا از حذف کاربر "${user.firstName} ${user.lastName}" اطمینان دارید؟`)) {
+    if (confirm(`آیا از حذف کاربر "${user.full_name}" اطمینان دارید؟`)) {
       this.userService.deleteUser(user.id)
         .pipe(takeUntil(this.destroy$))
         .subscribe({
@@ -248,12 +228,27 @@ export class UsersComponent implements OnInit, OnDestroy {
             this.showSnackBar('کاربر با موفقیت حذف شد', 'success');
             this.loadUsers();
           },
-          error: (error) => {
+          error: (error: any) => {
             console.error('Error deleting user:', error);
             this.showSnackBar('خطا در حذف کاربر', 'error');
           }
         });
     }
+  }
+
+  openPermissionsDialog(user: User): void {
+    const dialogRef = this.dialog.open(UserPermissionsComponent, {
+      width: '600px',
+      data: { user: { ...user } },
+      direction: 'rtl'
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        this.showSnackBar('دسترسی‌های کاربر با موفقیت به‌روزرسانی شد', 'success');
+        this.loadUsers();
+      }
+    });
   }
 
   getRoleLabel(role: string): string {
@@ -274,12 +269,12 @@ export class UsersComponent implements OnInit, OnDestroy {
     return colorMap[role] || 'basic';
   }
 
-  getStatusColor(isActive: boolean): string {
-    return isActive ? 'primary' : 'warn';
+  getStatusColor(is_active: boolean): string {
+    return is_active ? 'primary' : 'warn';
   }
 
-  getStatusLabel(isActive: boolean): string {
-    return isActive ? 'فعال' : 'غیرفعال';
+  getStatusLabel(is_active: boolean): string {
+    return is_active ? 'فعال' : 'غیرفعال';
   }
 
   formatDate(date: Date | string): string {
@@ -294,8 +289,12 @@ export class UsersComponent implements OnInit, OnDestroy {
     }).format(d);
   }
 
-  getInitials(firstName: string, lastName: string): string {
-    return `${firstName?.charAt(0) || ''}${lastName?.charAt(0) || ''}`;
+  getInitials(fullName: string): string {
+    if (!fullName) return '';
+    const names = fullName.split(' ');
+    const firstName = names[0];
+    const lastName = names.length > 1 ? names[names.length - 1] : '';
+    return `${firstName?.charAt(0) || ''}${lastName?.charAt(0) || ''}`.toUpperCase();
   }
 
   private showSnackBar(message: string, type: 'success' | 'error' | 'info' = 'info'): void {

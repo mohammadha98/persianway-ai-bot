@@ -28,7 +28,8 @@ class ConversationDocument(BaseModel):
     """Schema for storing conversations in MongoDB with embedded messages."""
     
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
-    user_id: str = Field(..., description="Unique identifier for the user")
+    user_id: Optional[str] = Field(..., description="Unique identifier for the user")
+    user_email: Optional[str] = Field(default=None, description="Email address of the user")
     title: Optional[str] = Field(default=None, description="Optional title for the conversation")
     messages: List[MessageDocument] = Field(default_factory=list, description="List of messages in the conversation")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp when the conversation was created")
@@ -50,6 +51,7 @@ class ConversationDocument(BaseModel):
         json_schema_extra = {
             "example": {
                 "user_id": "user123",
+                "user_email": "user@example.com",
                 "title": "Tomato Cultivation Questions",
                 "messages": [
                     {
@@ -109,10 +111,12 @@ class ConversationSearchRequest(BaseModel):
 
 
 class ConversationResponse(BaseModel):
-    """Schema for conversation API responses."""
+    """Schema for conversation response data."""
     
     id: str = Field(..., description="Conversation ID")
     user_id: str = Field(..., description="User ID")
+    user_email: Optional[str] = Field(default=None, description="Email address of the user")
+    session_id: Optional[str] = Field(default=None, description="Session identifier if applicable")
     title: Optional[str] = Field(default=None, description="Conversation title")
     messages: List[MessageResponse] = Field(..., description="List of messages in the conversation")
     created_at: datetime = Field(..., description="Conversation creation timestamp")
@@ -125,6 +129,7 @@ class ConversationResponse(BaseModel):
             "example": {
                 "id": "507f1f77bcf86cd799439011",
                 "user_id": "user123",
+                "user_email": "user@example.com",
                 "title": "Tomato Cultivation Questions",
                 "messages": [
                     {

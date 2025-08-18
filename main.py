@@ -64,11 +64,11 @@ def create_application() -> FastAPI:
         allow_headers=["*"],
     )
     
-    # Add conversation logging middleware
-    application.add_middleware(
-        ConversationLoggerMiddleware,
-        log_chat_endpoints=True
-    )
+    # # Add conversation logging middleware
+    # application.add_middleware(
+    #     ConversationLoggerMiddleware,
+    #     log_chat_endpoints=True
+    # )
 
     # Configure Jinja2 templates
     configure_templates(application)

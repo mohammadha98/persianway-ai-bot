@@ -104,6 +104,49 @@ async def get_conversation_stats(
         raise HTTPException(status_code=500, detail=f"Failed to retrieve conversation stats: {str(e)}")
 
 
+@router.get("/email/{user_email}", response_model=ConversationListResponse)
+async def get_conversations_by_email(
+    user_email: str,
+    limit: int = Query(default=50, ge=1, le=100, description="Maximum number of conversations to return"),
+    skip: int = Query(default=0, ge=0, description="Number of conversations to skip for pagination"),
+    conversation_service=Depends(get_conversation_service)
+):
+    """Get all conversations for a specific user email.
+    
+    This endpoint retrieves all conversations for a given user email with pagination support.
+    Conversations are returned in reverse chronological order (newest first).
+    """
+    try:
+        result = await conversation_service.get_conversations_by_email(
+            user_email=user_email,
+            limit=limit,
+            skip=skip
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve conversations by email: {str(e)}")
+
+
+@router.get("/session/{session_id}", response_model=List[ConversationResponse])
+async def get_conversations_by_session_id(
+    session_id: str,
+    conversation_service=Depends(get_conversation_service)
+):
+    """Get conversations for a specific session ID.
+    
+    This endpoint retrieves all conversations associated with a given session ID.
+    Typically, there should be only one conversation per session, but this returns
+    a list to handle edge cases where multiple conversations might share a session ID.
+    """
+    try:
+        conversations = await conversation_service.get_conversations_by_session_id(
+            session_id=session_id
+        )
+        return conversations
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve conversations by session ID: {str(e)}")
+
+
 @router.get("/search/advanced", response_model=ConversationListResponse)
 async def advanced_conversation_search(
     user_id: Optional[str] = Query(default=None, description="Filter by user ID"),

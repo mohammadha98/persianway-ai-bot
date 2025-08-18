@@ -68,7 +68,7 @@ export class ContributeComponent {
   constructor(
     private contributeService: ContributeService,
     private snackBar: MatSnackBar
-  ) {}
+  ) { }
 
   onFileSelected(event: any) {
     const file = event.target.files[0];
@@ -97,7 +97,7 @@ export class ContributeComponent {
       this.showMessage('لطفاً تمام فیلدهای ضروری را پر کنید.', 'error');
       return;
     }
-
+    debugger
     this.isSubmitting = true;
 
     const formData = new FormData();
@@ -107,7 +107,7 @@ export class ContributeComponent {
     formData.append('meta_tags', this.form.tags);
     formData.append('author_name', this.form.author || '');
     formData.append('additional_references', this.form.additionalReferences || '');
-    
+
     if (this.selectedFile) {
       formData.append('file', this.selectedFile);
     }
@@ -115,6 +115,7 @@ export class ContributeComponent {
     this.contributeService.submitContribution(formData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
+        console.log(response);
         this.showMessage('مشارکت شما با موفقیت ثبت شد. متشکریم!', 'success');
         this.resetForm();
       },
@@ -154,9 +155,9 @@ export class ContributeComponent {
   }
 
   public isFormValid(): boolean {
-    return !!(this.form.title.trim() && 
-             this.form.content.trim() && 
-             this.form.category);
+    return !!(this.form.title.trim() &&
+      this.form.content.trim() &&
+      this.form.category);
   }
 
   private resetForm() {

@@ -29,7 +29,7 @@ async def query_knowledge_base(query: KnowledgeBaseQuery, kb_service=Depends(get
     try:
         # Query the knowledge base
         result = await kb_service.query_knowledge_base(query.question)
-        
+    
         # Return the response with human referral information if needed
         return KnowledgeBaseResponse(
             answer=result["answer"],
@@ -100,6 +100,16 @@ async def get_processing_status():
         
         # Get the vector store
         vector_store = doc_processor.get_vector_store()
+        
+        # Check if vector store is None (embeddings not available)
+        if vector_store is None:
+            return {
+                "status": "unavailable",
+                "message": "Vector store is not available. Check if OpenAI API key is configured correctly.",
+                "document_count": 0,
+                "pdf_document_count": 0,
+                "excel_qa_count": 0
+            }
         
         # Get collection info
         collection = vector_store._collection

@@ -261,6 +261,49 @@ class ChatService:
 
 
 
+    async def generate_conversation_title(self, message: str) -> str:
+        """Generate a conversation title based on the user's message.
+        
+        Args:
+            message: The user's message to generate a title from
+            
+        Returns:
+            A concise title for the conversation
+        """
+        try:
+            # Get LLM instance
+            llm = await get_llm()
+            
+            # Create a prompt to generate a concise title
+            title_prompt = f"""Based on the following user message, generate a concise and descriptive title (maximum 5-7 words) for this conversation. The title should be in the same language as the user's message.
+
+User message: {message}
+
+Title:"""
+            
+            # Generate title using the LLM
+            response = await llm.ainvoke([HumanMessage(content=title_prompt)])
+            
+            # Extract and clean the title
+            title = response.content.strip()
+            
+            # Remove quotes if present
+            if title.startswith('"') and title.endswith('"'):
+                title = title[1:-1]
+            if title.startswith("'") and title.endswith("'"):
+                title = title[1:-1]
+                
+            # Limit title length as a safety measure
+            if len(title) > 100:
+                title = title[:97] + "..."
+                
+            return title
+            
+        except Exception as e:
+            logger.error(f"Error generating conversation title: {str(e)}")
+            # Return a default title if generation fails
+            return "New Conversation"
+
     async def process_message(self, user_id: str, message: str, model: str = None, parameters: dict = None) -> Dict[str, Any]:
         """Process a user message using a hybrid approach.
 
@@ -307,7 +350,8 @@ class ChatService:
 
         try:
             # First, check if the topic is related to our domain
-            is_domain_related = self._is_topic_related_to_domain(message)
+            # is_domain_related = self._is_topic_related_to_domain(message)
+            is_domain_related = True
             # is_domain_related=True
             if not is_domain_related:
                 # Unrelated topic - refer to human
@@ -340,13 +384,42 @@ class ChatService:
                     logging.warning(f"Knowledge base query failed: {str(kb_error)}")
                     kb_confidence = 0  # Set to 0 to trigger general knowledge fallback
 
+                # Define referral indicators once for reuse
+                referral_indicators = [
+                    "نیاز به بررسی توسط کارشناس",
+                    "به کارشناس مراجعه کنید",
+                    "خارج از حوزه تخصص",
+                    "نمی‌توانم پاسخ دهم",
+                    "نیاز به کارشناس",
+                    "مطمئن نیستم",
+                    "متاسفانه",
+                    "اطلاعات کافی",
+                    "متأسفانه",
+                    "توصیه می‌کنم با کارشناس تماس بگیرید",
+                    "بهتر است با کارشناس مشورت کنید",
+                    "نیاز به مشاوره تخصصی",
+                    "این موضوع نیاز به بررسی بیشتر دارد",
+                    "اطلاعات دقیق‌تری نیاز است",
+                    "پاسخ دقیق به این سوال نیازمند بررسی بیشتر است",
+                    "برای اطلاعات دقیق‌تر با کارشناسان تماس بگیرید",
+                    "این مورد خاص نیاز به بررسی دارد"
+                ]
+                
                 if kb_confidence >= KB_CONFIDENCE_THRESHOLD:
                     # High confidence answer from knowledge base - priority source
                     answer = kb_result["answer"]
-                    query_analysis["confidence_score"] = kb_confidence
-                    query_analysis["knowledge_source"] = kb_result.get("source_type", "knowledge_base")
-                    query_analysis["requires_human_referral"] = False
-                    query_analysis["reasoning"] = "High confidence answer found in knowledge base (priority source)."
+                    
+                    # Check for referral indicators even with high confidence
+                    if any(indicator in answer for indicator in referral_indicators):
+                        answer = HUMAN_REFERRAL_MESSAGE
+                        query_analysis["requires_human_referral"] = True
+                        query_analysis["reasoning"] = "Knowledge base answer contains referral indicators despite high confidence."
+                    else:
+                        query_analysis["confidence_score"] = kb_confidence
+                        query_analysis["knowledge_source"] = kb_result.get("source_type", "knowledge_base")
+                        query_analysis["requires_human_referral"] = False
+                        query_analysis["reasoning"] = "High confidence answer found in knowledge base (priority source)."
+                    
                     response_parameters["temperature"] = 0.1  # Low temperature for factual answers
                         
                 else:
@@ -357,15 +430,6 @@ class ChatService:
                     response = conversation.predict(input=message)
                     
                     # Check if the model indicated it needs human referral
-                    referral_indicators = [
-                        "نیاز به بررسی توسط کارشناس",
-                        "به کارشناس مراجعه کنید",
-                        "خارج از حوزه تخصص",
-                        "نمی‌توانم پاسخ دهم",
-                        "نیاز به کارشناس",
-                        "مطمئن نیستم"
-                    ]
-                    
                     if any(indicator in response for indicator in referral_indicators):
                         answer = HUMAN_REFERRAL_MESSAGE
                         query_analysis["requires_human_referral"] = True

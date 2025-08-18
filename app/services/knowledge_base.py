@@ -268,6 +268,9 @@ class KnowledgeBaseService:
                 "additional_references": additional_references if additional_references else "None",
                 "submission_timestamp": submitted_at,
                 "entry_type": "user_contribution", # Differentiate from PDF/Excel
+                "source_type": "qa_contribution", # Mark as QA contribution for retrieval priority
+                "question": title, # Store the title as the question
+                "answer": content, # Store the content as the answer
                 "id": doc_id
             }
 
@@ -300,6 +303,10 @@ class KnowledgeBaseService:
             
             # Persist changes
             vector_store.persist() # Ensure data is saved
+
+            # After adding new documents, the QA chain should be reset to reflect the changes.
+            self._qa_chain = None
+            logging.info("Knowledge base updated. QA chain has been reset.")
 
             # Prepare response
             response = {
@@ -479,13 +486,13 @@ class KnowledgeBaseService:
             # Search for similar documents with scores
             docs_with_scores = vector_store.similarity_search_with_score(query, k=rag_settings.top_k_results)
             
-            # Filter and prioritize "excel_qa" source types if available
-            excel_qa_docs = [doc for doc, score in docs_with_scores if doc.metadata.get("source_type") == "excel_qa"]
+            # Filter and prioritize "excel_qa" and "qa_contribution" source types if available
+            qa_docs = [doc for doc, score in docs_with_scores if doc.metadata.get("source_type") in ["excel_qa", "qa_contribution"]]
             
             # Check if we have a high-confidence, relevant QA match
-            for doc in excel_qa_docs:
-                qa_question = doc.metadata.get("question", "")
-                qa_answer = doc.metadata.get("answer", "")
+            for doc in qa_docs:
+                qa_question = doc.metadata.get("question", "") or doc.metadata.get("title", "")
+                qa_answer = doc.metadata.get("answer", "") or doc.metadata.get("content", "")
                 
                 # Check if this QA pair is relevant to the query
                 if self._is_content_relevant(query, qa_question) and qa_answer:
@@ -508,7 +515,7 @@ class KnowledgeBaseService:
                                 "content": qa_answer,
                                 "source": doc.metadata.get("source", "Unknown"),
                                 "page": doc.metadata.get("page", 1),
-                                "source_type": "excel_qa",
+                                "source_type": doc.metadata.get("source_type", "qa_contribution"),
                                 "title": qa_question
                             }]
                         }
@@ -561,19 +568,25 @@ class KnowledgeBaseService:
                         "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
                         "source": doc.metadata.get("source", "Unknown"),
                         "page": doc.metadata.get("page", 1),
-                        "source_type": "pdf"
+                        "source_type": doc.metadata.get("source_type", "unknown")
                     })
             
             # Prepare response
+            source_type = "pdf"
+            if source_docs:
+                source_type = source_docs[0].metadata.get("source_type", "pdf")
+            elif qa_docs:  # If we have QA docs but didn't use them (low confidence), still show their type
+                source_type = qa_docs[0].metadata.get("source_type", "pdf")
             response = {
                 "answer": answer,
                 "confidence_score": confidence,
-                "source_type": "pdf",
+                "source_type": source_type,
                 "requires_human_support": requires_human,
                 "query_id": str(uuid.uuid4()) if requires_human else None,
                 "sources": sources
             }
-            
+            print("RESPONSE IN KNOWLEDGEBASE:::::")
+            print(response)
             return response
             
         except Exception as e:

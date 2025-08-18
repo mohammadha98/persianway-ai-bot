@@ -1,29 +1,71 @@
 <div class="chat-container">
-  <!-- Header -->
-  <header class="chat-header">
-    <div class="header-content">
-      <div class="header-info">
-        <div class="avatar">
-          <mat-icon>agriculture</mat-icon>
-        </div>
-        <div class="title-section">
-          <h1>دستیار هوشمند</h1>
-          <p>پاسخگوی سوالات در مورد محصولات و مشاوره با تحلیل پیشرفته</p>
+  <mat-sidenav-container class="sidenav-container">
+    <!-- Conversation History Sidebar -->
+    <mat-sidenav #conversationSidenav 
+                 mode="side" 
+                 [opened]="true" 
+                 position="start"
+                 class="conversation-sidenav"
+                 [disableClose]="true">
+    
+      <mat-divider></mat-divider>
+      
+      <div class="conversation-list" *ngIf="!isLoadingHistory">
+        <mat-list *ngIf="conversationHistory.length > 0">
+          <mat-list-item *ngFor="let conversation of conversationHistory" 
+                         (click)="loadConversationsBySessionId(conversation.session_id)"
+                         class="conversation-item">
+            <div class="conversation-preview">
+              <div class="conversation-question">
+                <mat-icon matListItemIcon>chat_bubble_outline</mat-icon>
+                <span class="question-text">{{ conversation.title || '---' }}</span>
+              </div>
+             
+            </div>
+          </mat-list-item>
+          <ng-container *ngFor="let conversation of conversationHistory; let last = last">
+            <mat-divider [inset]="true" *ngIf="!last"></mat-divider>
+          </ng-container>
+        </mat-list>
+        
+        <div *ngIf="conversationHistory.length === 0" class="no-conversations">
+          <div class="empty-icon"></div>
+          <h4>مکالمه‌ای یافت نشد</h4>
+          <p>هنوز مکالمه‌ای شروع نکرده‌اید. اولین سوال خود را بپرسید!</p>
         </div>
       </div>
-      <div class="header-actions">
-        <button mat-icon-button (click)="toggleAnalysisDetails()" 
-                class="analysis-toggle" 
-                [class.active]="showAnalysisDetails"
-                matTooltip="نمایش جزئیات تحلیل">
-          <mat-icon>analytics</mat-icon>
-        </button>
-        <button mat-icon-button (click)="clearChat()" class="clear-btn" matTooltip="شروع مجدد">
-          <mat-icon>refresh</mat-icon>
-        </button>
+      
+      <div *ngIf="isLoadingHistory" class="loading-history">
+        <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+        <p>در حال بارگذاری تاریخچه...</p>
       </div>
-    </div>
-  </header>
+    </mat-sidenav>
+    
+    <!-- Main Chat Content -->
+    <mat-sidenav-content class="main-content">
+      <!-- Header -->
+      <header class="chat-header">
+        <div class="header-content">
+          <div class="header-info">
+         
+            <div class="title-section">
+              <h1>دستیار هوشمند</h1>
+              <p>پاسخگوی سوالات در مورد محصولات و مشاوره با تحلیل پیشرفته</p>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button mat-icon-button (click)="toggleAnalysisDetails()" 
+                    class="analysis-toggle" 
+                    [class.active]="showAnalysisDetails"
+                    matTooltip="نمایش جزئیات تحلیل">
+              <mat-icon>analytics</mat-icon>
+            </button>
+            <button mat-icon-button (click)="clearChat()" class="clear-btn" matTooltip="شروع مجدد">
+              <mat-icon>refresh</mat-icon>
+            </button>
+          </div>
+        </div>
+      </header>
 
   <!-- Messages -->
   <main class="messages-area" #messagesContainer>
@@ -33,7 +75,7 @@
         <div class="empty-state-icon">
           <mat-icon>chat_bubble_outline</mat-icon>
         </div>
-        <h2>به دستیار کشاورزی هوشمند خوش آمدید</h2>
+        <h2>به دستیار  هوشمند پرشین وی خوش آمدید</h2>
         <p>سوالات خود را در مورد کشاورزی، محصولات و مشاوره بپرسید</p>
         <div class="suggestion-chips">
           <div class="suggestion-chip" (click)="sendSuggestion('نحوه کاشت گوجه فرنگی چیست؟')">
@@ -157,7 +199,7 @@
           (keydown)="onKeyPress($event)"
           [disabled]="isLoading"
           placeholder="سوال خود را بپرسید..."
-          rows="1"
+          rows="2"
           class="message-input">
         </textarea>
       </mat-form-field>
@@ -172,4 +214,6 @@
       </button>
     </div>
   </footer>
+    </mat-sidenav-content>
+  </mat-sidenav-container>
 </div>

@@ -1,0 +1,199 @@
+<div class="conversation-search-container">
+
+  <!-- Search Form -->
+  <mat-card class="search-form-card" elevation="3">
+    <mat-card-header>
+      <div mat-card-avatar class="form-avatar">
+        <mat-icon>tune</mat-icon>
+      </div>
+      <mat-card-title>فیلترهای جستجو</mat-card-title>
+      <mat-card-subtitle>تنظیم معیارهای جستجو برای یافتن مکالمات مورد نظر</mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      <form [formGroup]="searchForm" (ngSubmit)="onSearch()">
+        <div class="form-row">
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>شناسه کاربر</mat-label>
+            <input matInput formControlName="user_id" placeholder="مثال: user123">
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>متن جستجو</mat-label>
+            <input matInput formControlName="search_text" placeholder="جستجو در سوالات و پاسخ‌ها">
+          </mat-form-field>
+        </div>
+
+        <div class="form-row">
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>تاریخ شروع</mat-label>
+            <input matInput type="datetime-local" formControlName="start_date">
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>تاریخ پایان</mat-label>
+            <input matInput type="datetime-local" formControlName="end_date">
+          </mat-form-field>
+        </div>
+
+        <div class="form-row">
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>منبع دانش</mat-label>
+            <mat-select formControlName="knowledge_source">
+              <mat-option *ngFor="let source of knowledgeSources" [value]="source.value">
+                {{ source.label }}
+              </mat-option>
+            </mat-select>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>نیاز به ارجاع انسانی</mat-label>
+            <mat-select formControlName="requires_human_referral">
+              <mat-option [value]="null">همه</mat-option>
+              <mat-option [value]="true">بله</mat-option>
+              <mat-option [value]="false">خیر</mat-option>
+            </mat-select>
+          </mat-form-field>
+        </div>
+
+        <div class="form-row">
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>حداقل اعتماد</mat-label>
+            <input matInput type="number" formControlName="min_confidence" min="0" max="1" step="0.1" placeholder="0.0">
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="form-field">
+            <mat-label>حداکثر اعتماد</mat-label>
+            <input matInput type="number" formControlName="max_confidence" min="0" max="1" step="0.1" placeholder="1.0">
+          </mat-form-field>
+        </div>
+
+        <div class="form-actions">
+          <button mat-raised-button color="primary" type="submit" [disabled]="loading" class="search-btn">
+            <mat-icon>search</mat-icon>
+            <span>جستجو</span>
+            <mat-spinner *ngIf="loading" diameter="20" class="btn-spinner"></mat-spinner>
+          </button>
+          <button mat-stroked-button type="button" (click)="onClear()" [disabled]="loading" class="clear-btn">
+            <mat-icon>refresh</mat-icon>
+            <span>پاک کردن</span>
+          </button>
+        </div>
+      </form>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Loading Indicator -->
+  <div *ngIf="loading" class="loading-container">
+    <div class="loading-content">
+      <mat-spinner diameter="60" strokeWidth="4"></mat-spinner>
+      <h3>در حال جستجو...</h3>
+      <p>لطفاً صبر کنید، مکالمات در حال بارگذاری هستند</p>
+    </div>
+  </div>
+
+  <!-- Search Results -->
+  <div *ngIf="!loading" class="results-container">
+    <div class="results-header">
+      <div class="results-title">
+        <mat-icon>chat_bubble_outline</mat-icon>
+        <h3>نتایج جستجو</h3>
+      </div>
+      <div class="results-count">
+        <mat-icon>analytics</mat-icon>
+        <span>{{ totalCount }} مکالمه یافت شد</span>
+      </div>
+    </div>
+
+    <div *ngIf="conversations.length === 0" class="no-results">
+      <div class="no-results-content">
+        <mat-icon>search_off</mat-icon>
+        <h3>هیچ مکالمه‌ای یافت نشد</h3>
+        <p>لطفاً معیارهای جستجو را تغییر دهید و دوباره تلاش کنید</p>
+        <button mat-stroked-button (click)="onClear()" class="retry-btn">
+          <mat-icon>refresh</mat-icon>
+          تلاش مجدد
+        </button>
+      </div>
+    </div>
+
+    <div *ngIf="conversations.length > 0" class="conversations-list">
+      <mat-card *ngFor="let conversation of conversations" class="conversation-card" elevation="2">
+        <mat-card-header>
+          <div mat-card-avatar class="conversation-avatar">
+            <mat-icon>chat_bubble</mat-icon>
+          </div>
+          <mat-card-title>{{ conversation.title || 'بدون عنوان' }}</mat-card-title>
+          <mat-card-subtitle>
+            <div class="conversation-meta">
+              <div class="meta-item">
+                <mat-icon>person_outline</mat-icon>
+                <span>{{ conversation.user_email || conversation.user_id }}</span>
+              </div>
+              <div class="meta-item">
+                <mat-icon>schedule</mat-icon>
+                <span>{{ formatDate(conversation.created_at) }}</span>
+              </div>
+              <div class="meta-item">
+                <mat-icon>forum</mat-icon>
+                <span>{{ conversation.total_messages }} پیام</span>
+              </div>
+            </div>
+          </mat-card-subtitle>
+        </mat-card-header>
+        
+        <mat-card-content>
+          <div class="messages-preview">
+            <div *ngFor="let message of conversation.messages.slice(0, 2)" class="message-preview">
+              <div class="message-role" [class.user]="message.role === 'user'" [class.assistant]="message.role === 'assistant'">
+                <mat-icon>{{ message.role === 'user' ? 'person' : 'smart_toy' }}</mat-icon>
+                <span>{{ message.role === 'user' ? 'کاربر' : 'دستیار' }}</span>
+              </div>
+              <div class="message-content">{{ message.content | slice:0:200 }}{{ message.content.length > 200 ? '...' : '' }}</div>
+              
+              <div *ngIf="message.role === 'assistant' && (message.confidence_score || message.knowledge_source)" class="message-metadata">
+                <span *ngIf="message.confidence_score" class="confidence-score">
+                  <mat-icon>trending_up</mat-icon>
+                  اعتماد: {{ (message.confidence_score * 100).toFixed(1) }}%
+                </span>
+                <span *ngIf="message.knowledge_source" class="knowledge-source">
+                  <mat-icon>source</mat-icon>
+                  {{ getKnowledgeSourceLabel(message.knowledge_source) }}
+                </span>
+                <span *ngIf="message.requires_human_referral" class="human-referral">
+                  <mat-icon>support_agent</mat-icon>
+                  نیاز به ارجاع انسانی
+                </span>
+              </div>
+            </div>
+            
+            <div *ngIf="conversation.messages.length > 2" class="more-messages">
+              <mat-icon>more_horiz</mat-icon>
+              <span>{{ conversation.messages.length - 2 }} پیام دیگر</span>
+            </div>
+          </div>
+        </mat-card-content>
+        
+        <mat-card-actions align="end">
+          <button mat-button color="primary" class="action-btn" (click)="openConversationDetails(conversation)">
+            <mat-icon>visibility</mat-icon>
+            <span>مشاهده کامل</span>
+          </button>
+       
+        
+        </mat-card-actions>
+      </mat-card>
+    </div>
+
+    <!-- Pagination -->
+    <div *ngIf="conversations.length > 0" class="pagination-container">
+      <mat-paginator
+        [length]="totalCount"
+        [pageSize]="pageSize"
+        [pageIndex]="currentPage - 1"
+        [pageSizeOptions]="[10, 20, 50, 100]"
+        (page)="onPageChange($event)"
+        showFirstLastButtons>
+      </mat-paginator>
+    </div>
+  </div>
+</div>
