@@ -26,7 +26,6 @@ env/
 ENV/
 
 
-app/core/config.py
 docs/
 
 # Environment variables
