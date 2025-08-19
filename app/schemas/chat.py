@@ -24,16 +24,16 @@ class ChatRequest(BaseModel):
     user_email: Optional[str] = Field(None, description="Email address of the user")
     message: str = Field(..., description="The message from the user")
    
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "user_id": "user123",
                 "session_id": "session_abc123",
                 "user_email": "user@example.com",
-                "message": "Hello, how can you help me today?",
-            
+                "message": "Hello, how can you help me today?"
             }
         }
+    }
 
 
 class QueryAnalysis(BaseModel):
@@ -62,8 +62,8 @@ class ChatResponse(BaseModel):
     answer: str = Field(..., description="The actual response to the user's query")
     conversation_history: Optional[List[ChatMessage]] = Field(None, description="The conversation history, if applicable")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "query_analysis": {
                     "confidence_score": 0.95,
@@ -83,3 +83,4 @@ class ChatResponse(BaseModel):
                 ]
             }
         }
+    }

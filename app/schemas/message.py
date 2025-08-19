@@ -35,15 +35,16 @@ class MessageDocument(BaseModel):
     # Performance metadata
     response_time_ms: Optional[float] = Field(default=None, description="Response time in milliseconds")
     
-    class Config:
-        use_enum_values = True
-        json_schema_extra = {
+    model_config = {
+        "use_enum_values": True,
+        "json_schema_extra": {
             "example": {
                 "role": "user",
                 "content": "What is the best pH for tomato cultivation?",
                 "timestamp": "2024-01-15T10:30:00Z"
             }
         }
+    }
 
 
 class MessageResponse(BaseModel):
@@ -56,9 +57,9 @@ class MessageResponse(BaseModel):
     knowledge_source: Optional[str] = Field(default=None, description="Knowledge source used (for assistant messages)")
     requires_human_referral: Optional[bool] = Field(default=None, description="Whether human referral was required (for assistant messages)")
     
-    class Config:
-        use_enum_values = True
-        json_schema_extra = {
+    model_config = {
+        "use_enum_values": True,
+        "json_schema_extra": {
             "example": {
                 "role": "assistant",
                 "content": "The optimal pH for tomato cultivation is between 6.0 and 6.8.",
@@ -68,3 +69,4 @@ class MessageResponse(BaseModel):
                 "requires_human_referral": False
             }
         }
+    }

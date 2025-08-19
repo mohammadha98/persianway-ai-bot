@@ -9,12 +9,13 @@ class KnowledgeBaseQuery(BaseModel):
     """
     question: str = Field(..., description="The question to ask the knowledge base")
     
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "question": "انواع کودهای شیمیایی کدامند؟"
             }
         }
+    }
 
 
 class KnowledgeContributionItem(BaseModel):
@@ -38,8 +39,8 @@ class KnowledgeContributionResponse(BaseModel):
     contribution: Optional[KnowledgeContributionItem] = Field(None, description="Details of the submitted contribution")
     message: Optional[str] = Field(None, description="Error message in case of failure")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example_success": {
                 "success": True,
                 "contribution": {
@@ -61,6 +62,7 @@ class KnowledgeContributionResponse(BaseModel):
                 "message": "Invalid content_type provided."
             }
         }
+    }
 
 
 class DocumentSource(BaseModel):
@@ -84,8 +86,8 @@ class KnowledgeBaseResponse(BaseModel):
     source_type: str = Field("pdf", description="The primary source type for this answer (pdf or excel_qa)")
     confidence_score: float = Field(0.0, description="Confidence score of the answer between 0 and 1")
     
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "answer": "انواع کودهای شیمیایی عبارتند از: کودهای نیتروژنی، کودهای فسفاته، کودهای پتاسیمی، و کودهای میکرو.",
                 "sources": [
@@ -100,6 +102,7 @@ class KnowledgeBaseResponse(BaseModel):
                 "query_id": None
             }
         }
+    }
 
 
 class KnowledgeContributionItem(BaseModel):
@@ -119,8 +122,8 @@ class KnowledgeContributionResponse(BaseModel):
     contribution: Optional[KnowledgeContributionItem] = Field(None, description="Details of the submitted contribution")
     message: Optional[str] = Field(None, description="Error message in case of failure")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example_success": {
                 "success": True,
                 "contribution": {
@@ -138,6 +141,7 @@ class KnowledgeContributionResponse(BaseModel):
                 "message": "Invalid content_type provided."
             }
         }
+    }
 
 
 class ProcessDocsResponse(BaseModel):
@@ -145,13 +149,14 @@ class ProcessDocsResponse(BaseModel):
     message: str = Field(..., description="A message about the document processing")
     status: str = Field(..., description="The status of the document processing")
     
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "message": "Document processing started in the background",
                 "status": "processing"
             }
         }
+    }
 
 
 class KnowledgeContributionItem(BaseModel):
@@ -171,8 +176,8 @@ class KnowledgeContributionResponse(BaseModel):
     contribution: Optional[KnowledgeContributionItem] = Field(None, description="Details of the submitted contribution")
     message: Optional[str] = Field(None, description="Error message in case of failure")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example_success": {
                 "success": True,
                 "contribution": {
@@ -190,3 +195,4 @@ class KnowledgeContributionResponse(BaseModel):
                 "message": "Invalid content_type provided."
             }
         }
+    }

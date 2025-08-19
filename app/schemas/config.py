@@ -92,8 +92,8 @@ class DynamicConfig(BaseModel):
     created_at: Optional[str] = Field(default=None, description="Creation timestamp")
     updated_at: Optional[str] = Field(default=None, description="Last update timestamp")
 
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "llm_settings": {
                     "preferred_api_provider": "openrouter",
@@ -116,6 +116,7 @@ class DynamicConfig(BaseModel):
                 }
             }
         }
+    }
 
 
 class ConfigUpdateRequest(BaseModel):

@@ -13,8 +13,8 @@ class PredictionRequest(BaseModel):
     feature3: float = Field(..., description="Third feature value")
     feature4: float = Field(..., description="Fourth feature value")
     
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "feature1": 0.5,
                 "feature2": 0.75,
@@ -22,6 +22,7 @@ class PredictionRequest(BaseModel):
                 "feature4": 0.9
             }
         }
+    }
 
 
 class PredictionResponse(BaseModel):
@@ -33,14 +34,15 @@ class PredictionResponse(BaseModel):
     prediction_label: Optional[str] = Field(None, description="Human-readable prediction label")
     confidence: Optional[float] = Field(None, description="Confidence score for the prediction")
     
-    class Config:
-        schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "prediction": 1,
                 "prediction_label": "Positive",
                 "confidence": 0.85
             }
         }
+    }
 
 
 class BatchPredictionRequest(BaseModel):

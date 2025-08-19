@@ -9,10 +9,6 @@ class PyObjectId(ObjectId):
     """Custom ObjectId type for Pydantic models."""
     
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-    
-    @classmethod
     def validate(cls, v):
         if not ObjectId.is_valid(v):
             raise ValueError("Invalid ObjectId")
@@ -22,6 +18,12 @@ class PyObjectId(ObjectId):
     def __get_pydantic_json_schema__(cls, field_schema):
         field_schema.update(type="string")
         return field_schema
+        
+    # Pydantic v2 compatibility
+    @classmethod
+    def __get_validators__(cls):
+        # For backwards compatibility
+        yield cls.validate
 
 
 class ConversationDocument(BaseModel):
