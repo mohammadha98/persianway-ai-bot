@@ -23,6 +23,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="Session identifier for conversation continuity")
     user_email: Optional[str] = Field(None, description="Email address of the user")
     message: str = Field(..., description="The message from the user")
+    simplified_response: Optional[bool] = Field(False, description="If true, returns a simplified response with only title, answer, and requires_human_referral")
    
     model_config = {
         "json_schema_extra": {
@@ -30,7 +31,8 @@ class ChatRequest(BaseModel):
                 "user_id": "user123",
                 "session_id": "session_abc123",
                 "user_email": "user@example.com",
-                "message": "Hello, how can you help me today?"
+                "message": "Hello, how can you help me today?",
+                "simplified_response": False
             }
         }
     }
@@ -50,6 +52,26 @@ class ResponseParameters(BaseModel):
     temperature: float = Field(..., description="The temperature setting used for the model")
     max_tokens: int = Field(..., description="The maximum number of tokens for the response")
     top_p: Optional[float] = Field(None, description="The top_p setting used for the model")
+
+
+class SimplifiedChatResponse(BaseModel):
+    """Schema for simplified chat response data.
+    
+    This defines a simplified output format with only essential fields.
+    """
+    answer: str = Field(..., description="The actual response to the user's query")
+    title: Optional[str] = Field(None, description="Generated title for the conversation")
+    requires_human_referral: bool = Field(..., description="Whether the query requires human referral")
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "answer": "Based on our knowledge base, the optimal pH for tomato cultivation is between 6.0 and 6.8.",
+                "title": "Tomato pH Requirements",
+                "requires_human_referral": False
+            }
+        }
+    }
 
 
 class ChatResponse(BaseModel):

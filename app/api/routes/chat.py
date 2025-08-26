@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Dict, Any
+from typing import Dict, Any, Union
 import time
 
-from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.chat import ChatRequest, ChatResponse, SimplifiedChatResponse
 from app.services.chat_service import get_chat_service
 from app.services.conversation_service import get_conversation_service
 
@@ -10,7 +10,7 @@ from app.services.conversation_service import get_conversation_service
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-@router.post("/", response_model=ChatResponse)
+@router.post("/", response_model=Union[ChatResponse, SimplifiedChatResponse])
 async def create_chat(
     request: ChatRequest, 
     chat_service=Depends(get_chat_service),
@@ -66,13 +66,20 @@ async def create_chat(
         conversation_history = chat_service.get_conversation_history(request.user_id)
         
       
-        # Return the response
-        return ChatResponse(
-            query_analysis=result["query_analysis"],
-            response_parameters=result["response_parameters"],
-            answer=result["answer"],
-            title=title,
-            conversation_history=conversation_history
-         )
+        # Return the response based on simplified_response parameter
+        if request.simplified_response:
+            return SimplifiedChatResponse(
+                answer=result["answer"],
+                title=title,
+                requires_human_referral=result["query_analysis"]["requires_human_referral"]
+            )
+        else:
+            return ChatResponse(
+                query_analysis=result["query_analysis"],
+                response_parameters=result["response_parameters"],
+                answer=result["answer"],
+                title=title,
+                conversation_history=conversation_history
+            )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat processing error: {str(e)}")
