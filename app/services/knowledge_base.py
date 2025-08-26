@@ -585,8 +585,7 @@ class KnowledgeBaseService:
                 "query_id": str(uuid.uuid4()) if requires_human else None,
                 "sources": sources
             }
-            print("RESPONSE IN KNOWLEDGEBASE:::::")
-            print(response)
+         
             return response
             
         except Exception as e:

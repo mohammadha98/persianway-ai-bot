@@ -33,10 +33,21 @@ async def create_chat(
         
         # Calculate response time
         response_time_ms = (time.time() - start_time) * 1000
+           # # Store the conversation in the database
+        await conversation_service.store_conversation(
+            session_id=request.session_id,
+            user_email=request.user_email,
+            user_id=request.user_id,
+            user_question=request.message,
+            system_response=result["answer"],
+            query_analysis=result["query_analysis"],
+            response_parameters=result["response_parameters"],
+            response_time_ms=response_time_ms,
+        )
         
 
                # Get or generate conversation title
-        title: Optional[str] = None
+        title: Optional[str] = ""
         if request.session_id:
             # Check if a conversation with this session ID already exists
    
@@ -50,18 +61,7 @@ async def create_chat(
             title = await chat_service.generate_conversation_title(request.message)
 
         
-        # # Store the conversation in the database
-        await conversation_service.store_conversation(
-            session_id=request.session_id,
-            user_email=request.user_email,
-            user_id=request.user_id,
-            user_question=request.message,
-            system_response=result["answer"],
-            query_analysis=result["query_analysis"],
-            response_parameters=result["response_parameters"],
-            response_time_ms=response_time_ms
-        )
-        
+     
         # Get conversation history
         conversation_history = chat_service.get_conversation_history(request.user_id)
         

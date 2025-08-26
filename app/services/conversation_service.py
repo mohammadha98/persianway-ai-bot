@@ -42,7 +42,8 @@ class ConversationService:
         user_agent: Optional[str] = None,
         ip_address: Optional[str] = None,
         response_time_ms: Optional[float] = None,
-        user_email: Optional[str] = None
+        user_email: Optional[str] = None,
+        title:Optional[str] = None,
     ) -> str:
         """Store or update a conversation in the database using the new embedded message structure.
         If a conversation with the same session_id already exists, it will be updated with the new messages.
