@@ -60,6 +60,7 @@ class ChatResponse(BaseModel):
     query_analysis: QueryAnalysis = Field(..., description="Analysis of the user's query")
     response_parameters: ResponseParameters = Field(..., description="Parameters used for generating the response")
     answer: str = Field(..., description="The actual response to the user's query")
+    title: Optional[str] = Field(None, description="Generated title for the conversation")
     conversation_history: Optional[List[ChatMessage]] = Field(None, description="The conversation history, if applicable")
 
     model_config = {
@@ -77,6 +78,7 @@ class ChatResponse(BaseModel):
                     "max_tokens": 150
                 },
                 "answer": "Based on our knowledge base, the optimal pH for tomato cultivation is between 6.0 and 6.8.",
+                "title": "Tomato pH Requirements",
                 "conversation_history": [
                     {"role": "user", "content": "What is the best pH for tomatoes?"},
                     {"role": "assistant", "content": "Based on our knowledge base, the optimal pH for tomato cultivation is between 6.0 and 6.8."}

@@ -29,8 +29,7 @@ class DocumentProcessor:
         # Initialize embeddings
         # Use OpenAI API key for embeddings (OpenRouter doesn't support embeddings)
         api_key = settings.OPENAI_API_KEY
-        print("DOCS PROCCESSOR API KEY")
-        print(api_key)
+    
         # Always use the fixed OpenAI embedding regardless of the model provider
         # This ensures the knowledge base works with both OpenAI and OpenRouter
         if not api_key or api_key == "":
