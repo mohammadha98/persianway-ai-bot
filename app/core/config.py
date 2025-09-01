@@ -2,6 +2,10 @@ import os
 from typing import Optional, List
 from pydantic_settings import BaseSettings
 
+# Determine the project root directory and construct the absolute path to the .env file
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+ENV_FILE_PATH = os.path.join(PROJECT_ROOT, ".env")
+
 class Settings(BaseSettings):
     # API Configuration
     OPENAI_API_KEY: Optional[str] = None
@@ -51,7 +55,7 @@ class Settings(BaseSettings):
     ALLOWED_HOSTS: list = ["*"]
     
     model_config = {
-        "env_file": ".env",
+        "env_file": ENV_FILE_PATH,
         "case_sensitive": False,
         "extra": "allow"
     }
