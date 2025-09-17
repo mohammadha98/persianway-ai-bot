@@ -4,6 +4,7 @@ import re
 from langchain_community.chat_models import ChatOpenAI
 import logging
 from loguru import logger
+from app.services.spell_corrector import get_spell_corrector
 
 async def get_llm(model_name: str = None, temperature: float = None, max_tokens: int = None, top_p: float = None):
     """Initializes and returns the appropriate language model client.
@@ -189,7 +190,7 @@ class ChatService:
             
             # سرگرمی و هنر (Entertainment & Arts)
             'فیلم', 'سینما', 'بازیگر', 'کارگردان', 'تلویزیون', 'سریال', 'برنامه',
-            'موسیقی', 'خواننده', 'آهنگ', 'کنسرت', 'آلبوم', 'ساز', 'پیانو', 'گیتار',
+            'موسیقی', 'خواننده', 'آهنگ', 'کنسرت', 'آلبوم', 'پیانو', 'گیتار',
             'نقاشی', 'مجسمه سازی', 'عکاسی', 'تئاتر', 'رقص', 'باله', 'اپرا',
             'کتاب', 'رمان', 'شعر', 'نویسنده', 'شاعر', 'ادبیات', 'داستان',
             'movie', 'cinema', 'actor', 'director', 'television', 'series', 'program',
@@ -234,8 +235,8 @@ class ChatService:
             'shares', 'insurance', 'tax', 'inflation', 'recession',
             
             # آموزش و تحصیل (Education)
-            'دانشگاه', 'مدرسه', 'کلاس', 'معلم', 'استاد', 'دانشجو', 'امتحان',
-            'نمره', 'مدرک', 'دیپلم', 'لیسانس', 'فوق لیسانس', 'دکترا',
+            'دانشگاه', 'مدرسه',
+            'نمره', 'دیپلم', 'لیسانس', 'فوق لیسانس', 'دکترا',
             'ریاضی', 'فیزیک', 'شیمی', 'زیست شناسی', 'تاریخ', 'جغرافیا',
             'university', 'school', 'class', 'teacher', 'professor', 'student',
             'exam', 'grade', 'certificate', 'diploma', 'bachelor', 'master',
@@ -254,10 +255,10 @@ class ChatService:
                 # Log the keyword that caused the rejection
                 logger.info(f"Query rejected due to unrelated keyword: '{keyword}' found in query: '{query}'")
                 # You can access this log in your application logs
-                return False
+                return False, keyword
             
         # For all other queries, assume they are related to the domain
-        return True
+        return True, None
 
 
 
@@ -347,11 +348,13 @@ Title:"""
             "top_p": params.get("top_p", llm_settings.top_p)
         }
         answer = ""
+    
 
         try:
             # First, check if the topic is related to our domain
-            # is_domain_related = self._is_topic_related_to_domain(message)
-            is_domain_related = True
+             # Check if the topic is related to the domain
+            is_domain_related, unrelated_keyword = self._is_topic_related_to_domain(message)
+            # is_domain_related = True
             # is_domain_related=True
             if not is_domain_related:
                 # Unrelated topic - refer to human
@@ -359,7 +362,7 @@ Title:"""
                 query_analysis["confidence_score"] = 0.0
                 query_analysis["knowledge_source"] = "none"
                 query_analysis["requires_human_referral"] = True
-                query_analysis["reasoning"] = "Query is outside our domain expertise and requires human specialist attention."
+                query_analysis["reasoning"] = f"Query is outside our domain expertise because it contains the keyword '{unrelated_keyword}', and requires human specialist attention."
             else:
                 # Domain-related topic - try knowledge base first
                 try:

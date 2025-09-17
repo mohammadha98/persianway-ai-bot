@@ -7,6 +7,7 @@ from app.api.routes.conversations import router as conversations_router
 from app.api.routes.config import router as config_router
 from app.api.routes.upload import router as upload_router
 from app.api.routes.users import router as users_router
+from app.api.routes.spell_check import router as spell_check_router
 from app.api.routes.ui import router as ui_routes
 
 # Main API router
@@ -20,6 +21,7 @@ router.include_router(conversations_router)
 router.include_router(config_router)
 router.include_router(upload_router)
 router.include_router(users_router)
+router.include_router(spell_check_router)
 
 # UI router (separate from API router)
 ui_router = APIRouter()
