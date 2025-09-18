@@ -348,7 +348,7 @@ class KnowledgeBaseService:
         content_lower = qa_content.lower()
         
         # Extract key terms from query (remove common words)
-        common_words = {'که', 'این', 'آن', 'در', 'به', 'از', 'با', 'برای', 'تا', 'و', 'یا', 'اما', 'چه', 'چی', 'کی', 'کجا', 'چرا', 'چگونه', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+        common_words = {'که', 'این', 'آن', 'در', 'به', 'از', 'با', 'برای', 'تا', 'و', 'یا', 'اما', 'چه', 'چی', 'کی', 'کجا', 'چرا', 'چگونه', 'بین', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
         query_words = [word for word in query_lower.split() if word not in common_words and len(word) > 2]
         
         # Check for direct word matches
@@ -356,7 +356,7 @@ class KnowledgeBaseService:
         match_ratio = direct_matches / max(len(query_words), 1)
         
         # If we have good word overlap, consider it relevant
-        if match_ratio >= 0.3:  # At least 30% of query words should match
+        if match_ratio >= 0.5:  # At least 50% of query words should match
             return True
             
         # Define domain-specific keywords to detect topic mismatch
@@ -441,7 +441,7 @@ class KnowledgeBaseService:
 
         # Add explicit checks for political/unrelated content
         political_patterns = [
-            'سیاست', 'انتخابات', 'دولت', 'مکتب', 'دیدگاه سیاسی', 'politics', 'political', 'government'
+            'سیاست', 'انتخابات', 'دولت', 'مکتب', 'دیدگاه سیاسی', 'جنگ', 'politics', 'political', 'government', 'war'
         ]
         if any(pattern in query_lower for pattern in political_patterns):
             return False

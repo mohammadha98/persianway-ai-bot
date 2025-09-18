@@ -121,7 +121,7 @@ class ChatService:
         self._sessions: Dict[str, ConversationChain] = {}
         self._memories: Dict[str, ConversationBufferMemory] = {}
         self.config_service = ConfigService()
-        
+        self.generalAnswer = False
         # Note: API key validation is now done dynamically in get_llm function
         
 
@@ -172,7 +172,7 @@ class ChatService:
             # سیاست و حکومت (Politics & Government)
             'سیاست', 'انتخابات', 'دولت', 'مجلس', 'رئیس جمهور', 'وزیر', 'حزب',
             'سیاستمدار', 'رای', 'کاندیدا', 'کابینه', 'پارلمان', 'قانون', 'قضاوت',
-            'دادگاه', 'وکیل', 'قاضی', 'جرم', 'مجازات', 'زندان', 'پلیس',
+            'دادگاه', 'وکیل', 'قاضی', 'جرم', 'مجازات', 'زندان', 'پلیس','جنگ',
             'politics', 'election', 'government', 'parliament', 'president', 'minister',
             'party', 'politician', 'vote', 'candidate', 'cabinet', 'law', 'court',
             'lawyer', 'judge', 'crime', 'punishment', 'prison', 'police', 'america',
@@ -426,24 +426,31 @@ Title:"""
                     response_parameters["temperature"] = 0.1  # Low temperature for factual answers
                         
                 else:
-                    # Low KB confidence but domain-related - try general knowledge as fallback
-                    conversation = await self._get_or_create_session(user_id, model, parameters)
-                    
-                    # Get response using general knowledge. The conversation object already has the system prompt.
-                    response = conversation.predict(input=message)
-                    
-                    # Check if the model indicated it needs human referral
-                    if any(indicator in response for indicator in referral_indicators):
+                    # Low KB confidence - check if general answers are allowed
+                    if self.generalAnswer:
+                        # Domain-related but low confidence - try general knowledge as fallback
+                        conversation = await self._get_or_create_session(user_id, model, parameters)
+                        
+                        # Get response using general knowledge. The conversation object already has the system prompt.
+                        response = conversation.predict(input=message)
+                        
+                        # Check if the model indicated it needs human referral
+                        if any(indicator in response for indicator in referral_indicators):
+                            answer = HUMAN_REFERRAL_MESSAGE
+                            query_analysis["requires_human_referral"] = True
+                            query_analysis["reasoning"] = "Model determined the query requires specialist attention."
+                        else:
+                            answer = response
+                            query_analysis["confidence_score"] = 0.6  # Assign a default confidence for general knowledge
+                            query_analysis["knowledge_source"] = "general_knowledge"
+                            query_analysis["requires_human_referral"] = False
+                            query_analysis["reasoning"] = "Answer provided from general knowledge."
+                            response_parameters["temperature"] = 0.3  # Moderate temperature for general knowledge
+                    else:
+                        # General answers are disabled - refer to human
                         answer = HUMAN_REFERRAL_MESSAGE
                         query_analysis["requires_human_referral"] = True
-                        query_analysis["reasoning"] = "Model determined the query requires specialist attention."
-                    else:
-                        answer = response
-                        query_analysis["confidence_score"] = 0.6  # Assign a default confidence for general knowledge
-                        query_analysis["knowledge_source"] = "general_knowledge"
-                        query_analysis["requires_human_referral"] = False
-                        query_analysis["reasoning"] = "Answer provided from general knowledge."
-                        response_parameters["temperature"] = 0.3  # Moderate temperature for general knowledge
+                        query_analysis["reasoning"] = "Low knowledge base confidence and general answers are disabled."
 
             # Add the final interaction to the conversation history.
             # The `conversation.predict` call above already adds the user message and the AI response to the memory
