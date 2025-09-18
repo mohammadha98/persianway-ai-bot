@@ -173,15 +173,26 @@ class ChatService:
             'سیاست', 'انتخابات', 'دولت', 'مجلس', 'رئیس جمهور', 'وزیر', 'حزب',
             'سیاستمدار', 'رای', 'کاندیدا', 'کابینه', 'پارلمان', 'قانون', 'قضاوت',
             'دادگاه', 'وکیل', 'قاضی', 'جرم', 'مجازات', 'زندان', 'پلیس','جنگ',
+            'سفیر', 'دیپلمات', 'سفارت', 'کنسولگری', 'نماینده', 'سازمان ملل',
+            'ناتو', 'اتحادیه اروپا', 'سنا', 'کنگره', 'مذاکره', 'تحریم', 'معاهده',
+            'استیضاح', 'فساد', 'رشوه', 'اختلاس', 'براندازی', 'کودتا', 'انقلاب',
+            'تظاهرات', 'اعتصاب', 'حقوق بشر', 'آزادی بیان', 'سانسور',
             'politics', 'election', 'government', 'parliament', 'president', 'minister',
             'party', 'politician', 'vote', 'candidate', 'cabinet', 'law', 'court',
             'lawyer', 'judge', 'crime', 'punishment', 'prison', 'police', 'america',
             'usa', 'iran', 'china', 'russia', 'europe', 'country', 'nation', 'diplomacy',
+            'ambassador', 'diplomat', 'embassy', 'consulate', 'representative', 'un',
+            'nato', 'eu', 'senate', 'congress', 'negotiation', 'sanction', 'treaty',
+            'impeachment', 'corruption', 'bribery', 'embezzlement', 'coup', 'revolution',
+            'protest', 'demonstration', 'strike', 'human rights', 'freedom of speech', 'censorship',
+            'democracy', 'dictatorship', 'monarchy', 'republic', 'constitution', 'referendum',
+            'propaganda', 'military', 'army', 'navy', 'air force', 'defense', 'nuclear',
+            'terrorism', 'extremism', 'intelligence', 'spy', 'security council',
             
             # ورزش (Sports)
             'فوتبال', 'والیبال', 'بسکتبال', 'تنیس', 'شنا', 'دوچرخه سواری',
             'کوهنوردی', 'اسکی', 'کشتی', 'جودو', 'کاراته', 'تکواندو', 'بوکس',
-            'ورزش', 'تیم', 'بازیکن', 'مربی', 'استادیوم', 'مسابقه', 'قهرمانی',
+            'ورزش', 'تیم', 'بازیکن', 'استادیوم', 'مسابقه', 'قهرمانی',
             'المپیک', 'جام جهانی', 'لیگ', 'فینال', 'گل', 'امتیاز',
             'football', 'volleyball', 'basketball', 'tennis', 'swimming', 'cycling',
             'mountaineering', 'skiing', 'wrestling', 'judo', 'karate', 'taekwondo',
@@ -203,7 +214,7 @@ class ChatService:
             'کامپیوتر', 'لپ تاپ', 'موبایل', 'تبلت', 'نرم افزار', 'برنامه نویسی',
             'اپلیکیشن', 'وب سایت', 'اینترنت', 'شبکه', 'سرور', 'دیتابیس',
             'هوش مصنوعی', 'ربات', 'بلاک چین', 'ارز دیجیتال', 'بیت کوین',
-            'گیم', 'بازی', 'کنسول', 'پلی استیشن', 'ایکس باکس', 'نینتندو',
+            'گیم', 'کنسول', 'پلی استیشن', 'ایکس باکس', 'نینتندو',
             'computer', 'laptop', 'mobile', 'tablet', 'software', 'programming',
             'application', 'website', 'internet', 'network', 'server', 'database',
             'artificial intelligence', 'robot', 'blockchain', 'cryptocurrency',
@@ -219,23 +230,23 @@ class ChatService:
             
             # املاک و مسکن (Real Estate & Housing)
             'خانه', 'آپارتمان', 'ویلا', 'زمین', 'ساختمان', 'اجاره', 'خرید', 'فروش',
-            'رهن', 'ودیعه', 'مشاور املاک', 'قیمت مسکن', 'متراژ', 'اتاق',
-            'آشپزخانه', 'حمام', 'پارکینگ', 'انباری', 'بالکن', 'حیاط',
+            'رهن', 'ودیعه', 'مشاور املاک', 'قیمت مسکن', 'متراژ'
+             ,'پارکینگ'
             'house', 'apartment', 'villa', 'land', 'building', 'rent', 'buy',
             'sell', 'mortgage', 'deposit', 'real estate agent', 'housing price',
             'area', 'room', 'kitchen', 'bathroom', 'parking', 'storage', 'balcony',
             
             # مالی و بانکی (Finance & Banking)
-            'بانک', 'وام', 'سپرده', 'سود', 'بهره', 'چک', 'کارت اعتباری',
-            'حساب', 'پول', 'ارز', 'دلار', 'یورو', 'بورس', 'سهام', 'سرمایه گذاری',
-            'بیمه', 'مالیات', 'حسابداری', 'اقتصاد', 'تورم', 'رکود',
+            'بانک', 'وام', 'سپرده', 'سود', 'بهره', 'چک', 'کارت اعتباری'
+            ,'ارز', 'دلار', 'یورو', 'بورس', 'سهام', 'سرمایه گذاری',
+            'بیمه', 'مالیات', 'حسابداری', 'اقتصاد', 'رکود',
             'money', 'bank', 'investment', 'stock', 'economy', 'financial', 'accounting',
             'loan', 'deposit', 'profit', 'interest', 'check', 'credit card',
             'account', 'currency', 'dollar', 'euro', 'stock market',
             'shares', 'insurance', 'tax', 'inflation', 'recession',
             
             # آموزش و تحصیل (Education)
-            'دانشگاه', 'مدرسه',
+            'دانشگاه',
             'نمره', 'دیپلم', 'لیسانس', 'فوق لیسانس', 'دکترا',
             'ریاضی', 'فیزیک', 'شیمی', 'زیست شناسی', 'تاریخ', 'جغرافیا',
             'university', 'school', 'class', 'teacher', 'professor', 'student',
@@ -390,22 +401,22 @@ Title:"""
                 # Define referral indicators once for reuse
                 referral_indicators = [
                     "نیاز به بررسی توسط کارشناس",
-                    "به کارشناس مراجعه کنید",
-                    "خارج از حوزه تخصص",
-                    "نمی‌توانم پاسخ دهم",
-                    "نیاز به کارشناس",
-                    "مطمئن نیستم",
-                    "متاسفانه",
-                    "اطلاعات کافی",
-                    "متأسفانه",
-                    "توصیه می‌کنم با کارشناس تماس بگیرید",
-                    "بهتر است با کارشناس مشورت کنید",
-                    "نیاز به مشاوره تخصصی",
-                    "این موضوع نیاز به بررسی بیشتر دارد",
-                    "اطلاعات دقیق‌تری نیاز است",
-                    "پاسخ دقیق به این سوال نیازمند بررسی بیشتر است",
-                    "برای اطلاعات دقیق‌تر با کارشناسان تماس بگیرید",
-                    "این مورد خاص نیاز به بررسی دارد"
+                    "به کارشناس مراجعه کنید"
+                    # "خارج از حوزه تخصص",
+                    # "نمی‌توانم پاسخ دهم",
+                    # "نیاز به کارشناس",
+                    # "مطمئن نیستم",
+                    # "متاسفانه",
+                    # "اطلاعات کافی",
+                    # "متأسفانه",
+                    # "توصیه می‌کنم با کارشناس تماس بگیرید",
+                    # "بهتر است با کارشناس مشورت کنید",
+                    # "نیاز به مشاوره تخصصی",
+                    # "این موضوع نیاز به بررسی بیشتر دارد",
+                    # "اطلاعات دقیق‌تری نیاز است",
+                    # "پاسخ دقیق به این سوال نیازمند بررسی بیشتر است",
+                    # "برای اطلاعات دقیق‌تر با کارشناسان تماس بگیرید",
+                    # "این مورد خاص نیاز به بررسی دارد"
                 ]
                 
                 if kb_confidence >= KB_CONFIDENCE_THRESHOLD:
