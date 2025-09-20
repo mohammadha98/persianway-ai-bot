@@ -176,7 +176,7 @@ class ChatService:
             'سفیر', 'دیپلمات', 'سفارت', 'کنسولگری', 'نماینده', 'سازمان ملل',
             'ناتو', 'اتحادیه اروپا', 'سنا', 'کنگره', 'مذاکره', 'تحریم', 'معاهده',
             'استیضاح', 'فساد', 'رشوه', 'اختلاس', 'براندازی', 'کودتا', 'انقلاب',
-            'تظاهرات', 'اعتصاب', 'حقوق بشر', 'آزادی بیان', 'سانسور',
+            'تظاهرات', 'اعتصاب', 'حقوق بشر', 'سانسور',
             'politics', 'election', 'government', 'parliament', 'president', 'minister',
             'party', 'politician', 'vote', 'candidate', 'cabinet', 'law', 'court',
             'lawyer', 'judge', 'crime', 'punishment', 'prison', 'police', 'america',
@@ -192,18 +192,18 @@ class ChatService:
             # ورزش (Sports)
             'فوتبال', 'والیبال', 'بسکتبال', 'تنیس', 'شنا', 'دوچرخه سواری',
             'کوهنوردی', 'اسکی', 'کشتی', 'جودو', 'کاراته', 'تکواندو', 'بوکس',
-            'ورزش', 'تیم', 'بازیکن', 'استادیوم', 'مسابقه', 'قهرمانی',
-            'المپیک', 'جام جهانی', 'لیگ', 'فینال', 'گل', 'امتیاز',
+          'بازیکن', 'استادیوم', 'مسابقه', 'قهرمانی',
+            'المپیک', 'جام جهانی', 'لیگ', 'فینال',
             'football', 'volleyball', 'basketball', 'tennis', 'swimming', 'cycling',
             'mountaineering', 'skiing', 'wrestling', 'judo', 'karate', 'taekwondo',
             'boxing', 'sport', 'team', 'player', 'coach', 'stadium', 'competition',
             'championship', 'olympics', 'world cup', 'league', 'final', 'goal', 'score',
             
             # سرگرمی و هنر (Entertainment & Arts)
-            'فیلم', 'سینما', 'بازیگر', 'کارگردان', 'تلویزیون', 'سریال', 'برنامه',
+             'سینما', 'بازیگر', 'کارگردان', 'تلویزیون',
             'موسیقی', 'خواننده', 'آهنگ', 'کنسرت', 'آلبوم', 'پیانو', 'گیتار',
             'نقاشی', 'مجسمه سازی', 'عکاسی', 'تئاتر', 'رقص', 'باله', 'اپرا',
-            'کتاب', 'رمان', 'شعر', 'نویسنده', 'شاعر', 'ادبیات', 'داستان',
+            'رمان', 'شعر', 'نویسنده', 'شاعر', 'ادبیات',
             'movie', 'cinema', 'actor', 'director', 'television', 'series', 'program',
             'music', 'singer', 'song', 'concert', 'album', 'instrument', 'piano',
             'guitar', 'painting', 'sculpture', 'photography', 'theater', 'dance',
@@ -212,43 +212,36 @@ class ChatService:
             
             # فناوری و الکترونیک (Technology & Electronics)
             'کامپیوتر', 'لپ تاپ', 'موبایل', 'تبلت', 'نرم افزار', 'برنامه نویسی',
-            'اپلیکیشن', 'وب سایت', 'اینترنت', 'شبکه', 'سرور', 'دیتابیس',
-            'هوش مصنوعی', 'ربات', 'بلاک چین', 'ارز دیجیتال', 'بیت کوین',
-            'گیم', 'کنسول', 'پلی استیشن', 'ایکس باکس', 'نینتندو',
+            'اپلیکیشن', 'وب سایت', 'اینترنت', 'دیتابیس',
+             'بلاک چین', 'ارز دیجیتال', 'بیت کوین',
+             'کنسول', 'پلی استیشن', 'ایکس باکس', 'نینتندو',
             'computer', 'laptop', 'mobile', 'tablet', 'software', 'programming',
             'application', 'website', 'internet', 'network', 'server', 'database',
             'artificial intelligence', 'robot', 'blockchain', 'cryptocurrency',
             'bitcoin', 'game', 'gaming', 'console', 'playstation', 'xbox', 'nintendo',
             
-            # حمل و نقل (Transportation)
-            'اتومبیل', 'ماشین', 'موتور', 'دوچرخه', 'قطار', 'هواپیما', 'کشتی',
-            'اتوبوس', 'تاکسی', 'مترو', 'ترام', 'کامیون', 'تریلر', 'جرثقیل',
-            'بنزین', 'گازوئیل', 'گاز', 'باتری', 'موتور', 'چرخ', 'ترمز',
-            'car', 'automobile', 'motorcycle', 'bicycle', 'train', 'airplane',
-            'ship', 'bus', 'taxi', 'metro', 'tram', 'truck', 'trailer', 'crane',
-            'gasoline', 'diesel', 'gas', 'battery', 'engine', 'wheel', 'brake',
-            
+           
             # املاک و مسکن (Real Estate & Housing)
-            'خانه', 'آپارتمان', 'ویلا', 'زمین', 'ساختمان', 'اجاره', 'خرید', 'فروش',
+            'آپارتمان', 'ویلا',
             'رهن', 'ودیعه', 'مشاور املاک', 'قیمت مسکن', 'متراژ'
-             ,'پارکینگ'
+            
             'house', 'apartment', 'villa', 'land', 'building', 'rent', 'buy',
             'sell', 'mortgage', 'deposit', 'real estate agent', 'housing price',
             'area', 'room', 'kitchen', 'bathroom', 'parking', 'storage', 'balcony',
             
             # مالی و بانکی (Finance & Banking)
-            'بانک', 'وام', 'سپرده', 'سود', 'بهره', 'چک', 'کارت اعتباری'
-            ,'ارز', 'دلار', 'یورو', 'بورس', 'سهام', 'سرمایه گذاری',
-            'بیمه', 'مالیات', 'حسابداری', 'اقتصاد', 'رکود',
+             'وام', 'سپرده', 'سود', 'بهره', 'چک', 'کارت اعتباری'
+            , 'دلار', 'یورو', 'بورس', 'سهام', 'سرمایه گذاری',
+            'بیمه', 'مالیات', 'حسابداری', 'اقتصاد',
             'money', 'bank', 'investment', 'stock', 'economy', 'financial', 'accounting',
             'loan', 'deposit', 'profit', 'interest', 'check', 'credit card',
             'account', 'currency', 'dollar', 'euro', 'stock market',
             'shares', 'insurance', 'tax', 'inflation', 'recession',
             
             # آموزش و تحصیل (Education)
-            'دانشگاه',
-            'نمره', 'دیپلم', 'لیسانس', 'فوق لیسانس', 'دکترا',
-            'ریاضی', 'فیزیک', 'شیمی', 'زیست شناسی', 'تاریخ', 'جغرافیا',
+            'دانشگاه'
+            , 'دیپلم', 'لیسانس', 'فوق لیسانس', 'دکترا',
+            'ریاضی', 'فیزیک', 'شیمی', 'زیست شناسی', 'جغرافیا',
             'university', 'school', 'class', 'teacher', 'professor', 'student',
             'exam', 'grade', 'certificate', 'diploma', 'bachelor', 'master',
             'phd', 'mathematics', 'physics', 'chemistry', 'biology', 'history',
