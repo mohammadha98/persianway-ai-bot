@@ -464,6 +464,68 @@ class KnowledgeBaseService:
         # Default to False for better precision
         return False
     
+
+    async def expand_query(self, query: str) -> Dict[str, Any]:
+        """Expand a query using GPT-4o-mini to improve search results.
+        
+        Args:
+            query: The original query string
+            
+        Returns:
+            A dictionary containing the original query and expanded queries
+        """
+        try:
+            from openai import AsyncOpenAI
+            
+            # Initialize OpenAI client
+            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            
+            # Create a prompt for query expansion
+            prompt = f"""Given the following query, generate 3 alternative versions that capture the same intent but with different wording or additional context. 
+            Focus on expanding concepts, adding synonyms, and considering both Persian and English terminology.
+            
+            Original query: {query}
+            
+            Return ONLY a JSON object with the following format:
+            {{
+                "expanded_queries": [
+                    "first alternative query",
+                    "second alternative query",
+                    "third alternative query"
+                ]
+            }}
+            """
+            
+            # Call GPT-4o-mini
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that expands search queries to improve retrieval results."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=700
+            )
+            
+            # Parse the response
+            import json
+            expanded_queries = json.loads(response.choices[0].message.content)
+            
+            # Return the original query and expanded queries
+            return {
+                "original_query": query,
+                "expanded_queries": expanded_queries.get("expanded_queries", [])
+            }
+        except Exception as e:
+            logging.error(f"Error in query expansion: {str(e)}")
+            # Return just the original query if there's an error
+            return {
+                "original_query": query,
+                "expanded_queries": []
+            }
+
+
     async def query_knowledge_base(self, query: str) -> Dict[str, Any]:
         """Query the knowledge base with a question.
         
@@ -483,8 +545,29 @@ class KnowledgeBaseService:
                 
 
             rag_settings = await self.config_service.get_rag_settings()
-            # Search for similar documents with scores
-            docs_with_scores = vector_store.similarity_search_with_score(query, k=rag_settings.top_k_results)
+            
+            # Expand the query for better search results
+            expanded_query_result = await self.expand_query(query)
+            all_queries = [expanded_query_result["original_query"]] + expanded_query_result["expanded_queries"]
+            
+            # Search for similar documents with scores using all queries
+            all_docs_with_scores = []
+            for search_query in all_queries:
+                if search_query.strip():  # Only search non-empty queries
+                    docs_with_scores = vector_store.similarity_search_with_score(search_query, k=rag_settings.top_k_results)
+                    all_docs_with_scores.extend(docs_with_scores)
+            
+            # Remove duplicates and sort by score (lower is better for similarity)
+            seen_docs = set()
+            unique_docs_with_scores = []
+            for doc, score in sorted(all_docs_with_scores, key=lambda x: x[1]):
+                doc_key = (doc.page_content, doc.metadata.get("source", ""), doc.metadata.get("page", 0))
+                if doc_key not in seen_docs:
+                    seen_docs.add(doc_key)
+                    unique_docs_with_scores.append((doc, score))
+            
+            # Take the top results after deduplication
+            docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
             
             # Filter and prioritize "excel_qa" and "qa_contribution" source types if available
             qa_docs = [doc for doc, score in docs_with_scores if doc.metadata.get("source_type") in ["excel_qa", "qa_contribution"]]

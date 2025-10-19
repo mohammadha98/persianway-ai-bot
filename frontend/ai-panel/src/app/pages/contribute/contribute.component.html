@@ -50,32 +50,32 @@
 
           <!-- Tags -->
           <mat-form-field appearance="outline" class="full-width">
-            <mat-label>برچسب‌ها</mat-label>
+            <mat-label>برچسب‌ها *</mat-label>
             <input matInput [(ngModel)]="form.tags" name="tags"
-                   placeholder="برچسب‌ها را با کامه جدا کنید (مثال: گندم، کود، آبیاری)">
+                   placeholder="برچسب‌ها را با کامه جدا کنید (مثال: گندم، کود، آبیاری)" required>
             <mat-hint>برچسب‌ها به بهتر پیدا شدن مطلب کمک می‌کنند</mat-hint>
           </mat-form-field>
 
           <!-- Source -->
           <mat-form-field appearance="outline" class="full-width">
-            <mat-label>منبع</mat-label>
+            <mat-label>منبع *</mat-label>
             <input matInput [(ngModel)]="form.source" name="source"
-                   placeholder="منبع اطلاعات (اختیاری)">
+                   placeholder="منبع اطلاعات" required>
             <mat-hint>نام کتاب، مقاله، یا منبع دیگر</mat-hint>
           </mat-form-field>
 
           <!-- Author -->
           <mat-form-field appearance="outline" class="full-width">
-            <mat-label>نویسنده</mat-label>
+            <mat-label>نویسنده *</mat-label>
             <input matInput [(ngModel)]="form.author" name="author"
-                   placeholder="نام نویسنده یا منبع (اختیاری)">
+                   placeholder="نام نویسنده یا منبع" required>
           </mat-form-field>
 
           <!-- Additional References -->
           <mat-form-field appearance="outline" class="full-width">
-            <mat-label>منابع تکمیلی</mat-label>
+            <mat-label>منابع تکمیلی *</mat-label>
             <textarea matInput [(ngModel)]="form.additionalReferences" name="additionalReferences"
-                      rows="2" placeholder="لینک‌ها یا منابع تکمیلی (اختیاری)">
+                      rows="2" placeholder="لینک‌ها یا منابع تکمیلی" required>
             </textarea>
           </mat-form-field>
         </form>
