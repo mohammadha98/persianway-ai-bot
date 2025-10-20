@@ -1,0 +1,101 @@
+<div class="knowledge-list-container">
+  <!-- Header Section
+  <mat-card class="header-card">
+    <mat-card-header>
+      <div mat-card-avatar class="header-icon">
+        <mat-icon>library_books</mat-icon>
+      </div>
+      <mat-card-title>لیست دانش‌های ثبت شده</mat-card-title>
+      <mat-card-subtitle>مشاهده و مدیریت دانش‌های موجود در پایگاه دانش</mat-card-subtitle>
+    </mat-card-header>
+  </mat-card> -->
+
+  <!-- Knowledge Table -->
+  <mat-card class="table-card">
+     <mat-card-header>
+      <div mat-card-avatar class="table-icon">
+        <mat-icon>format_list_bulleted</mat-icon>
+      </div>
+      <mat-card-title>دانش‌های ثبت شده</mat-card-title>
+      <mat-card-subtitle>مشاهده و مدیریت محتوای پایگاه دانش</mat-card-subtitle>
+    </mat-card-header> 
+    
+    <mat-card-content>
+      <!-- Search and Filter -->
+      <div class="search-filter-container">
+        <mat-form-field appearance="outline" class="search-field">
+          <mat-label>جستجو</mat-label>
+          <input matInput [(ngModel)]="searchText" (input)="onSearchInput($event)" placeholder="جستجو در عنوان، محتوا یا برچسب‌ها">
+          <mat-icon matSuffix *ngIf="!isSearching">search</mat-icon>
+          <mat-icon matSuffix *ngIf="isSearching" class="searching-icon">hourglass_empty</mat-icon>
+        </mat-form-field>
+
+      </div>
+      
+      <!-- Table -->
+      <div class="table-container">
+        <!-- Loading indicator -->
+        <div *ngIf="isLoading" class="loading-state">
+          <mat-icon>hourglass_empty</mat-icon>
+          <p>در حال بارگذاری...</p>
+        </div>
+        
+        <table mat-table [dataSource]="filteredKnowledgeItems" class="knowledge-table" *ngIf="!isLoading">
+          <!-- Title Column -->
+          <ng-container matColumnDef="title">
+            <th mat-header-cell *matHeaderCellDef>عنوان</th>
+            <td mat-cell *matCellDef="let item">
+              {{ item.title }}
+              <span *ngIf="item.file_name" class="file-badge" [matTooltip]="'فایل: ' + item.file_name">
+                <mat-icon>attach_file</mat-icon>
+              </span>
+            </td>
+          </ng-container>
+    
+          <!-- Tags Column -->
+          <ng-container matColumnDef="tags">
+            <th mat-header-cell *matHeaderCellDef>برچسب‌ها</th>
+            <td mat-cell *matCellDef="let item">{{ item.meta_tags?.join(', ') || '' }}</td>
+          </ng-container>
+          
+          <!-- Author Column -->
+          <ng-container matColumnDef="author">
+            <th mat-header-cell *matHeaderCellDef>نویسنده</th>
+            <td mat-cell *matCellDef="let item">{{ item.author_name || 'نامشخص' }}</td>
+          </ng-container>
+          
+          <!-- Actions Column -->
+          <ng-container matColumnDef="actions">
+            <th mat-header-cell *matHeaderCellDef>عملیات</th>
+            <td mat-cell *matCellDef="let item">
+              <button mat-icon-button color="primary" (click)="viewKnowledge(item)" matTooltip="مشاهده">
+                <mat-icon>visibility</mat-icon>
+              </button>
+              <button mat-icon-button color="warn" (click)="deleteKnowledge(item)" matTooltip="حذف">
+                <mat-icon>delete</mat-icon>
+              </button>
+            </td>
+          </ng-container>
+          
+          <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+          <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+        </table>
+        
+        <!-- Empty State -->
+        <div *ngIf="!isLoading && filteredKnowledgeItems.length === 0" class="empty-state">
+          <mat-icon>info</mat-icon>
+          <p>هیچ موردی یافت نشد.</p>
+        </div>
+      </div>
+      
+      <!-- Pagination -->
+      <mat-paginator 
+        [length]="totalItems"
+        [pageSize]="pageSize"
+        [pageSizeOptions]="[5, 10, 25, 50]"
+        (page)="onPageChange($event)"
+        aria-label="انتخاب صفحه">
+      </mat-paginator>
+    </mat-card-content>
+  </mat-card>
+</div>

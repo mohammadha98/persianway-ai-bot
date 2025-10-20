@@ -24,6 +24,7 @@ class KnowledgeContributionItem(BaseModel):
     title: str = Field(..., description="Title of the entry")
     submitted_at: str = Field(..., description="Timestamp of submission")
     meta_tags: List[str] = Field(..., description="Keywords for categorization")
+    content:Optional[str] = Field(..., description="The content of the knowledge entry")
     source: str = Field(..., description="The origin or reference for the knowledge")
     author_name: Optional[str] = Field(None, description="Name of the contributor")
     additional_references: Optional[str] = Field(None, description="URLs or citation text for further reading")
@@ -169,6 +170,18 @@ class KnowledgeContributionItem(BaseModel):
     author_name: Optional[str] = Field(None, description="Name of the contributor")
     additional_references: Optional[str] = Field(None, description="URLs or citation text for further reading")
 
+
+class KnowledgeItemDb(BaseModel):
+    """Schema for a single knowledge item in the database."""
+    hash_id: str = Field(..., description="Unique hashed identifier for the knowledge item")
+    title: str = Field(..., description="Title of the entry")
+    content: Optional[str] = Field(None, description="The content of the knowledge entry")
+    meta_tags: List[str] = Field(..., description="Keywords for categorization")
+    author_name: Optional[str] = Field(None, description="Name of the contributor")
+    submission_timestamp: str = Field(..., description="Timestamp of submission")
+    entry_type: str = Field(..., description="Type of entry (user_contribution, file_processed, etc.)")
+    file_type: Optional[str] = Field(None, description="Type of the uploaded File")
+    file_name: Optional[str] = Field(None, description="Name of the uploaded File")
 
 class KnowledgeContributionResponse(BaseModel):
     """Schema for the knowledge contribution API response."""

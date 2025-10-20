@@ -196,7 +196,7 @@ class KnowledgeBaseService:
         additional_references: Optional[str] = None,
         uploaded_file_path: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Adds a new knowledge entry to the vector store.
+        """Adds a new knowledge entry to the vector store and relational database.
 
         Args:
             title: Title of the entry.
@@ -211,7 +211,8 @@ class KnowledgeBaseService:
             A dictionary with the ID and timestamp of the new entry, and file processing information if applicable.
         """
         try:
-            doc_id = str(uuid.uuid4())
+            # Generate a unique hash_id that will be used in both vector store and database
+            hash_id = str(uuid.uuid4())
             submitted_at = datetime.now().isoformat()
             processed_file = False
             file_type = None
@@ -236,7 +237,8 @@ class KnowledgeBaseService:
                             doc.metadata["additional_references"] = additional_references if additional_references else "None"
                             doc.metadata["submission_timestamp"] = submitted_at
                             doc.metadata["entry_type"] = "user_contribution_pdf"
-                            doc.metadata["id"] = doc_id
+                            doc.metadata["hash_id"] = hash_id  # Use hash_id as common identifier
+                            doc.metadata["id"] = hash_id       # Keep id for backward compatibility
                         
                         file_docs.extend(pdf_docs)
                         processed_file = True
@@ -254,7 +256,8 @@ class KnowledgeBaseService:
                             doc.metadata["additional_references"] = additional_references if additional_references else "None"
                             doc.metadata["submission_timestamp"] = submitted_at
                             doc.metadata["entry_type"] = "user_contribution_excel"
-                            doc.metadata["id"] = doc_id
+                            doc.metadata["hash_id"] = hash_id  # Use hash_id as common identifier
+                            doc.metadata["id"] = hash_id       # Keep id for backward compatibility
                         
                         file_docs.extend(excel_docs)
                         processed_file = True
@@ -271,7 +274,8 @@ class KnowledgeBaseService:
                 "source_type": "qa_contribution", # Mark as QA contribution for retrieval priority
                 "question": title, # Store the title as the question
                 "answer": content, # Store the content as the answer
-                "id": doc_id
+                "hash_id": hash_id,  # Use hash_id as common identifier
+                "id": hash_id        # Keep id for backward compatibility
             }
 
             # Create Langchain Document for text contribution
@@ -301,22 +305,49 @@ class KnowledgeBaseService:
                     vector_store.add_documents(batch)
                     logging.info(f"Processed batch {i//batch_size + 1}/{(len(file_docs) + batch_size - 1)//batch_size} with {len(batch)} documents from uploaded file")
             
-            # Persist changes
+            # Persist changes to vector store
             vector_store.persist() # Ensure data is saved
 
             # After adding new documents, the QA chain should be reset to reflect the changes.
             self._qa_chain = None
-            logging.info("Knowledge base updated. QA chain has been reset.")
+            logging.info("Vector store updated. QA chain has been reset.")
+            
+            # Prepare document for database insertion
+            db_document = {
+                "hash_id": hash_id,
+                "title": title,
+                "content": content,
+                "meta_tags": meta_tags,
+                "author_name": author_name if author_name else "Unknown",
+                "additional_references": additional_references.split(",") if additional_references else [],
+                "submission_timestamp": submitted_at,
+                "entry_type": "user_contribution"
+            }
+            
+            # Add file information if a file was processed
+            if processed_file:
+                db_document["file_processed"] = True
+                db_document["file_type"] = file_type
+                db_document["file_name"] = os.path.basename(uploaded_file_path) if uploaded_file_path else None
+                if file_type == 'excel' and 'qa_count' in locals():
+                    db_document["qa_count"] = qa_count
+            
+            # Insert document into database
+            from app.services.database import get_database_service
+            db_service = await get_database_service()
+            db_id = await db_service.insert_knowledge_document(db_document)
+            logging.info(f"Document inserted into database with ID: {db_id}")
 
             # Prepare response
             response = {
-                "id": doc_id,
+                "id": hash_id,
                 "title": title,
                 "submitted_at": submitted_at,
                 "meta_tags": meta_tags,
                 "source": source,
                 "author_name": author_name,
-                "additional_references": additional_references
+                "additional_references": additional_references,
+                "db_id": db_id
             }
             
             # Add file information if a file was processed

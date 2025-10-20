@@ -3,13 +3,15 @@ from typing import Dict, Any, List, Optional
 from enum import Enum
 import uuid
 from datetime import datetime
+from app.services.database import get_database_service
 
 from app.schemas.knowledge_base import (
     KnowledgeBaseQuery, 
     KnowledgeBaseResponse, 
     ProcessDocsResponse,
     KnowledgeContributionResponse,
-    KnowledgeContributionItem
+    KnowledgeContributionItem,
+    KnowledgeItemDb
 )
 from app.services.knowledge_base import get_knowledge_base_service
 from app.services.document_processor import get_document_processor
@@ -17,6 +19,39 @@ from app.services.document_processor import get_document_processor
 # Create router for knowledge base endpoints
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
+
+@router.get("/knowledge-list", response_model=List[KnowledgeItemDb])
+async def get_knowledge_list(db_service=Depends(get_database_service)):
+    """Retrieve the list of knowledge contributions.
+    
+    This endpoint returns a list of all knowledge contributions, including
+    questions, answers, and metadata.
+    """
+    try:
+        # Query the database for knowledge contributions
+        documents = await db_service.get_knowledge_documents()
+        
+        # Convert documents to KnowledgeContributionItem format
+        knowledge_list = []
+        for doc in documents:
+            # Handle different document structures based on entry_type
+            if doc.get("entry_type") == "user_contribution":
+                knowledge_list.append(KnowledgeItemDb(
+                    hash_id=doc["hash_id"],
+                    title=doc["title"],
+                    content=doc["content"],
+                    author_name=doc["author_name"],
+                    meta_tags=doc["meta_tags"],
+                    entry_type=doc["entry_type"],
+                    submission_timestamp=doc["submission_timestamp"],
+                    file_type=doc.get("file_type"),  # Use get() to handle missing fields
+                    file_name=doc.get("file_name")   # Use get() to handle missing fields
+                ))
+            # Add handling for other entry types if needed
+        
+        return knowledge_list
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Knowledge list retrieval error: {str(e)}")
 
 @router.post("/query", response_model=KnowledgeBaseResponse)
 async def query_knowledge_base(query: KnowledgeBaseQuery, kb_service=Depends(get_knowledge_base_service)):

@@ -15,6 +15,19 @@ export interface FileUploadResponse {
   filename?: string;
 }
 
+
+export interface KnowledgeListItem{
+  hash_id: string;
+  title: string;
+  content: string;
+  meta_tags: string[];
+  author_name: string;
+  additionalReferences?: string;
+  submission_timestamp: string;
+  file_type?: string;
+  file_name?: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -43,5 +56,11 @@ export class ContributeService {
   getUserContributions(): Observable<any> {
     const url = `${this.apiUrl}/api/contributions`;
     return this.http.get(url);
+  }
+
+
+  knowledgeList(): Observable<KnowledgeListItem[]> {
+    const url = `${this.apiUrl}/api/knowledge/knowledge-list`;
+    return this.http.get<KnowledgeListItem[]>(url);
   }
 }

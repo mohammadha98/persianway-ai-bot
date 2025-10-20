@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -10,6 +10,8 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { ContributeService } from '../../services/contribute.service';
+import { KnowledgeListComponent } from '../knowledge-list/knowledge-list.component';
+import { MatExpansionModule } from '@angular/material/expansion';
 
 interface ContributionForm {
   title: string;
@@ -34,16 +36,21 @@ interface ContributionForm {
     MatFormFieldModule,
     MatSelectModule,
     MatSnackBarModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    MatExpansionModule,
+    KnowledgeListComponent
   ],
   templateUrl: './contribute.component.html',
   styleUrl: './contribute.component.scss'
 })
 export class ContributeComponent {
+  // Expandable section state
+  isExpanded: boolean = true;
+  
   form: ContributionForm = {
     title: '',
-    content: '',
     category: '',
+    content: '',
     tags: '',
     source: '',
     author: '',
@@ -64,6 +71,11 @@ export class ContributeComponent {
 
   isSubmitting = false;
   selectedFile: File | null = null;
+  
+  // Toggle expand/collapse function
+  toggleExpand(): void {
+    this.isExpanded = !this.isExpanded;
+  }
 
   constructor(
     private contributeService: ContributeService,

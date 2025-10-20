@@ -51,10 +51,71 @@
 }
 
 .content-grid {
-  display: grid;
+ 
   grid-template-columns: 1fr 1fr;
   gap: 32px;
   margin-bottom: 32px;
+}
+
+// Expandable Section Styles
+.expandable-section {
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  background-color: white;
+  overflow: hidden;
+  margin-bottom: 32px;
+}
+
+.expandable-header {
+  display: flex;
+  align-items: center;
+  padding: 16px 24px;
+  background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s ease;
+  direction: rtl;
+  
+  &:hover {
+    background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
+  }
+  
+  mat-icon {
+    margin-left: 12px;
+    color: white;
+    transition: transform 0.3s ease;
+  }
+  
+  h3 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 500;
+    color: white;
+  }
+}
+
+.expandable-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.5s ease;
+  
+  &.expanded {
+    max-height: 3000px; // Large enough to contain all content
+  }
+  
+  // Grid layout for the form and upload card
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 32px;
+  padding: 0;
+  
+  &.expanded {
+    padding: 24px;
+  }
+  
+  @media (min-width: 992px) {
+    grid-template-columns: 2fr 1fr;
+  }
 }
 
 .form-card {

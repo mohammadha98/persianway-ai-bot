@@ -106,6 +106,81 @@ class DatabaseService:
         """Get the config collection."""
         database = self.get_database()
         return database["config"]
+        
+    def get_knowledgebase_collection(self):
+        """Get the knowledgebase collection."""
+        database = self.get_database()
+        return database["knowledgebase"]
+        
+    async def insert_knowledge_document(self, document: dict) -> str:
+        """
+        Insert a document into the knowledgebase collection.
+        
+        Args:
+            document: A dictionary containing the knowledge document data with the following fields:
+                - hash_id: A unique identifier for the document
+                - title: The title of the knowledge entry
+                - content: The main content of the knowledge entry
+                - meta_tags: An array of tags for categorization
+                - author_name: The name of the author who created the entry
+                - additional_references: An array of related references or sources
+                - submission_timestamp: The date and time when the entry was submitted
+                - entry_type: The type of knowledge entry
+                
+        Returns:
+            The inserted document ID
+            
+        Raises:
+            ValueError: If required fields are missing
+            RuntimeError: If database operation fails
+        """
+        # Validate required fields
+        required_fields = ["hash_id", "title", "content", "meta_tags", 
+                          "author_name", "submission_timestamp", "entry_type"]
+        
+        missing_fields = [field for field in required_fields if field not in document]
+        if missing_fields:
+            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
+        
+        # Ensure arrays are properly formatted
+        if "meta_tags" in document and not isinstance(document["meta_tags"], list):
+            document["meta_tags"] = [document["meta_tags"]]
+            
+        if "additional_references" in document and not isinstance(document["additional_references"], list):
+            document["additional_references"] = [document["additional_references"]]
+        
+        try:
+            # Get the knowledgebase collection
+            collection = self.get_knowledgebase_collection()
+            
+            # Insert the document
+            result = await collection.insert_one(document)
+            
+            # Return the inserted document ID
+            return str(result.inserted_id)
+        except Exception as e:
+            logger.error(f"Failed to insert knowledge document: {str(e)}")
+            raise RuntimeError(f"Failed to insert knowledge document: {str(e)}")
+            
+    async def get_knowledge_documents(self, limit: int = 100, skip: int = 0) -> list[dict]:
+        """
+        Retrieve knowledge documents from the knowledgebase collection.
+        
+        Args:
+            limit: Maximum number of documents to return
+            skip: Number of documents to skip for pagination
+            
+        Returns:
+            List of knowledge documents
+        """
+        try:
+            collection = self.get_knowledgebase_collection()
+            cursor = collection.find().sort("submission_timestamp", -1).skip(skip).limit(limit)
+            documents = await cursor.to_list(length=limit)
+            return documents
+        except Exception as e:
+            logger.error(f"Failed to retrieve knowledge documents: {str(e)}")
+            raise RuntimeError(f"Failed to retrieve knowledge documents: {str(e)}")
 
 
 # Global database service instance
