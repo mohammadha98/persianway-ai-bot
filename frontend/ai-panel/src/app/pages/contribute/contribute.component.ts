@@ -169,11 +169,7 @@ export class ContributeComponent {
   public isFormValid(): boolean {
     return !!(this.form.title.trim() &&
       this.form.content.trim() &&
-      this.form.category &&
-      this.form.tags.trim() &&
-      this.form.source.trim() &&
-      this.form.author.trim() &&
-      this.form.additionalReferences.trim());
+      this.form.tags.trim() )
   }
 
   private resetForm() {

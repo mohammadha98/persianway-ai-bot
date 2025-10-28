@@ -26,6 +26,14 @@ export interface KnowledgeListItem{
   submission_timestamp: string;
   file_type?: string;
   file_name?: string;
+  synced?:boolean
+}
+
+export interface KnowledgeRemovalResponse {
+  success: boolean;
+  message: string;
+  hash_id: string;
+  removed_count: number;
 }
 
 @Injectable({
@@ -63,4 +71,11 @@ export class ContributeService {
     const url = `${this.apiUrl}/api/knowledge/knowledge-list`;
     return this.http.get<KnowledgeListItem[]>(url);
   }
+
+  removeKnowledge(hashId: string): Observable<KnowledgeRemovalResponse> {
+    const url = `${this.apiUrl}/api/knowledge/remove/${hashId}`;
+    return this.http.delete<KnowledgeRemovalResponse>(url);
+  }
+
+  
 }

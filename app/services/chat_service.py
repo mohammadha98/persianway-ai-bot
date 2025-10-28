@@ -136,6 +136,10 @@ class ChatService:
             A LangChain ConversationChain for the user
         """
         if user_id not in self._sessions:
+            # Get dynamic configuration for system prompt
+            await self.config_service._load_config()
+            rag_settings = await self.config_service.get_rag_settings()
+            
             # Create a new memory for this user
             memory = ConversationBufferMemory(return_messages=True)
             self._memories[user_id] = memory
@@ -150,8 +154,10 @@ class ChatService:
                 memory=memory,
                 verbose=False
             )
-            # Clear any existing messages to prevent the system prompt from being added
-            self._sessions[user_id].memory.clear()
+            
+            # Add system prompt to establish model behavior for general knowledge responses
+            system_prompt = rag_settings.system_prompt
+            self._sessions[user_id].memory.chat_memory.add_message(SystemMessage(content=system_prompt))
         
         return self._sessions[user_id]
     
@@ -309,7 +315,7 @@ Title:"""
             # Return a default title if generation fails
             return "New Conversation"
 
-    async def process_message(self, user_id: str, message: str, model: str = None, parameters: dict = None) -> Dict[str, Any]:
+    async def process_message(self, user_id: str, message: str, conversation_history: List = None, model: str = None, parameters: dict = None) -> Dict[str, Any]:
         """Process a user message using a hybrid approach.
 
         This service implements a three-tier approach:
@@ -320,6 +326,7 @@ Title:"""
         Args:
             user_id: Unique identifier for the user session
             message: The message from the user
+            conversation_history: Previous conversation messages for context
             model: The model to use for processing
             parameters: Additional parameters for the model
 
@@ -338,6 +345,7 @@ Title:"""
         rag_settings = await self.config_service.get_rag_settings()
         HUMAN_REFERRAL_MESSAGE = rag_settings.human_referral_message
         KB_CONFIDENCE_THRESHOLD = rag_settings.knowledge_base_confidence_threshold
+        HISTORY=conversation_history
         query_analysis = {
             "confidence_score": 0.0,
             "knowledge_source": "none",
@@ -371,7 +379,7 @@ Title:"""
                 # Domain-related topic - try knowledge base first
                 try:
                     kb_service = get_knowledge_base_service()
-                    kb_result = await kb_service.query_knowledge_base(message)
+                    kb_result = await kb_service.query_knowledge_base(message, conversation_history)
                     kb_confidence = kb_result.get("confidence_score", 0) if kb_result else 0
                 except RuntimeError as kb_error:
                     # Vector store configuration error - log and inform user
@@ -409,7 +417,7 @@ Title:"""
                     
                     # Check for referral indicators even with high confidence
                     if any(indicator in answer for indicator in referral_indicators):
-                        answer = HUMAN_REFERRAL_MESSAGE
+                        answer = answer
                         query_analysis["requires_human_referral"] = True
                         query_analysis["reasoning"] = "Knowledge base answer contains referral indicators despite high confidence."
                     else:

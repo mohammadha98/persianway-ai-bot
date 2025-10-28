@@ -26,15 +26,31 @@ async def create_chat(
         # Record start time for response time calculation
         start_time = time.time()
         
+        # Get or generate conversation title
+        title: Optional[str] = ""
+        existing_conversation = None
+        
+        if request.session_id:
+            # Check if a conversation with this session ID already exists
+            existing_conversation = await conversation_service.get_conversations_by_session_id(request.session_id)
+            if existing_conversation and len(existing_conversation) > 0 and existing_conversation[0].title:
+                title = existing_conversation[0].title
+        
+        if not title:
+            # If no title exists, generate one
+            title = await chat_service.generate_conversation_title(request.message)
+
         # Process the message
         result = await chat_service.process_message(
             user_id=request.user_id,
             message=request.message,
+            conversation_history=existing_conversation
         )
         
         # Calculate response time
         response_time_ms = (time.time() - start_time) * 1000
-           # # Store the conversation in the database
+        
+        # Store the conversation in the database
         await conversation_service.store_conversation(
             session_id=request.session_id,
             user_email=request.user_email,
@@ -45,23 +61,6 @@ async def create_chat(
             response_parameters=result["response_parameters"],
             response_time_ms=response_time_ms,
         )
-        
-
-               # Get or generate conversation title
-        title: Optional[str] = ""
-        if request.session_id:
-            # Check if a conversation with this session ID already exists
-   
-
-            existing_conversation = await conversation_service.get_conversations_by_session_id(request.session_id)
-            if existing_conversation and len(existing_conversation) > 0 and existing_conversation[0].title:
-                title = existing_conversation[0].title
-        
-        if not title:
-            # If no title exists, generate one
-            title = await chat_service.generate_conversation_title(request.message)
-
-        
      
         # Get conversation history
         conversation_history = chat_service.get_conversation_history(request.user_id)

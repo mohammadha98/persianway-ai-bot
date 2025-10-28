@@ -145,6 +145,31 @@ class KnowledgeContributionResponse(BaseModel):
     }
 
 
+class KnowledgeRemovalResponse(BaseModel):
+    """Schema for the knowledge removal API response."""
+    success: bool = Field(..., description="Indicates if the removal was successful")
+    message: str = Field(..., description="Message describing the result of the removal operation")
+    hash_id: Optional[str] = Field(None, description="The hash_id of the removed knowledge item")
+    removed_count: Optional[int] = Field(None, description="Number of items removed from vector store")
+
+    model_config = {
+        "json_schema_extra": {
+            "example_success": {
+                "success": True,
+                "message": "Knowledge contribution removed successfully",
+                "hash_id": "4dfaaf98-4036-4e8a-9235-18f915d21a24",
+                "removed_count": 3
+            },
+            "example_failure": {
+                "success": False,
+                "message": "Knowledge contribution not found or could not be removed",
+                "hash_id": "4dfaaf98-4036-4e8a-9235-18f915d21a24",
+                "removed_count": 0
+            }
+        }
+    }
+
+
 class ProcessDocsResponse(BaseModel):
     """Schema for document processing response."""
     message: str = Field(..., description="A message about the document processing")
@@ -182,6 +207,7 @@ class KnowledgeItemDb(BaseModel):
     entry_type: str = Field(..., description="Type of entry (user_contribution, file_processed, etc.)")
     file_type: Optional[str] = Field(None, description="Type of the uploaded File")
     file_name: Optional[str] = Field(None, description="Name of the uploaded File")
+    synced: bool = Field(True, description="Indicates if the document has been synced with the vector store")
 
 class KnowledgeContributionResponse(BaseModel):
     """Schema for the knowledge contribution API response."""

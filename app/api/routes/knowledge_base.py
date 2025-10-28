@@ -10,6 +10,7 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseResponse, 
     ProcessDocsResponse,
     KnowledgeContributionResponse,
+    KnowledgeRemovalResponse,
     KnowledgeContributionItem,
     KnowledgeItemDb
 )
@@ -44,6 +45,7 @@ async def get_knowledge_list(db_service=Depends(get_database_service)):
                     meta_tags=doc["meta_tags"],
                     entry_type=doc["entry_type"],
                     submission_timestamp=doc["submission_timestamp"],
+                    synced=doc.get("synced", True),  # Use get() to handle missing fields
                     file_type=doc.get("file_type"),  # Use get() to handle missing fields
                     file_name=doc.get("file_name")   # Use get() to handle missing fields
                 ))
@@ -177,7 +179,7 @@ async def contribute_knowledge(
     kb_service=Depends(get_knowledge_base_service),
     title: str = Form(..., description="Title of the knowledge entry."),
     content: str = Form(..., description="Main body/content of the knowledge in Persian."),
-    source: str = Form(..., description="The origin or reference for the knowledge."),
+    source:Optional[str] = Form(None, description="The origin or reference for the knowledge (optional)."),
     meta_tags: str = Form(..., description="Comma-separated keywords for categorization (e.g., soil,fertilizer,wheat)."),
     author_name: Optional[str] = Form(None, description="Name of the contributor (optional)."),
     additional_references: Optional[str] = Form(None, description="URLs or citation text for further reading (optional)."),
@@ -195,7 +197,7 @@ async def contribute_knowledge(
         cleaned_content = content.strip()
         cleaned_source = source.strip()
         
-        if not cleaned_title or not cleaned_content or not cleaned_source:
+        if not cleaned_title or not cleaned_content:
             return KnowledgeContributionResponse(success=False, message="Title, content, and source cannot be empty.")
 
         parsed_meta_tags = [tag.strip() for tag in meta_tags.split(',') if tag.strip()]
@@ -256,3 +258,66 @@ async def contribute_knowledge(
         # Log the exception for debugging
         # logger.error(f"Error during knowledge contribution: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to contribute knowledge: {str(e)}")
+
+
+@router.delete("/remove/{hash_id}", response_model=KnowledgeRemovalResponse)
+async def remove_knowledge_contribution(
+    hash_id: str,
+    kb_service=Depends(get_knowledge_base_service)
+):
+    """Remove a knowledge contribution by its hash_id.
+    
+    This endpoint removes a knowledge contribution from both the vector store
+    and the database. It also updates the sync status before removal.
+    
+    Args:
+        hash_id: The unique hash identifier of the knowledge contribution to remove
+        
+    Returns:
+        KnowledgeRemovalResponse: Response indicating success/failure with details
+    """
+    try:
+        # Validate hash_id format (basic validation)
+        if not hash_id or not hash_id.strip():
+            return KnowledgeRemovalResponse(
+                success=False,
+                message="Hash ID cannot be empty",
+                hash_id=hash_id,
+                removed_count=0
+            )
+        
+        # Call the service to remove the knowledge contribution
+        result = await kb_service.remove_knowledge_contribution(hash_id.strip())
+        
+        if result.get("success", False):
+            removed_count = result.get("documents_removed_count", 0)
+            return KnowledgeRemovalResponse(
+                success=True,
+                message=f"Knowledge contribution removed successfully. {removed_count} items removed from vector store. Document marked as unsynced in database.",
+                hash_id=hash_id,
+                removed_count=removed_count
+            )
+        else:
+            error_msg = result.get("error", "Knowledge contribution not found or could not be removed")
+            return KnowledgeRemovalResponse(
+                success=False,
+                message=error_msg,
+                hash_id=hash_id,
+                removed_count=0
+            )
+            
+    except ValueError as ve:
+        # Handle specific validation errors from service
+        return KnowledgeRemovalResponse(
+            success=False,
+            message=str(ve),
+            hash_id=hash_id,
+            removed_count=0
+        )
+    except Exception as e:
+        # Log the exception for debugging
+        # logger.error(f"Error during knowledge removal: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to remove knowledge contribution: {str(e)}"
+        )

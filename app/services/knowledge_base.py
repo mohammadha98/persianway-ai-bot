@@ -3,9 +3,11 @@ import uuid
 import logging
 import os
 from datetime import datetime
-from langchain.chains import RetrievalQA
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from app.services.chat_service import get_llm
 from langchain.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from langchain.memory import ConversationBufferMemory
 
 from app.core.config import settings
@@ -67,97 +69,53 @@ class KnowledgeBaseService:
                 search_kwargs={"k": rag_settings.top_k_results}
             )
             
-            # Create a prompt template without including the system prompt to avoid duplication
-            template = rag_settings.prompt_template
+            # Create a comprehensive prompt template that includes system prompt for better model behavior control
+            system_prompt = rag_settings.system_prompt
+            base_template = rag_settings.prompt_template
             
-            prompt = PromptTemplate(
-                template=template,
-                input_variables=["context", "question"]
-            )
+            # Combine system prompt with the RAG template
+            combined_template = f"""{system_prompt}
+
+{base_template}"""
+
+            # The new create_retrieval_chain expects 'input' instead of 'question',
+            # so we replace the placeholder in the template.
+            final_template = combined_template.replace("{question}", "{input}")
             
-            # Create the QA chain with dynamic settings
-            self._qa_chain = RetrievalQA.from_chain_type(
-                llm=self.llm,
-                chain_type="stuff",
-                retriever=retriever,
-                return_source_documents=True,
-                chain_type_kwargs={"prompt": prompt}
-            )
+            # Create the QA chain with dynamic settings using new LangChain approach
+            # Create a chat prompt template for the new chain
+            chat_prompt = ChatPromptTemplate.from_template(final_template)
+            
+            # Create the document chain
+            document_chain = create_stuff_documents_chain(self.llm, chat_prompt)
+            
+            # Create the retrieval chain
+            self._qa_chain = create_retrieval_chain(retriever, document_chain)
         
         return self._qa_chain
     
-    def _calculate_confidence_score(self, query: str, document: Any) -> float:
-        """Calculate a confidence score based on the relevance of a document.
-        
-        Args:
-            query: The original query
-            document: The retrieved document
-            
-        Returns:
-            A confidence score between 0 and 1
+    def _calculate_confidence_score(self, similarity_score: float) -> float:
         """
-        if not document:
-            return 0.0
+        Converts the similarity score (distance) from the vector store to a confidence score.
+        Lower distance scores indicate higher similarity.
+
+        Args:
+            similarity_score: The distance score from the vector search (e.g., ChromaDB's L2 distance).
+
+        Returns:
+            A confidence score between 0 and 1, where 1 is most confident.
+        """
+        # ChromaDB returns L2 distance scores which can be any positive value.
+        # Lower scores mean higher similarity. We use exponential decay to convert to confidence.
+        # This approach handles scores > 1.0 gracefully and provides smooth scaling.
         
-        query_lower = query.lower()
-        doc_content = document.page_content.lower()
+        # Use exponential decay: confidence = e^(-distance)
+        # This naturally maps: distance=0 -> confidence=1, distance=∞ -> confidence=0
+        import math
+        confidence = math.exp(-similarity_score)
         
-        # Check if document is relevant to the query
-        if not self._is_content_relevant(query, document.page_content):
-            return 0.2  # Low confidence for irrelevant documents
-        
-        # Calculate relevance score based on multiple factors
-        relevance_score = 0.0
-        
-        # Factor 1: Direct keyword matches (40% weight)
-        query_words = [word for word in query_lower.split() if len(word) > 2]
-        if query_words:
-            matches = sum(1 for word in query_words if word in doc_content)
-            keyword_score = matches / len(query_words)
-            relevance_score += keyword_score * 0.4
-        
-        # Factor 2: Document length and completeness (20% weight)
-        # Longer, more complete documents tend to be more reliable
-        doc_length = len(document.page_content)
-        length_score = min(doc_length / 500, 1.0)  # Normalize to 500 chars
-        relevance_score += length_score * 0.2
-        
-        # Factor 3: Source type preference (20% weight)
-        source_type = document.metadata.get("source_type", "unknown")
-        if source_type == "excel_qa":
-            source_score = 1.0  # Prefer structured QA pairs
-        elif source_type == "pdf":
-            source_score = 0.8  # PDF content is good but less structured
-        else:
-            source_score = 0.6  # Other sources
-        relevance_score += source_score * 0.2
-        
-        # Factor 4: Semantic similarity (20% weight)
-        # Check for semantic relationships
-        semantic_score = 0.0
-        semantic_keywords = {
-            'پوست': ['skin', 'face', 'facial', 'dermal'],
-            'مو': ['hair', 'scalp'],
-            'ریزش': ['loss', 'fall', 'thinning'],
-            'زیبایی': ['beauty', 'cosmetic'],
-            'سلامت': ['health', 'wellness'],
-            'درمان': ['treatment', 'therapy', 'cure'],
-            'دارو': ['medicine', 'medication', 'drug']
-        }
-        
-        for persian_term, english_terms in semantic_keywords.items():
-            if persian_term in query_lower:
-                if persian_term in doc_content or any(term in doc_content for term in english_terms):
-                    semantic_score += 0.5
-            for eng_term in english_terms:
-                if eng_term in query_lower:
-                    if persian_term in doc_content or eng_term in doc_content:
-                        semantic_score += 0.5
-        
-        semantic_score = min(semantic_score, 1.0)  # Cap at 1.0
-        relevance_score += semantic_score * 0.2
-        
-        return min(relevance_score, 1.0)
+        # Ensure the result is within [0, 1] range
+        return max(0.0, min(confidence, 1.0))
     
     def _log_human_referral(self, query: str, answer: str, confidence: float) -> None:
         """Log a query that requires human attention.
@@ -190,8 +148,8 @@ class KnowledgeBaseService:
         self,
         title: str,
         content: str,
-        source: str,
         meta_tags: List[str],
+        source: Optional[str] = None,
         author_name: Optional[str] = None,
         additional_references: Optional[str] = None,
         uploaded_file_path: Optional[str] = None,
@@ -264,7 +222,7 @@ class KnowledgeBaseService:
 
             # Prepare metadata for text contribution
             metadata = {
-                "source": source,
+                "source": source if source else "Unknown",
                 "title": title,
                 "meta_tags": ",".join(meta_tags), # Store as comma-separated string as per existing patterns if any, or adjust if vector store handles lists
                 "author_name": author_name if author_name else "Unknown",
@@ -321,6 +279,7 @@ class KnowledgeBaseService:
                 "author_name": author_name if author_name else "Unknown",
                 "additional_references": additional_references.split(",") if additional_references else [],
                 "submission_timestamp": submitted_at,
+                "synced": True,
                 "entry_type": "user_contribution"
             }
             
@@ -556,17 +515,126 @@ class KnowledgeBaseService:
                 "expanded_queries": []
             }
 
+    def _extract_conversation_history(self, conversation_history) -> List[Dict[str, str]]:
+        """
+        Extract conversation messages from ConversationResponse format.
+        
+        Args:
+            conversation_history: ConversationResponse object or list of messages
+            
+        Returns:
+            List[Dict[str, str]]: List of messages with 'role' and 'content' keys
+        """
+        if not conversation_history:
+            return []
+            
+        # Handle ConversationResponse object
+        if hasattr(conversation_history, 'messages'):
+            messages = []
+            for msg in conversation_history.messages:
+                messages.append({
+                    'role': msg.role,
+                    'content': msg.content
+                })
+            return messages
+        
+        # Handle list of ConversationResponse objects
+        elif isinstance(conversation_history, list) and conversation_history:
+            # If it's a list of ConversationResponse objects, take the latest one
+            if hasattr(conversation_history[0], 'messages'):
+                latest_conversation = conversation_history[-1]  # Get the most recent conversation
+                messages = []
+                for msg in latest_conversation.messages:
+                    messages.append({
+                        'role': msg.role,
+                        'content': msg.content
+                    })
+                return messages
+            # If it's already a list of dict messages, return as is
+            elif isinstance(conversation_history[0], dict) and 'role' in conversation_history[0]:
+                return conversation_history
+        
+        return []
 
-    async def query_knowledge_base(self, query: str) -> Dict[str, Any]:
+    async def rewrite_query_with_context(self, history: List[Dict[str, str]], 
+                                       user_message: str, 
+                                       max_history: int = 4) -> str:
+        """
+        Rewrites the user's query based on recent conversation context
+        (without adding knowledge outside the chat).
+        Designed for contextual query building in Persian RAG pipelines.
+        
+        Args:
+            history: List of conversation messages with 'role' and 'content' keys
+            user_message: The current user message to rewrite
+            max_history: Maximum number of previous messages to consider
+            
+        Returns:
+            str: The rewritten query that incorporates conversation context
+        """
+        # If no history, return original message
+        if not history:
+            return user_message
+            
+        # Build multi-turn context window
+        recent_context = "\n".join(
+            [f"{msg['role'].capitalize()}: {msg['content']}" for msg in history[-max_history:]]
+        )
+        
+        prompt = f"""
+بازنویسی کن پرسش زیر به گونه‌ای که بدون نیاز به متن‌های قبلی قابل
+جست‌وجو در پایگاه دانش باشد.
+فقط از اطلاعات خود گفتگو استفاده کن و هیچ دانشی از بیرون اضافه نکن.
+---
+گفتگو:
+{recent_context}
+پرسش جدید کاربر:
+{user_message}
+---
+پرسش بازنویسی‌شده:
+"""
+        
+        try:
+            # Use the existing LLM infrastructure from chat_service
+            llm = await get_llm(temperature=0, max_tokens=100)
+            
+            # Create messages for the LLM
+            from langchain.schema import SystemMessage, HumanMessage
+            messages = [
+                SystemMessage(content="تو فقط بازنویسی contextual انجام می‌دهی."),
+                HumanMessage(content=prompt)
+            ]
+            
+            # Get response from LLM
+            response = await llm.agenerate([messages])
+            rewritten_text = response.generations[0][0].text.strip()
+            
+            # Return rewritten query or fallback to original
+            return rewritten_text if rewritten_text else user_message
+            
+        except Exception as e:
+            logging.error(f"Error in rewrite_query_with_context: {e}")
+            # Fallback to original message if rewriting fails
+            return user_message
+
+    async def query_knowledge_base(self, query: str, conversation_history: List = None) -> Dict[str, Any]:
         """Query the knowledge base with a question.
         
         Args:
             query: The question to ask
+            conversation_history: Previous conversation messages for context
             
         Returns:
             A dictionary with the answer, confidence score, and source information
         """
         try:
+            # Extract conversation history and rewrite query with context if available
+            extracted_history = self._extract_conversation_history(conversation_history)
+            if extracted_history:
+                # Rewrite the query to include conversation context
+                query = await self.rewrite_query_with_context(extracted_history, query)
+                logging.info(f"Query rewritten with context: {query}")
+            
             # First, check if we have an exact or semantically similar match in our QA database
             vector_store = self.document_processor.get_vector_store()
             
@@ -585,7 +653,7 @@ class KnowledgeBaseService:
             all_docs_with_scores = []
             for search_query in all_queries:
                 if search_query.strip():  # Only search non-empty queries
-                    docs_with_scores = vector_store.similarity_search_with_score(search_query, k=rag_settings.top_k_results)
+                    docs_with_scores = vector_store.similarity_search_with_score(search_query, k=20)
                     all_docs_with_scores.extend(docs_with_scores)
             
             # Remove duplicates and sort by score (lower is better for similarity)
@@ -600,41 +668,40 @@ class KnowledgeBaseService:
             # Take the top results after deduplication
             docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
             
-            # Filter and prioritize "excel_qa" and "qa_contribution" source types if available
-            qa_docs = [doc for doc, score in docs_with_scores if doc.metadata.get("source_type") in ["excel_qa", "qa_contribution"]]
-            
-            # Check if we have a high-confidence, relevant QA match
-            for doc in qa_docs:
-                qa_question = doc.metadata.get("question", "") or doc.metadata.get("title", "")
-                qa_answer = doc.metadata.get("answer", "") or doc.metadata.get("content", "")
-                
-                # Check if this QA pair is relevant to the query
-                if self._is_content_relevant(query, qa_question) and qa_answer:
-                    # Calculate confidence based on similarity and relevance
-                    confidence = self._calculate_confidence_score(query, doc)
+            # Check all documents equally for high-confidence matches, regardless of source type
+            for doc, score in docs_with_scores:
+                # For QA-type documents, check if we have a direct answer
+                if doc.metadata.get("source_type") in ["excel_qa", "qa_contribution"]:
+                    qa_question = doc.metadata.get("question", "") or doc.metadata.get("title", "")
+                    qa_answer = doc.metadata.get("answer", "") or doc.metadata.get("content", "")
                     
-                    # Load dynamic configuration for thresholds
-                    await self.config_service._load_config()
-                    rag_settings = await self.config_service.get_rag_settings()
-                    
-                    # If confidence is high enough, return the answer directly
-                    if confidence >= rag_settings.qa_match_threshold:
-                        return {
-                            "answer": qa_answer,
-                            "confidence_score": confidence,
-                            "source_type": "excel_qa",
-                            "requires_human_support": False,
-                            "query_id": None,
-                            "sources": [{
-                                "content": qa_answer,
-                                "source": doc.metadata.get("source", "Unknown"),
-                                "page": doc.metadata.get("page", 1),
-                                "source_type": doc.metadata.get("source_type", "qa_contribution"),
-                                "title": qa_question
-                            }]
-                        }
+                    # Check if this QA pair is relevant to the query
+                    if self._is_content_relevant(query, qa_question) and qa_answer:
+                        # Calculate confidence based on the vector search similarity score
+                        confidence = self._calculate_confidence_score(score)
+                        
+                        # Load dynamic configuration for thresholds
+                        await self.config_service._load_config()
+                        rag_settings = await self.config_service.get_rag_settings()
+                        
+                        # # If confidence is high enough, return the answer directly
+                        # if confidence >= rag_settings.qa_match_threshold:
+                        #     return {
+                        #         "answer": qa_answer,
+                        #         "confidence_score": confidence,
+                        #         "source_type": doc.metadata.get("source_type", "qa_contribution"),
+                        #         "requires_human_support": False,
+                        #         "query_id": None,
+                        #         "sources": [{
+                        #             "content": qa_answer,
+                        #             "source": doc.metadata.get("source", "Unknown"),
+                        #             "page": doc.metadata.get("page", 1),
+                        #             "source_type": doc.metadata.get("source_type", "qa_contribution"),
+                        #             "title": qa_question
+                        #         }]
+                        #     }
             
-            # If no high-confidence QA match, fall back to PDF-based knowledge retrieval
+            # If no high-confidence direct match found, use the QA chain with all documents
             qa_chain = await self._get_qa_chain()
             
             # If QA chain is not available, return a fallback message
@@ -651,16 +718,21 @@ class KnowledgeBaseService:
                     "sources": []
                 }
                 
-            # Get answer from QA chain
-            result = qa_chain({"query": query})
-            answer = result["result"]
-            source_docs = result.get("source_documents", [])
+            # Get answer from QA chain using new input format
+            docs = [doc for doc, score in docs_with_scores]
+            result = qa_chain.invoke({"input": query, "context": docs})
+            answer = result["answer"]
+            source_docs = result.get("context", [])
             
             # Calculate confidence score
             confidence = 0.0
             if source_docs:
-                # Use the first (most relevant) document for confidence calculation
-                confidence = self._calculate_confidence_score(query, source_docs[0])
+                # Use the score of the most relevant document for confidence calculation
+                if docs_with_scores:
+                    most_relevant_score = docs_with_scores[0][1]  # score is the second item in the tuple
+                    confidence = self._calculate_confidence_score(most_relevant_score)
+                else:
+                    confidence = 0.0
             
             # Get dynamic configuration if not already loaded
             if 'rag_settings' not in locals():
@@ -686,11 +758,9 @@ class KnowledgeBaseService:
                     })
             
             # Prepare response
-            source_type = "pdf"
+            source_type = "unknown"
             if source_docs:
-                source_type = source_docs[0].metadata.get("source_type", "pdf")
-            elif qa_docs:  # If we have QA docs but didn't use them (low confidence), still show their type
-                source_type = qa_docs[0].metadata.get("source_type", "pdf")
+                source_type = source_docs[0].metadata.get("source_type", "unknown")
             response = {
                 "answer": answer,
                 "confidence_score": confidence,
@@ -719,6 +789,161 @@ class KnowledgeBaseService:
                 "requires_human_support": True,
                 "query_id": str(uuid.uuid4()),
                 "sources": []
+            }
+
+    async def remove_knowledge_contribution(self, hash_id: str) -> Dict[str, Any]:
+        """Removes a knowledge entry from both the vector store and relational database.
+    
+        Args:
+            hash_id: The unique hash_id of the entry to remove.
+    
+        Returns:
+            A dictionary with the removal status and details.
+        """
+        try:
+            removed_count = 0
+            vector_removal_success = False
+            db_removal_success = False
+            
+            # Get vector store
+            vector_store = self.document_processor.get_vector_store()
+            
+            if vector_store is None:
+                logging.warning("Vector store is not available. Cannot remove documents from vector database.")
+            else:
+                # ChromaDB delete by metadata using where clause <mcreference link="https://github.com/langchain-ai/langchain/discussions/1690" index="5">5</mcreference>
+                try:
+                    # Access the underlying ChromaDB collection to delete by metadata
+                    collection = vector_store._collection
+                    
+                    # Get documents with the specified hash_id to count them before deletion
+                    existing_docs = collection.get(where={"hash_id": hash_id})
+                    
+                    # Safely get the count of documents
+                    if isinstance(existing_docs, dict) and 'ids' in existing_docs:
+                        removed_count = len(existing_docs['ids']) if existing_docs['ids'] else 0
+                    else:
+                        # Fallback: if the structure is unexpected, assume no documents found
+                        removed_count = 0
+                        logging.warning(f"Unexpected structure from collection.get(): {type(existing_docs)}")
+                    
+                    if removed_count > 0:
+                        # Delete documents by metadata <mcreference link="https://github.com/langchain-ai/langchain/discussions/1690" index="5">5</mcreference>
+                        collection.delete(where={"hash_id": hash_id})
+                        
+                        # Persist changes to vector store
+                        vector_store.persist()
+                        
+                        # Reset QA chain to reflect changes
+                        self._qa_chain = None
+                        
+                        vector_removal_success = True
+                        logging.info(f"Successfully removed {removed_count} documents from vector store with hash_id: {hash_id}")
+                    else:
+                        logging.info(f"No documents found in vector store with hash_id: {hash_id}")
+                        vector_removal_success = True  # Consider it successful if nothing to remove
+                        
+                except Exception as e:
+                    logging.error(f"Error removing documents from vector store: {str(e)}")
+                    # Try alternative method using LangChain's delete method if available <mcreference link="https://python.langchain.com/api_reference/chroma/vectorstores/langchain_chroma.vectorstores.Chroma.html" index="3">3</mcreference>
+                    try:
+                        # Get all documents and find IDs with matching hash_id
+                        all_docs = collection.get(include=['metadatas'])
+                        ids_to_delete = []
+                        
+                        # Safely handle the response structure
+                        if isinstance(all_docs, dict) and 'metadatas' in all_docs and 'ids' in all_docs:
+                            if all_docs['metadatas']:
+                                for i, metadata in enumerate(all_docs['metadatas']):
+                                    if metadata and metadata.get('hash_id') == hash_id:
+                                        ids_to_delete.append(all_docs['ids'][i])
+                        else:
+                            logging.warning(f"Unexpected structure from collection.get(include=['metadatas']): {type(all_docs)}")
+                        
+                        if ids_to_delete:
+                            # Use LangChain's delete method <mcreference link="https://github.com/langchain-ai/langchain/discussions/17797" index="1">1</mcreference>
+                            vector_store.delete(ids=ids_to_delete)
+                            removed_count = len(ids_to_delete)
+                            vector_removal_success = True
+                            
+                            # Persist changes and reset QA chain
+                            vector_store.persist()
+                            self._qa_chain = None
+                            
+                            logging.info(f"Successfully removed {removed_count} documents using alternative method with hash_id: {hash_id}")
+                        else:
+                            logging.info(f"No documents found with hash_id: {hash_id}")
+                            vector_removal_success = True
+                            
+                    except Exception as e2:
+                        logging.error(f"Alternative removal method also failed: {str(e2)}")
+                        vector_removal_success = False
+            
+            # Update database document (mark as unsynced instead of deleting)
+            try:
+                from app.services.database import get_database_service
+                db_service = await get_database_service()
+                
+                # If vector removal was successful, mark the document as unsynced
+                if vector_removal_success and removed_count > 0:
+                    try:
+                        db_update_success = await db_service.update_knowledge_document_sync_status(hash_id, synced=False)
+                        if db_update_success:
+                            db_removal_success = True
+                            logging.info(f"Successfully marked document as unsynced with hash_id: {hash_id}")
+                        else:
+                            db_removal_success = False
+                            logging.warning(f"No document found in database with hash_id: {hash_id}")
+                    except Exception as sync_error:
+                        logging.error(f"Failed to update sync status for hash_id {hash_id}: {str(sync_error)}")
+                        db_removal_success = False
+                else:
+                    # Even if vector removal failed, try to mark as unsynced
+                    try:
+                        db_update_success = await db_service.update_knowledge_document_sync_status(hash_id, synced=False)
+                        if db_update_success:
+                            db_removal_success = True
+                            logging.info(f"Marked document as unsynced (vector removal failed) with hash_id: {hash_id}")
+                        else:
+                            db_removal_success = False
+                            logging.warning(f"No document found in database with hash_id: {hash_id}")
+                    except Exception as sync_error:
+                        logging.error(f"Failed to update sync status for hash_id {hash_id}: {str(sync_error)}")
+                        db_removal_success = False
+                    
+            except Exception as e:
+                logging.error(f"Error updating document in database: {str(e)}")
+                db_removal_success = False
+            
+            # Prepare response
+            overall_success = vector_removal_success and db_removal_success
+            
+            response = {
+                "success": overall_success,
+                "hash_id": hash_id,
+                "removed_from_vector_store": vector_removal_success,
+                "removed_from_database": db_removal_success,
+                "documents_removed_count": removed_count,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            if overall_success:
+                logging.info(f"Successfully removed knowledge contribution with hash_id: {hash_id}")
+            else:
+                logging.warning(f"Partial or failed removal of knowledge contribution with hash_id: {hash_id}")
+            
+            return response
+            
+        except Exception as e:
+            logging.error(f"Error removing knowledge contribution: {str(e)}")
+            return {
+                "success": False,
+                "hash_id": hash_id,
+                "error": str(e),
+                "removed_from_vector_store": False,
+                "removed_from_database": False,
+                "documents_removed_count": 0,
+                "timestamp": datetime.now().isoformat()
             }
 
 

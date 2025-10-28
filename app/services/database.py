@@ -181,6 +181,42 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Failed to retrieve knowledge documents: {str(e)}")
             raise RuntimeError(f"Failed to retrieve knowledge documents: {str(e)}")
+            
+    async def update_knowledge_document_sync_status(self, hash_id: str, synced: bool = False) -> bool:
+        """
+        Update the synced field for a knowledge document by hash_id.
+        If the synced field doesn't exist, it will be added with default value True for all documents,
+        then updated to the specified value for the target document.
+        
+        Args:
+            hash_id: The unique identifier of the document to update
+            synced: The value to set for the synced field (default: False)
+            
+        Returns:
+            True if the document was found and updated, False otherwise
+            
+        Raises:
+            RuntimeError: If database operation fails
+        """
+        try:
+            collection = self.get_knowledgebase_collection()
+        
+            # Now update the specific document's synced status
+            result = await collection.update_one(
+                {"hash_id": hash_id},
+                {"$set": {"synced": synced}}
+            )
+            
+            if result.matched_count > 0:
+                logger.info(f"Updated synced status to {synced} for document with hash_id: {hash_id}")
+                return True
+            else:
+                logger.warning(f"No document found with hash_id: {hash_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to update synced status for document {hash_id}: {str(e)}")
+            raise RuntimeError(f"Failed to update synced status for document {hash_id}: {str(e)}")
 
 
 # Global database service instance

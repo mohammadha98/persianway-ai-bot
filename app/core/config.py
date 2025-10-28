@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     MAX_TOKENS: int = 512
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_API_BASE: str = "https://openrouter.ai/api/v1"
-    OPENAI_EMBEDDING_MODEL: str = "text-embedding-ada-002"
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     
     # RAG Configuration
     KNOWLEDGE_BASE_CONFIDENCE_THRESHOLD: float = 0.5

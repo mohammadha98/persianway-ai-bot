@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewEncapsulation } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -10,9 +10,13 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { ContributeService, KnowledgeListItem } from '../../services/contribute.service';
+import { KnowledgeDetailsModalComponent } from '../../modals/knowledge-details-modal/knowledge-details-modal.component';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged, takeUntil } from 'rxjs/operators';
+import { MatChip } from '@angular/material/chips';
 
 // Interface for display in the table
 interface KnowledgeItem extends KnowledgeListItem {
@@ -40,14 +44,17 @@ interface CategoryOption {
     MatInputModule,
     MatSelectModule,
     MatPaginatorModule,
-    MatTooltipModule
+    MatTooltipModule,
+    MatSnackBarModule,
+    MatDialogModule,
+    MatChip
   ],
   templateUrl: './knowledge-list.component.html',
-  styleUrl: './knowledge-list.component.scss'
+  styleUrl: './knowledge-list.component.scss',
 })
 export class KnowledgeListComponent implements OnInit, OnDestroy {
   // Table configuration
-  displayedColumns: string[] = ['title', 'tags', 'author', 'actions'];
+  displayedColumns: string[] = ['title', 'tags', 'author', 'synced', 'actions'];
   
   // Pagination
   pageSize = 10;
@@ -76,7 +83,11 @@ export class KnowledgeListComponent implements OnInit, OnDestroy {
     { value: 'health', label: 'سلامت' }
   ];
   
-  constructor(private contributeService: ContributeService) { }
+  constructor(
+    private contributeService: ContributeService,
+    private snackBar: MatSnackBar,
+    private dialog: MatDialog
+  ) { }
   
   ngOnInit(): void {
     this.loadKnowledgeData();
@@ -160,8 +171,39 @@ export class KnowledgeListComponent implements OnInit, OnDestroy {
   }
   
   viewKnowledge(item: KnowledgeItem): void {
-    console.log('View knowledge item:', item);
-    // Implement view functionality
+    if (!item) {
+      this.snackBar.open('خطا: اطلاعات سند یافت نشد', 'بستن', {
+        duration: 3000,
+        panelClass: ['error-snackbar']
+      });
+      return;
+    }
+
+    try {
+      const dialogRef = this.dialog.open(KnowledgeDetailsModalComponent, {
+        width: '800px',
+        maxWidth: '95vw',
+        maxHeight: '90vh',
+        data: { knowledge: item },
+        panelClass: 'knowledge-details-modal',
+        autoFocus: true,
+        restoreFocus: true,
+        disableClose: false
+      });
+
+      // Optional: Handle dialog close events
+      dialogRef.afterClosed().subscribe(result => {
+        // Handle any cleanup or actions after modal closes
+        console.log('Knowledge details modal closed');
+      });
+
+    } catch (error) {
+      console.error('Error opening knowledge details modal:', error);
+      this.snackBar.open('خطا در نمایش جزئیات سند', 'بستن', {
+        duration: 3000,
+        panelClass: ['error-snackbar']
+      });
+    }
   }
   
   editKnowledge(item: KnowledgeItem): void {
@@ -171,11 +213,41 @@ export class KnowledgeListComponent implements OnInit, OnDestroy {
   
   deleteKnowledge(item: KnowledgeItem): void {
     console.log('Delete knowledge item:', item);
-    // Implement delete functionality
+    
     if (confirm(`آیا از حذف "${item.title}" اطمینان دارید؟`)) {
-      // In a real implementation, you would call a service method to delete from the API
-      this.knowledgeItems = this.knowledgeItems.filter(i => i.hash_id !== item.hash_id);
-      this.applyFilters();
+      this.contributeService.removeKnowledge(item.hash_id).subscribe({
+        next: (response) => {
+          // Remove item from local array
+          this.applyFilters();
+          this.loadKnowledgeData();
+          // Show success notification
+          this.snackBar.open(
+            `سند "${item.title}" با موفقیت حذف شد`,
+            'بستن',
+            {
+              duration: 3000,
+              horizontalPosition: 'center',
+              verticalPosition: 'top',
+              panelClass: ['success-snackbar']
+            }
+          );
+        },
+        error: (error) => {
+          console.error('Error deleting knowledge item:', error);
+          
+          // Show error notification
+          this.snackBar.open(
+            `خطا در حذف سند "${item.title}". لطفاً دوباره تلاش کنید.`,
+            'بستن',
+            {
+              duration: 5000,
+              horizontalPosition: 'center',
+              verticalPosition: 'top',
+              panelClass: ['error-snackbar']
+            }
+          );
+        }
+      });
     }
   }
 }

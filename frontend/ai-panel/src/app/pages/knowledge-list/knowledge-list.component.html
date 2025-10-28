@@ -64,6 +64,25 @@
             <td mat-cell *matCellDef="let item">{{ item.author_name || 'نامشخص' }}</td>
           </ng-container>
           
+          <!-- Synced Column -->
+          <ng-container matColumnDef="synced">
+            <th mat-header-cell *matHeaderCellDef>وضعیت همگام‌سازی</th>
+            <td mat-cell *matCellDef="let item">
+              <span *ngIf="item.synced === true" class="sync-status synced" matTooltip="همگام‌سازی شده">
+                <mat-icon>check_circle</mat-icon>
+                همگام‌سازی شده
+              </span>
+              <span *ngIf="item.synced === false" class="sync-status not-synced" matTooltip="همگام‌سازی نشده">
+                <mat-icon>cancel</mat-icon>
+                همگام‌سازی نشده
+              </span>
+              <span *ngIf="item.synced === null || item.synced === undefined" class="sync-status unknown" matTooltip="وضعیت نامشخص">
+                <mat-icon>help</mat-icon>
+                نامشخص
+              </span>
+            </td>
+          </ng-container>
+          
           <!-- Actions Column -->
           <ng-container matColumnDef="actions">
             <th mat-header-cell *matHeaderCellDef>عملیات</th>
@@ -71,7 +90,12 @@
               <button mat-icon-button color="primary" (click)="viewKnowledge(item)" matTooltip="مشاهده">
                 <mat-icon>visibility</mat-icon>
               </button>
-              <button mat-icon-button color="warn" (click)="deleteKnowledge(item)" matTooltip="حذف">
+              <button 
+                mat-icon-button 
+                color="warn" 
+                (click)="deleteKnowledge(item)" 
+                [disabled]="item.synced === false"
+                [matTooltip]="item.synced === false ? 'امکان حذف سند همگام‌سازی نشده وجود ندارد' : 'حذف'">
                 <mat-icon>delete</mat-icon>
               </button>
             </td>

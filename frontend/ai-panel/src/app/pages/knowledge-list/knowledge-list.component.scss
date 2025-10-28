@@ -1,3 +1,5 @@
+@import '../../../styles.scss';
+
 .knowledge-list-container {
   max-width: 1000px;
   margin: 0 auto;
@@ -5,7 +7,7 @@
   direction: rtl;
   background: #fafafa;
   min-height: 100vh;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Vazirmatn', sans-serif;
 }
 
 .header-card {
@@ -206,4 +208,80 @@
       }
     }
   }
+}
+
+// Snackbar styles
+::ng-deep .success-snackbar {
+  background-color: #4CAF50 !important;
+  color: white !important;
+}
+
+::ng-deep .error-snackbar {
+  background-color: #f44336 !important;
+  color: white !important;
+}
+
+// Sync status styles
+.sync-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  
+  mat-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+  }
+  
+  &.synced {
+    background-color: #e8f5e8;
+    color: #2e7d32;
+    
+    mat-icon {
+      color: #4caf50;
+    }
+  }
+  
+  &.not-synced {
+    background-color: #ffebee;
+    color: #c62828;
+    
+    mat-icon {
+      color: #f44336;
+    }
+  }
+  
+  &.unknown {
+    background-color: #fff3e0;
+    color: #ef6c00;
+    
+    mat-icon {
+      color: #ff9800;
+    }
+  }
+}
+
+// Disabled button styles
+button[mat-icon-button][disabled] {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
+  
+  &.mat-warn {
+    color: rgba(244, 67, 54, 0.4) !important;
+  }
+  
+  mat-icon {
+    color: inherit !important;
+  }
+}
+
+// Enhanced tooltip for disabled buttons
+::ng-deep .mat-mdc-tooltip.disabled-tooltip {
+  background-color: #757575 !important;
+  color: white !important;
+  font-size: 12px !important;
 }
