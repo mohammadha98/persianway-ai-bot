@@ -153,6 +153,7 @@ class KnowledgeBaseService:
         author_name: Optional[str] = None,
         additional_references: Optional[str] = None,
         uploaded_file_path: Optional[str] = None,
+        is_public: bool = False,
     ) -> Dict[str, Any]:
         """Adds a new knowledge entry to the vector store and relational database.
 
@@ -164,6 +165,7 @@ class KnowledgeBaseService:
             author_name: Optional name of the contributor.
             additional_references: Optional URLs or citations.
             uploaded_file_path: Optional path to an uploaded PDF or Excel file.
+            is_public: Flag indicating if the contribution is public-facing metadata.
 
         Returns:
             A dictionary with the ID and timestamp of the new entry, and file processing information if applicable.
@@ -195,6 +197,7 @@ class KnowledgeBaseService:
                             doc.metadata["additional_references"] = additional_references if additional_references else "None"
                             doc.metadata["submission_timestamp"] = submitted_at
                             doc.metadata["entry_type"] = "user_contribution_pdf"
+                            doc.metadata["is_public"] = is_public
                             doc.metadata["hash_id"] = hash_id  # Use hash_id as common identifier
                             doc.metadata["id"] = hash_id       # Keep id for backward compatibility
                         
@@ -214,6 +217,7 @@ class KnowledgeBaseService:
                             doc.metadata["additional_references"] = additional_references if additional_references else "None"
                             doc.metadata["submission_timestamp"] = submitted_at
                             doc.metadata["entry_type"] = "user_contribution_excel"
+                            doc.metadata["is_public"] = is_public
                             doc.metadata["hash_id"] = hash_id  # Use hash_id as common identifier
                             doc.metadata["id"] = hash_id       # Keep id for backward compatibility
                         
@@ -233,7 +237,8 @@ class KnowledgeBaseService:
                 "question": title, # Store the title as the question
                 "answer": content, # Store the content as the answer
                 "hash_id": hash_id,  # Use hash_id as common identifier
-                "id": hash_id        # Keep id for backward compatibility
+                "id": hash_id,        # Keep id for backward compatibility
+                "is_public": is_public
             }
 
             # Create Langchain Document for text contribution
@@ -290,6 +295,7 @@ class KnowledgeBaseService:
                 db_document["file_name"] = os.path.basename(uploaded_file_path) if uploaded_file_path else None
                 if file_type == 'excel' and 'qa_count' in locals():
                     db_document["qa_count"] = qa_count
+            db_document["is_public"] = is_public
             
             # Insert document into database
             from app.services.database import get_database_service
@@ -306,7 +312,8 @@ class KnowledgeBaseService:
                 "source": source,
                 "author_name": author_name,
                 "additional_references": additional_references,
-                "db_id": db_id
+                "db_id": db_id,
+                "is_public": is_public
             }
             
             # Add file information if a file was processed
@@ -617,12 +624,13 @@ class KnowledgeBaseService:
             # Fallback to original message if rewriting fails
             return user_message
 
-    async def query_knowledge_base(self, query: str, conversation_history: List = None) -> Dict[str, Any]:
+    async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False) -> Dict[str, Any]:
         """Query the knowledge base with a question.
         
         Args:
             query: The question to ask
             conversation_history: Previous conversation messages for context
+            is_public: When True, restricts retrieval to documents tagged with public metadata
             
         Returns:
             A dictionary with the answer, confidence score, and source information
@@ -649,11 +657,15 @@ class KnowledgeBaseService:
             expanded_query_result = await self.expand_query(query)
             all_queries = [expanded_query_result["original_query"]] + expanded_query_result["expanded_queries"]
             
+            search_kwargs = {"k": 20}
+            if is_public:
+                search_kwargs["filter"] = {"is_public": True}
+            
             # Search for similar documents with scores using all queries
             all_docs_with_scores = []
             for search_query in all_queries:
                 if search_query.strip():  # Only search non-empty queries
-                    docs_with_scores = vector_store.similarity_search_with_score(search_query, k=20)
+                    docs_with_scores = vector_store.similarity_search_with_score(search_query, **search_kwargs)
                     all_docs_with_scores.extend(docs_with_scores)
             
             # Remove duplicates and sort by score (lower is better for similarity)
@@ -684,22 +696,22 @@ class KnowledgeBaseService:
                         await self.config_service._load_config()
                         rag_settings = await self.config_service.get_rag_settings()
                         
-                        # # If confidence is high enough, return the answer directly
-                        # if confidence >= rag_settings.qa_match_threshold:
-                        #     return {
-                        #         "answer": qa_answer,
-                        #         "confidence_score": confidence,
-                        #         "source_type": doc.metadata.get("source_type", "qa_contribution"),
-                        #         "requires_human_support": False,
-                        #         "query_id": None,
-                        #         "sources": [{
-                        #             "content": qa_answer,
-                        #             "source": doc.metadata.get("source", "Unknown"),
-                        #             "page": doc.metadata.get("page", 1),
-                        #             "source_type": doc.metadata.get("source_type", "qa_contribution"),
-                        #             "title": qa_question
-                        #         }]
-                        #     }
+                        # If confidence is high enough, return the answer directly
+                        if confidence >= rag_settings.qa_match_threshold:
+                            return {
+                                "answer": qa_answer,
+                                "confidence_score": confidence,
+                                "source_type": doc.metadata.get("source_type", "qa_contribution"),
+                                "requires_human_support": False,
+                                "query_id": None,
+                                "sources": [{
+                                    "content": qa_answer,
+                                    "source": doc.metadata.get("source", "Unknown"),
+                                    "page": doc.metadata.get("page", 1),
+                                    "source_type": doc.metadata.get("source_type", "qa_contribution"),
+                                    "title": qa_question
+                                }]
+                            }
             
             # If no high-confidence direct match found, use the QA chain with all documents
             qa_chain = await self._get_qa_chain()
@@ -721,8 +733,10 @@ class KnowledgeBaseService:
             # Get answer from QA chain using new input format
             docs = [doc for doc, score in docs_with_scores]
             result = qa_chain.invoke({"input": query, "context": docs})
-            answer = result["answer"]
-            source_docs = result.get("context", [])
+            answer = result.get("answer") or result.get("result")
+            if answer is None:
+                raise KeyError("answer")
+            source_docs = result.get("context") or result.get("source_documents") or []
             
             # Calculate confidence score
             confidence = 0.0

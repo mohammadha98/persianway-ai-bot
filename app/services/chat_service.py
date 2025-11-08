@@ -1,5 +1,6 @@
 from logging import Logger
 from typing import Dict, List, Optional, Any
+import json
 import re
 from langchain_community.chat_models import ChatOpenAI
 import logging
@@ -314,6 +315,116 @@ Title:"""
             logger.error(f"Error generating conversation title: {str(e)}")
             # Return a default title if generation fails
             return "New Conversation"
+
+    async def detect_public_data_intent(
+        self,
+        message: str,
+        conversation_history: Optional[List[Any]] = None,
+        *,
+        llm: Optional[Any] = None
+    ) -> bool:
+        """Detect whether the user's message is about PersianWay public data.
+        
+        Args:
+            message: The latest user message.
+            conversation_history: Prior conversation exchanges for additional context.
+            llm: Optional pre-configured LLM instance (used mainly for testing).
+        
+        Returns:
+            True if the intent relates to public PersianWay company information, otherwise False.
+        """
+        if not message or not message.strip():
+            return False
+
+        formatted_history: List[str] = []
+        if conversation_history:
+            for entry in conversation_history[-6:]:
+                role = None
+                content = None
+
+                if isinstance(entry, ChatMessage):
+                    role = entry.role
+                    content = entry.content
+                elif isinstance(entry, dict):
+                    role = entry.get("role")
+                    content = entry.get("content")
+                else:
+                    role = getattr(entry, "role", None)
+                    content = getattr(entry, "content", None)
+
+                if role and content:
+                    formatted_history.append(f"{role}: {content}")
+
+        history_block = "\n".join(formatted_history) if formatted_history else "No prior conversation."
+
+        classifier_prompt = (
+            "You are an intent classifier for PersianWay's customer support system.\n"
+            "Determine if the latest user message is asking about public information "
+            "regarding the company PersianWay (پرشین وی), such as general company facts, "
+            "mission, services overview, or public announcements. If the user is describing "
+            "a specific product issue, requesting expert consultation, or seeking individualized "
+            "advice, classify it as not public data.\n"
+            "Respond in JSON with the shape {\"public_data\": <true|false>, \"explanation\": \"...\"}."
+        )
+
+        try:
+            classifier_llm = llm or await get_llm(
+                model_name="gpt-4o-mini",
+                temperature=0.0,
+                top_p=0.1
+            )
+        except Exception as e:
+            logger.error("Failed to initialize intent detection LLM: {}", e)
+            return False
+
+        try:
+            response = await classifier_llm.ainvoke([
+                SystemMessage(content=classifier_prompt),
+                HumanMessage(
+                    content=(
+                        f"Conversation history:\n{history_block}\n\n"
+                        f"Latest user message:\n{message}\n\n"
+                        "Classify the intent now."
+                    )
+                )
+            ])
+        except Exception as e:
+            logger.error("Error during public data intent detection: {}", e)
+            return False
+
+        content = (getattr(response, "content", "") or "").strip()
+        if not content:
+            return False
+
+        payload = None
+        json_match = re.search(r"\{.*\}", content, re.DOTALL)
+        if json_match:
+            try:
+                payload = json.loads(json_match.group())
+            except json.JSONDecodeError:
+                payload = None
+
+        if isinstance(payload, dict) and "public_data" in payload:
+            value = payload.get("public_data")
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                normalized_value = value.strip().lower()
+                if normalized_value in {"true", "yes", "public", "public_data"}:
+                    return True
+                if normalized_value in {"false", "no", "private", "not_public"}:
+                    return False
+            if isinstance(value, (int, float)):
+                return bool(value)
+
+        normalized_content = content.lower()
+        if "public_data" in normalized_content:
+            if "true" in normalized_content or "yes" in normalized_content:
+                return True
+            if "false" in normalized_content or "no" in normalized_content:
+                return False
+
+        return False
 
     async def process_message(self, user_id: str, message: str, conversation_history: List = None, model: str = None, parameters: dict = None) -> Dict[str, Any]:
         """Process a user message using a hybrid approach.

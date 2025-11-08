@@ -8,11 +8,13 @@ class KnowledgeBaseQuery(BaseModel):
     This defines the expected input format for the knowledge base query API.
     """
     question: str = Field(..., description="The question to ask the knowledge base")
+    is_public: bool = Field(False, description="Restrict retrieval to entries marked as public information.")
     
     model_config = {
         "json_schema_extra": {
             "example": {
-                "question": "انواع کودهای شیمیایی کدامند؟"
+                "question": "انواع کودهای شیمیایی کدامند؟",
+                "is_public": False
             }
         }
     }
@@ -32,6 +34,7 @@ class KnowledgeContributionItem(BaseModel):
     file_type: Optional[str] = Field(None, description="Type of file processed (pdf or excel)")
     file_name: Optional[str] = Field(None, description="Name of the processed file")
     qa_count: Optional[int] = Field(None, description="Number of QA pairs processed from Excel file")
+    is_public: bool = Field(False, description="Indicates if the contribution is marked as public information.")
 
 
 class KnowledgeContributionResponse(BaseModel):
@@ -54,8 +57,9 @@ class KnowledgeContributionResponse(BaseModel):
                     "additional_references": "https://example.com/loamy-soil-guide",
                     "file_processed": True,
                     "file_type": "pdf",
-                    "file_name": "soil_analysis.pdf",
-                    "qa_count": None
+                "file_name": "soil_analysis.pdf",
+                "qa_count": None,
+                "is_public": False
                 }
             },
             "example_failure": {
@@ -115,6 +119,8 @@ class KnowledgeContributionItem(BaseModel):
     source: str = Field(..., description="The origin or reference for the knowledge")
     author_name: Optional[str] = Field(None, description="Name of the contributor")
     additional_references: Optional[str] = Field(None, description="URLs or citation text for further reading")
+    is_public: bool = Field(False, description="Indicates if the contribution is marked as public information.")
+    is_public: bool = Field(False, description="Indicates if the contribution is marked as public information.")
 
 
 class KnowledgeContributionResponse(BaseModel):
@@ -134,7 +140,8 @@ class KnowledgeContributionResponse(BaseModel):
                     "meta_tags": ["loam", "soil", "agriculture"],
                     "source": "Expert observation",
                     "author_name": "Dr. KhakShenas",
-                    "additional_references": "https://example.com/loamy-soil-guide"
+                "additional_references": "https://example.com/loamy-soil-guide",
+                "is_public": False
                 }
             },
             "example_failure": {
@@ -208,6 +215,7 @@ class KnowledgeItemDb(BaseModel):
     file_type: Optional[str] = Field(None, description="Type of the uploaded File")
     file_name: Optional[str] = Field(None, description="Name of the uploaded File")
     synced: bool = Field(True, description="Indicates if the document has been synced with the vector store")
+    is_public: bool = Field(False, description="Indicates if the knowledge item is marked as public information.")
 
 class KnowledgeContributionResponse(BaseModel):
     """Schema for the knowledge contribution API response."""
@@ -226,7 +234,8 @@ class KnowledgeContributionResponse(BaseModel):
                     "meta_tags": ["loam", "soil", "agriculture"],
                     "source": "Expert observation",
                     "author_name": "Dr. KhakShenas",
-                    "additional_references": "https://example.com/loamy-soil-guide"
+                "additional_references": "https://example.com/loamy-soil-guide",
+                "is_public": False
                 }
             },
             "example_failure": {

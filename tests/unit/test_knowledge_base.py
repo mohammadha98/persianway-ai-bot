@@ -243,7 +243,7 @@ async def test_query_knowledge_base_pdf_fallback(knowledge_base_service):
                             # Configure mocks
                             mock_vector_store.return_value.similarity_search_with_score.return_value = [(mock_doc, 0.3)]
                             mock_qa_chain = MagicMock()
-                            mock_qa_chain.return_value = mock_qa_result
+                            mock_qa_chain.invoke.return_value = mock_qa_result
                             mock_get_qa_chain.return_value = mock_qa_chain
                             
                             # Act
@@ -255,6 +255,60 @@ async def test_query_knowledge_base_pdf_fallback(knowledge_base_service):
                             assert result["source_type"] == "pdf"
                             assert result["requires_human_support"] is False
                             assert len(result["sources"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_query_knowledge_base_public_filter_applied(knowledge_base_service):
+    """Ensure public queries apply metadata filtering before retrieval."""
+    test_query = "What does PersianWay do?"
+
+    mock_doc = MagicMock()
+    mock_doc.page_content = "PersianWay provides public services."
+    mock_doc.metadata = {
+        "source_type": "pdf",
+        "source": "public_overview.pdf",
+        "page": 2
+    }
+
+    mock_expanded_query = {
+        "original_query": test_query,
+        "expanded_queries": []
+    }
+
+    mock_rag_settings = MagicMock()
+    mock_rag_settings.top_k_results = 5
+    mock_rag_settings.qa_match_threshold = 0.8
+    mock_rag_settings.knowledge_base_confidence_threshold = 0.7
+    mock_rag_settings.human_referral_message = "Need human support"
+
+    mock_qa_chain = MagicMock()
+    mock_qa_chain.invoke.return_value = {
+        "answer": "PersianWay is a public company.",
+        "context": [mock_doc]
+    }
+
+    with patch.object(knowledge_base_service, 'expand_query', return_value=mock_expanded_query):
+        with patch.object(knowledge_base_service.document_processor, 'get_vector_store') as mock_vector_store:
+            vector_store_instance = MagicMock()
+            vector_store_instance.similarity_search_with_score.return_value = [(mock_doc, 0.2)]
+            mock_vector_store.return_value = vector_store_instance
+
+            with patch.object(knowledge_base_service.config_service, '_load_config', new_callable=AsyncMock):
+                with patch.object(knowledge_base_service.config_service, 'get_rag_settings', return_value=mock_rag_settings):
+                    with patch.object(knowledge_base_service, '_get_qa_chain') as mock_get_qa_chain:
+                        mock_get_qa_chain.return_value = mock_qa_chain
+
+                        with patch.object(knowledge_base_service, '_calculate_confidence_score', return_value=0.9):
+                            result = await knowledge_base_service.query_knowledge_base(
+                                test_query,
+                                is_public=True
+                            )
+
+    assert result["confidence_score"] == 0.9
+    assert result["requires_human_support"] is False
+    assert vector_store_instance.similarity_search_with_score.called
+    for call in vector_store_instance.similarity_search_with_score.call_args_list:
+        assert call.kwargs.get("filter") == {"is_public": True}
 
 
 @pytest.mark.asyncio
@@ -300,7 +354,7 @@ async def test_query_knowledge_base_low_confidence_human_referral(knowledge_base
                                 # Configure mocks
                                 mock_vector_store.return_value.similarity_search_with_score.return_value = [(mock_doc, 0.8)]
                                 mock_qa_chain = MagicMock()
-                                mock_qa_chain.return_value = mock_qa_result
+                                mock_qa_chain.invoke.return_value = mock_qa_result
                                 mock_get_qa_chain.return_value = mock_qa_chain
                                 
                                 # Act
@@ -466,7 +520,7 @@ async def test_query_knowledge_base_query_expansion_integration(knowledge_base_s
                             
                             mock_vector_store.return_value.similarity_search_with_score.side_effect = mock_similarity_search
                             mock_qa_chain = MagicMock()
-                            mock_qa_chain.return_value = mock_qa_result
+                            mock_qa_chain.invoke.return_value = mock_qa_result
                             mock_get_qa_chain.return_value = mock_qa_chain
                             
                             # Act

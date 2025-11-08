@@ -65,7 +65,7 @@ async def query_knowledge_base(query: KnowledgeBaseQuery, kb_service=Depends(get
     """
     try:
         # Query the knowledge base
-        result = await kb_service.query_knowledge_base(query.question)
+        result = await kb_service.query_knowledge_base(query.question, is_public=query.is_public)
     
         # Return the response with human referral information if needed
         return KnowledgeBaseResponse(
@@ -183,6 +183,7 @@ async def contribute_knowledge(
     meta_tags: str = Form(..., description="Comma-separated keywords for categorization (e.g., soil,fertilizer,wheat)."),
     author_name: Optional[str] = Form(None, description="Name of the contributor (optional)."),
     additional_references: Optional[str] = Form(None, description="URLs or citation text for further reading (optional)."),
+    is_public: bool = Form(False, description="Mark the contribution as public information."),
     file: Optional[UploadFile] = File(None, description="Optional PDF or Excel file to be processed and added to the knowledge base.")
 ):
     """Allows users to contribute new agricultural knowledge entries.
@@ -243,7 +244,8 @@ async def contribute_knowledge(
             meta_tags=parsed_meta_tags,
             author_name=author_name.strip() if author_name else None,
             additional_references=additional_references.strip() if additional_references else None,
-            uploaded_file_path=uploaded_file_path
+            uploaded_file_path=uploaded_file_path,
+            is_public=is_public
         )
         
         return KnowledgeContributionResponse(

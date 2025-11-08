@@ -404,6 +404,7 @@ class TestKnowledgeBaseComprehensive:
                 assert result["source"] == test_data["source"], "Source should match input"
                 assert result["meta_tags"] == test_data["meta_tags"], "Meta tags should match input"
                 assert result["author_name"] == test_data["author_name"], "Author name should match input"
+                assert result["is_public"] is False, "Default contributions should not be public unless specified"
                 assert "db_id" in result, "Result should contain database ID"
                 
                 hash_id = result["id"]
@@ -438,6 +439,7 @@ class TestKnowledgeBaseComprehensive:
                         assert doc.metadata.get("title") == test_data["title"], "Document title should match"
                         assert doc.metadata.get("source") == test_data["source"], "Document source should match"
                         assert doc.metadata.get("author_name") == test_data["author_name"], "Document author should match"
+                        assert doc.metadata.get("is_public") is False, "Document metadata should reflect public flag"
                         assert test_data["title"] in doc.page_content, "Document content should contain title"
                         break
                 
@@ -580,6 +582,7 @@ class TestKnowledgeBaseComprehensive:
                 assert result["meta_tags"] == test_data["meta_tags"]
                 assert result["author_name"] == test_data["author_name"]
                 assert result["additional_references"] == test_data["additional_references"]
+                assert result["is_public"] is False
                 assert "submitted_at" in result
                 assert "id" in result
                 assert "db_id" in result
@@ -596,6 +599,7 @@ class TestKnowledgeBaseComprehensive:
                 assert doc.metadata["author_name"] == test_data["author_name"]
                 assert doc.metadata["entry_type"] == "user_contribution"
                 assert doc.metadata["source_type"] == "qa_contribution"
+                assert doc.metadata["is_public"] is False
                 assert "hash_id" in doc.metadata
                 assert "submission_timestamp" in doc.metadata
                 
