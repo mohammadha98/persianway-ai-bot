@@ -1,55 +1,13 @@
 @import '../../../styles.scss';
 
 .knowledge-list-container {
-  max-width: 1000px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
   direction: rtl;
   background: #fafafa;
   min-height: 100vh;
   font-family: 'Vazirmatn', sans-serif;
-}
-
-.header-card {
-  margin-bottom: 32px;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: none;
-  background: white;
-  
-  mat-card-header {
-    padding: 24px 24px 16px;
-  }
-  
-  .header-icon {
-    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 56px;
-    height: 56px;
-    border-radius: 16px;
-    
-    mat-icon {
-      font-size: 28px;
-      width: 28px;
-      height: 28px;
-    }
-  }
-  
-  mat-card-title {
-    font-size: 24px;
-    font-weight: 600;
-    color: #1a1a1a;
-    margin-bottom: 4px;
-  }
-  
-  mat-card-subtitle {
-    font-size: 16px;
-    color: #666;
-    font-weight: 400;
-  }
 }
 
 .table-card {
@@ -106,17 +64,21 @@
 .search-filter-container {
   display: flex;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
   flex-wrap: wrap;
   
   .search-field {
-    flex: 2;
+    flex: 1;
     min-width: 250px;
   }
+}
+
+// Desktop Table View
+.desktop-view {
+  display: block;
   
-  .filter-field {
-    flex: 1;
-    min-width: 150px;
+  @media (max-width: 768px) {
+    display: none;
   }
 }
 
@@ -124,22 +86,260 @@
   width: 100%;
   overflow-x: auto;
   margin-bottom: 16px;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
   
   .knowledge-table {
     width: 100%;
+    background: white;
     
     th.mat-header-cell {
       font-weight: 600;
       color: #333;
       font-size: 14px;
+      background: #f5f5f5;
+      border-bottom: 2px solid #e0e0e0;
+      white-space: nowrap;
     }
     
-    td.mat-cell, th.mat-header-cell {
-      padding: 12px 16px;
+    td.mat-cell {
+      padding: 16px 12px;
+      vertical-align: middle;
     }
     
-    tr.mat-row:hover {
-      background-color: rgba(0, 0, 0, 0.04);
+    th.mat-header-cell {
+      padding: 16px 12px;
+    }
+    
+    .table-row {
+      transition: all 0.2s ease;
+      border-bottom: 1px solid #f0f0f0;
+      
+      &:hover {
+        background-color: rgba(33, 150, 243, 0.04);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      }
+      
+      &:last-child {
+        border-bottom: none;
+      }
+    }
+    
+    // Title Cell
+    .title-cell {
+      max-width: 300px;
+      
+      .title-content {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        
+        .title-text {
+          flex: 1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-weight: 500;
+          color: #1a1a1a;
+        }
+        
+        .file-badge {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          background: #e3f2fd;
+          border-radius: 6px;
+          
+          mat-icon {
+            font-size: 16px;
+            width: 16px;
+            height: 16px;
+            color: #2196F3;
+          }
+        }
+      }
+    }
+    
+    // Tags Cell
+    .tags-cell {
+      max-width: 250px;
+      
+      .tags-content {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        
+        .tag-chip {
+          display: inline-block;
+          padding: 4px 10px;
+          background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+          color: #1976d2;
+          border-radius: 12px;
+          font-size: 11px;
+          font-weight: 500;
+          white-space: nowrap;
+          max-width: 100px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        .more-tags {
+          display: inline-block;
+          padding: 4px 8px;
+          background: #f5f5f5;
+          color: #666;
+          border-radius: 12px;
+          font-size: 11px;
+          font-weight: 500;
+        }
+      }
+    }
+    
+    // Author Cell
+    .author-cell {
+      max-width: 150px;
+      
+      span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #555;
+      }
+    }
+    
+    // Actions Cell
+    .actions-cell {
+      width: 120px;
+      
+      .action-buttons {
+        display: flex;
+        gap: 4px;
+        justify-content: center;
+      }
+    }
+  }
+}
+
+// Mobile Card View
+.mobile-view {
+  display: none;
+  
+  @media (max-width: 768px) {
+    display: block;
+  }
+}
+
+.knowledge-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e0e0e0;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+  }
+  
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #f0f0f0;
+    
+    .card-title {
+      flex: 1;
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a1a1a;
+      line-height: 1.4;
+    }
+    
+    .file-badge {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      background: #e3f2fd;
+      border-radius: 8px;
+      
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        color: #2196F3;
+      }
+    }
+  }
+  
+  .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+    
+    .card-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      
+      .card-label {
+        font-weight: 600;
+        color: #666;
+        font-size: 13px;
+        min-width: 70px;
+        flex-shrink: 0;
+      }
+      
+      .tags-content {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        flex: 1;
+        
+        .tag-chip {
+          display: inline-block;
+          padding: 4px 10px;
+          background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+          color: #1976d2;
+          border-radius: 12px;
+          font-size: 11px;
+          font-weight: 500;
+        }
+      }
+    }
+  }
+  
+  .card-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid #f0f0f0;
+    
+    button {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+      }
     }
   }
 }
@@ -149,7 +349,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  padding: 3rem 2rem;
   color: #666;
   
   mat-icon {
@@ -157,6 +357,12 @@
     height: 3rem;
     width: 3rem;
     margin-bottom: 1rem;
+    animation: spin 1.5s infinite linear;
+  }
+  
+  p {
+    font-size: 16px;
+    font-weight: 500;
   }
 }
 
@@ -174,13 +380,16 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 48px 0;
+  padding: 64px 24px;
   color: #666;
+  background: #fafafa;
+  border-radius: 12px;
+  margin: 16px 0;
   
   mat-icon {
-    font-size: 48px;
-    width: 48px;
-    height: 48px;
+    font-size: 64px;
+    width: 64px;
+    height: 64px;
     margin-bottom: 16px;
     color: #ccc;
   }
@@ -188,25 +397,7 @@
   p {
     font-size: 16px;
     margin: 0;
-  }
-}
-
-@media (max-width: 768px) {
-  .search-filter-container {
-    flex-direction: column;
-    
-    .search-field, .filter-field {
-      width: 100%;
-    }
-  }
-  
-  .table-container {
-    .knowledge-table {
-      td.mat-cell, th.mat-header-cell {
-        padding: 8px;
-        font-size: 13px;
-      }
-    }
+    font-weight: 500;
   }
 }
 
@@ -225,16 +416,23 @@
 .sync-status {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 12px;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 16px;
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
   
   mat-icon {
     font-size: 16px;
     width: 16px;
     height: 16px;
+  }
+  
+  .status-text {
+    @media (max-width: 1024px) {
+      display: none;
+    }
   }
   
   &.synced {
@@ -266,7 +464,8 @@
 }
 
 // Disabled button styles
-button[mat-icon-button][disabled] {
+button[mat-icon-button][disabled],
+button[mat-raised-button][disabled] {
   opacity: 0.4 !important;
   cursor: not-allowed !important;
   
@@ -284,4 +483,89 @@ button[mat-icon-button][disabled] {
   background-color: #757575 !important;
   color: white !important;
   font-size: 12px !important;
+}
+
+// Responsive adjustments
+@media (max-width: 1024px) {
+  .knowledge-list-container {
+    padding: 16px;
+  }
+  
+  .table-card {
+    mat-card-header {
+      padding: 20px 20px 12px;
+    }
+    
+    mat-card-content {
+      padding: 0 20px 20px;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .knowledge-list-container {
+    padding: 12px;
+  }
+  
+  .search-filter-container {
+    margin-bottom: 16px;
+    
+    .search-field {
+      width: 100%;
+    }
+  }
+  
+  .table-card {
+    mat-card-header {
+      padding: 16px 16px 12px;
+    }
+    
+    mat-card-content {
+      padding: 0 16px 16px;
+    }
+    
+    .table-icon {
+      width: 40px;
+      height: 40px;
+      
+      mat-icon {
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+      }
+    }
+    
+    mat-card-title {
+      font-size: 16px;
+    }
+    
+    mat-card-subtitle {
+      font-size: 13px;
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .knowledge-list-container {
+    padding: 8px;
+  }
+  
+  .knowledge-card {
+    padding: 12px;
+    
+    .card-header {
+      .card-title {
+        font-size: 14px;
+      }
+    }
+    
+    .card-body {
+      .card-row {
+        .card-label {
+          font-size: 12px;
+          min-width: 60px;
+        }
+      }
+    }
+  }
 }

@@ -284,7 +284,7 @@ class ChatService:
         """
         try:
             # Get LLM instance
-            llm = await get_llm()
+            llm = await get_llm(model_name="gpt-4o-mini",temperature=0.1, max_tokens=100)
             
             # Create a prompt to generate a concise title
             title_prompt = f"""Based on the following user message, generate a concise and descriptive title (maximum 5-7 words) for this conversation. The title should be in the same language as the user's message.
@@ -319,63 +319,190 @@ Title:"""
     async def detect_public_data_intent(
         self,
         message: str,
-        conversation_history: Optional[List[Any]] = None,
+        conversation_history: Optional[Any] = None,
         *,
         llm: Optional[Any] = None
     ) -> bool:
-        """Detect whether the user's message is about PersianWay public data.
+        """Legacy method for backward compatibility.
+        
+        Detects whether the user's message is about PersianWay public data.
+        This is now a wrapper around detect_query_intent.
         
         Args:
             message: The latest user message.
-            conversation_history: Prior conversation exchanges for additional context.
-            llm: Optional pre-configured LLM instance (used mainly for testing).
+            conversation_history: Prior conversation exchanges.
+            llm: Optional pre-configured LLM instance.
         
         Returns:
             True if the intent relates to public PersianWay company information, otherwise False.
         """
+        result = await self.detect_query_intent(message, conversation_history, llm=llm)
+        return result.get("is_public", False)
+    
+    async def detect_query_intent(
+        self,
+        message: str,
+        conversation_history: Optional[Any] = None,
+        *,
+        llm: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """Detect the intent of the user's query.
+        
+        Args:
+            message: The latest user message.
+            conversation_history: Prior conversation exchanges (can be ConversationResponse, list of messages, or None).
+            llm: Optional pre-configured LLM instance (used mainly for testing).
+        
+        Returns:
+            A dictionary with:
+                - intent: One of "PUBLIC", "PRIVATE", "NEEDS_CLARIFICATION", or "OFF_TOPIC"
+                - is_public: Boolean indicating if it's a public query (for backward compatibility)
+                - explanation: Reason for the classification
+                - clarification_prompt: Optional message to ask user for clarification (for NEEDS_CLARIFICATION)
+                - off_topic_message: Optional message to redirect user (for OFF_TOPIC)
+        """
         if not message or not message.strip():
-            return False
+            return {
+                "intent": "NEEDS_CLARIFICATION",
+                "is_public": False,
+                "explanation": "Empty message",
+                "clarification_prompt": "لطفاً سوال یا درخواست خود را مشخص کنید."
+            }
 
         formatted_history: List[str] = []
+        
         if conversation_history:
-            for entry in conversation_history[-6:]:
+            messages_to_process = []
+            
+            # Handle ConversationResponse object
+            if hasattr(conversation_history, 'messages'):
+                messages_to_process = conversation_history.messages[-6:]  # Last 6 messages
+            # Handle list of ConversationResponse objects
+            elif isinstance(conversation_history, list) and conversation_history:
+                if hasattr(conversation_history[0], 'messages'):
+                    # It's a list of ConversationResponse, take the last one
+                    messages_to_process = conversation_history[-1].messages[-6:]
+                else:
+                    # It's already a list of messages
+                    messages_to_process = conversation_history[-6:]
+            
+            # Process messages
+            for entry in messages_to_process:
                 role = None
                 content = None
 
-                if isinstance(entry, ChatMessage):
+                # Handle MessageResponse objects (from ConversationResponse)
+                if hasattr(entry, 'role') and hasattr(entry, 'content'):
                     role = entry.role
                     content = entry.content
+                # Handle ChatMessage objects
+                elif isinstance(entry, ChatMessage):
+                    role = entry.role
+                    content = entry.content
+                # Handle dict
                 elif isinstance(entry, dict):
                     role = entry.get("role")
                     content = entry.get("content")
-                else:
-                    role = getattr(entry, "role", None)
-                    content = getattr(entry, "content", None)
 
                 if role and content:
                     formatted_history.append(f"{role}: {content}")
-
+        
+        # Log the extracted history for debugging
+        if formatted_history:
+            logger.debug(f"Intent detection extracted {len(formatted_history)} messages from conversation history")
+        
         history_block = "\n".join(formatted_history) if formatted_history else "No prior conversation."
 
         classifier_prompt = (
-            "You are an intent classifier for PersianWay's customer support system.\n"
-            "Determine if the latest user message is asking about public information "
-            "regarding the company PersianWay (پرشین وی), such as general company facts, "
-            "mission, services overview, or public announcements. If the user is describing "
-            "a specific product issue, requesting expert consultation, or seeking individualized "
-            "advice, classify it as not public data.\n"
-            "Respond in JSON with the shape {\"public_data\": <true|false>, \"explanation\": \"...\"}."
+            "You are an intent classifier for PersianWay (پرشین وی) customer support.\n\n"
+            "PersianWay focuses on THREE main areas:\n"
+            "1. Company information (about PersianWay itself)\n"
+            "2. Agriculture (کشاورزی) - farming, crops, fertilizers, irrigation, etc.\n"
+            "3. Health & Beauty (سلامت و زیبایی) - health, wellness, beauty products, etc.\n\n"
+            "Classify the user's message into ONE of these categories:\n\n"
+            "1. PUBLIC - Questions specifically about the PersianWay COMPANY itself:\n"
+            "   - Company history, mission, vision, background\n"
+            "   - Business model, organizational structure\n"
+            "   - Office locations, contact information, company details\n"
+            "   - Explicitly asking 'what is PersianWay?', 'tell me about the company'\n"
+            "   - Company announcements, policies, or organizational facts\n\n"
+            "2. PRIVATE - Questions related to our core expertise areas (DEFAULT for relevant topics):\n"
+            "   - Agriculture topics: farming, crops, fertilizers, irrigation, soil, pests, etc.\n"
+            "   - Health topics: wellness, nutrition, medical questions, health products\n"
+            "   - Beauty topics: skincare, cosmetics, beauty products, treatments\n"
+            "   - Product recommendations, troubleshooting, or technical support\n"
+            "   - Questions about services, features, or what the company offers\n"
+            "   - Personal account issues or specific user problems\n"
+            "   - General knowledge questions that MIGHT relate to these areas\n\n"
+            "3. NEEDS_CLARIFICATION - Unclear or vague questions that need more details:\n"
+            "   - Questions that are too vague or ambiguous to understand the intent\n"
+            "   - Questions missing critical context or details\n"
+            "   - Single words or very short phrases without clear meaning\n"
+            "   - Questions with pronouns (این, اون, اینا) without clear references\n"
+            "   - Incomplete questions or fragmented sentences\n\n"
+            "4. OFF_TOPIC - Questions clearly UNRELATED to our expertise areas:\n"
+            "   - Topics completely outside agriculture, health, beauty, and company info\n"
+            "   - Politics, sports, entertainment, technology, real estate, finance\n"
+            "   - Unrelated products or services we don't provide\n"
+            "   - Questions about other companies or brands (not PersianWay)\n"
+            "   ⚠️ IMPORTANT: Be LENIENT - only use OFF_TOPIC if the question is CLEARLY and OBVIOUSLY unrelated\n"
+            "   ⚠️ If there's ANY possibility the question relates to our areas, choose PRIVATE\n\n"
+            "RULES:\n"
+            "- When in doubt between PUBLIC and PRIVATE, choose PRIVATE\n"
+            "- When in doubt between PRIVATE and OFF_TOPIC, choose PRIVATE (be lenient)\n"
+            "- Only use OFF_TOPIC if the question is OBVIOUSLY and COMPLETELY unrelated\n"
+            "- Only use NEEDS_CLARIFICATION if genuinely unclear or missing critical information\n"
+            "- If conversation history provides context, use it to understand references\n\n"
+            "Examples:\n"
+            "PUBLIC:\n"
+            "- 'شرکت پرشین وی چیه؟' → PUBLIC\n"
+            "- 'دفتر شما کجاست؟' → PUBLIC\n"
+            "- 'شرکت شما چه کاری انجام میده؟' → PUBLIC\n\n"
+            "PRIVATE (Agriculture):\n"
+            "- 'بهترین کود برای گندم؟' → PRIVATE\n"
+            "- 'چطور خاک رو آماده کنم؟' → PRIVATE\n"
+            "- 'چطور آفت رو از بین ببرم؟' → PRIVATE\n\n"
+            "PRIVATE (Health & Beauty):\n"
+            "- 'چه ویتامینی برای پوست خوبه؟' → PRIVATE\n"
+            "- 'درمان سردرد چیه؟' → PRIVATE\n"
+            "- 'کرم ضد آفتاب خوب معرفی کن' → PRIVATE\n\n"
+            "PRIVATE (General/Services):\n"
+            "- 'محصولات شما چیه؟' → PRIVATE\n"
+            "- 'قیمت محصول چقدره؟' → PRIVATE\n"
+            "- 'چطور سفارش بدم؟' → PRIVATE\n\n"
+            "NEEDS_CLARIFICATION:\n"
+            "- 'چطور؟' → NEEDS_CLARIFICATION (too vague)\n"
+            "- 'اینا چیه؟' → NEEDS_CLARIFICATION (no context)\n"
+            "- 'بهتر' → NEEDS_CLARIFICATION (incomplete)\n\n"
+            "OFF_TOPIC (clearly unrelated):\n"
+            "- 'بهترین تیم فوتبال کدومه؟' → OFF_TOPIC (sports)\n"
+            "- 'چطور برنامه نویسی یاد بگیرم؟' → OFF_TOPIC (technology)\n"
+            "- 'قیمت دلار امروز چقدره؟' → OFF_TOPIC (finance)\n"
+            "- 'فیلم خوب پیشنهاد بده' → OFF_TOPIC (entertainment)\n"
+            "- 'نظرت درباره انتخابات چیه؟' → OFF_TOPIC (politics)\n\n"
+            "Respond ONLY with valid JSON:\n"
+            "{\n"
+            "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"NEEDS_CLARIFICATION\" | \"OFF_TOPIC\",\n"
+            "  \"explanation\": \"brief reason for classification\",\n"
+            "  \"clarification_prompt\": \"optional: what to ask if NEEDS_CLARIFICATION (in Persian)\",\n"
+            "  \"off_topic_message\": \"optional: redirect message if OFF_TOPIC (in Persian)\"\n"
+            "}"
         )
 
         try:
             classifier_llm = llm or await get_llm(
                 model_name="gpt-4o-mini",
-                temperature=0.0,
+                temperature=0.1,
                 top_p=0.1
             )
         except Exception as e:
-            logger.error("Failed to initialize intent detection LLM: {}", e)
-            return False
+            logger.error(f"Failed to initialize intent detection LLM: {e}")
+            return {
+                "intent": "PRIVATE",
+                "is_public": False,
+                "explanation": f"Failed to initialize LLM: {str(e)}",
+                "clarification_prompt": None
+            }
 
         try:
             response = await classifier_llm.ainvoke([
@@ -389,42 +516,94 @@ Title:"""
                 )
             ])
         except Exception as e:
-            logger.error("Error during public data intent detection: {}", e)
-            return False
+            logger.error(f"Error during intent detection: {e}")
+            return {
+                "intent": "PRIVATE",
+                "is_public": False,
+                "explanation": f"Error during classification: {str(e)}",
+                "clarification_prompt": None
+            }
 
         content = (getattr(response, "content", "") or "").strip()
         if not content:
-            return False
+            logger.warning("Intent detection returned empty content")
+            return {
+                "intent": "PRIVATE",
+                "is_public": False,
+                "explanation": "Empty response from classifier",
+                "clarification_prompt": None
+            }
 
+        # Parse JSON response
         payload = None
         json_match = re.search(r"\{.*\}", content, re.DOTALL)
         if json_match:
             try:
                 payload = json.loads(json_match.group())
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse JSON from intent detection: {e}")
                 payload = None
 
+        # Process the response
+        if isinstance(payload, dict) and "intent" in payload:
+            intent = payload.get("intent", "PRIVATE").upper()
+            explanation = payload.get("explanation", "No explanation provided")
+            clarification_prompt = payload.get("clarification_prompt")
+            off_topic_message = payload.get("off_topic_message")
+            
+            # Validate intent
+            if intent not in ["PUBLIC", "PRIVATE", "NEEDS_CLARIFICATION", "OFF_TOPIC"]:
+                logger.warning(f"Invalid intent '{intent}', defaulting to PRIVATE")
+                intent = "PRIVATE"
+            
+            # Determine is_public for backward compatibility
+            is_public = (intent == "PUBLIC")
+            
+            # Log the classification result
+            logger.info(
+                f"Intent classification: message='{message[:50]}...', "
+                f"intent={intent}, is_public={is_public}, explanation='{explanation}'"
+            )
+            
+            return {
+                "intent": intent,
+                "is_public": is_public,
+                "explanation": explanation,
+                "clarification_prompt": clarification_prompt,
+                "off_topic_message": off_topic_message
+            }
+
+        # Fallback: try old format for backward compatibility
         if isinstance(payload, dict) and "public_data" in payload:
             value = payload.get("public_data")
+            explanation = payload.get("explanation", "No explanation provided")
+            
+            is_public = False
             if isinstance(value, bool):
-                return value
-            if isinstance(value, str):
+                is_public = value
+            elif isinstance(value, str):
                 normalized_value = value.strip().lower()
-                if normalized_value in {"true", "yes", "public", "public_data"}:
-                    return True
-                if normalized_value in {"false", "no", "private", "not_public"}:
-                    return False
-            if isinstance(value, (int, float)):
-                return bool(value)
+                is_public = normalized_value in {"true", "yes", "public", "public_data"}
+            elif isinstance(value, (int, float)):
+                is_public = bool(value)
+            
+            logger.info(f"Intent detection (legacy format): message='{message[:50]}...', is_public={is_public}")
+            
+            return {
+                "intent": "PUBLIC" if is_public else "PRIVATE",
+                "is_public": is_public,
+                "explanation": explanation,
+                "clarification_prompt": None
+            }
 
-        normalized_content = content.lower()
-        if "public_data" in normalized_content:
-            if "true" in normalized_content or "yes" in normalized_content:
-                return True
-            if "false" in normalized_content or "no" in normalized_content:
-                return False
-
-        return False
+        # Ultimate fallback
+        logger.warning(f"Intent detection failed to classify message: '{message[:50]}...', defaulting to PRIVATE")
+        return {
+            "intent": "PRIVATE",
+            "is_public": False,
+            "explanation": "Failed to parse classifier response",
+            "clarification_prompt": None
+        }
 
     async def process_message(self, user_id: str, message: str, conversation_history: List = None, model: str = None, parameters: dict = None) -> Dict[str, Any]:
         """Process a user message using a hybrid approach.
@@ -487,10 +666,70 @@ Title:"""
                 query_analysis["requires_human_referral"] = True
                 query_analysis["reasoning"] = f"Query is outside our domain expertise because it contains the keyword '{unrelated_keyword}', and requires human specialist attention."
             else:
-                # Domain-related topic - try knowledge base first
+                # Domain-related topic - first check intent
+                intent_result = await self.detect_query_intent(message, conversation_history)
+                
+                # Handle off-topic questions
+                if intent_result["intent"] == "OFF_TOPIC":
+                    off_topic_msg = intent_result.get("off_topic_message") or (
+                        "درود! 🌹\n\n"
+                        "متأسفانه این سوال خارج از حوزه تخصص ماست. پرشین وی در حوزه‌های زیر آماده کمک به شماست:\n\n"
+                        "🌱 **کشاورزی**: کاشت، داشت، کود، آبیاری، مبارزه با آفات\n"
+                        "💊 **سلامت**: تغذیه، ویتامین‌ها، محصولات سلامتی\n"
+                        "💄 **زیبایی**: مراقبت از پوست، محصولات آرایشی و بهداشتی\n"
+                        "🏢 **اطلاعات شرکت**: درباره پرشین وی، خدمات و محصولات\n\n"
+                        "چطور می‌تونم در این زمینه‌ها بهتون کمک کنم؟"
+                    )
+                    
+                    answer = off_topic_msg
+                    query_analysis["confidence_score"] = 0.3
+                    query_analysis["knowledge_source"] = "off_topic_redirect"
+                    query_analysis["requires_human_referral"] = True
+                    query_analysis["reasoning"] = f"Query is off-topic: {intent_result['explanation']}"
+                    
+                    # Add to conversation memory
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
+                    
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                
+                # Handle clarification requests
+                if intent_result["intent"] == "NEEDS_CLARIFICATION":
+                    clarification_msg = intent_result.get("clarification_prompt") or (
+                        "سوال شما کمی مبهم است. لطفاً جزئیات بیشتری ارائه دهید تا بتوانم بهتر به شما کمک کنم.\n\n"
+                        "مثلاً:\n"
+                        "- به چه محصول یا موضوع خاصی اشاره دارید؟\n"
+                        "- چه اطلاعاتی نیاز دارید؟\n"
+                        "- مشکل یا سوال دقیق شما چیست؟"
+                    )
+                    
+                    answer = clarification_msg
+                    query_analysis["confidence_score"] = 0.5
+                    query_analysis["knowledge_source"] = "clarification_request"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = f"Query needs clarification: {intent_result['explanation']}"
+                    
+                    # Add to conversation memory
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
+                    
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                
+                # Proceed with knowledge base query
+                is_public = intent_result["is_public"]
                 try:
                     kb_service = get_knowledge_base_service()
-                    kb_result = await kb_service.query_knowledge_base(message, conversation_history)
+                    kb_result = await kb_service.query_knowledge_base(message, conversation_history, is_public)
                     kb_confidence = kb_result.get("confidence_score", 0) if kb_result else 0
                 except RuntimeError as kb_error:
                     # Vector store configuration error - log and inform user

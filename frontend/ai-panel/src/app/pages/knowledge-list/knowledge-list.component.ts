@@ -16,7 +16,6 @@ import { ContributeService, KnowledgeListItem } from '../../services/contribute.
 import { KnowledgeDetailsModalComponent } from '../../modals/knowledge-details-modal/knowledge-details-modal.component';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged, takeUntil } from 'rxjs/operators';
-import { MatChip } from '@angular/material/chips';
 
 // Interface for display in the table
 interface KnowledgeItem extends KnowledgeListItem {
@@ -46,8 +45,7 @@ interface CategoryOption {
     MatPaginatorModule,
     MatTooltipModule,
     MatSnackBarModule,
-    MatDialogModule,
-    MatChip
+    MatDialogModule
   ],
   templateUrl: './knowledge-list.component.html',
   styleUrl: './knowledge-list.component.scss',
@@ -134,6 +132,11 @@ export class KnowledgeListComponent implements OnInit, OnDestroy {
         this.isLoading = false;
       }
     });
+  }
+  
+  refresh(): void {
+    this.currentPage = 0;
+    this.loadKnowledgeData();
   }
   
 

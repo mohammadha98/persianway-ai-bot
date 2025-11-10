@@ -1,15 +1,4 @@
 <div class="knowledge-list-container">
-  <!-- Header Section
-  <mat-card class="header-card">
-    <mat-card-header>
-      <div mat-card-avatar class="header-icon">
-        <mat-icon>library_books</mat-icon>
-      </div>
-      <mat-card-title>لیست دانش‌های ثبت شده</mat-card-title>
-      <mat-card-subtitle>مشاهده و مدیریت دانش‌های موجود در پایگاه دانش</mat-card-subtitle>
-    </mat-card-header>
-  </mat-card> -->
-
   <!-- Knowledge Table -->
   <mat-card class="table-card">
      <mat-card-header>
@@ -29,56 +18,66 @@
           <mat-icon matSuffix *ngIf="!isSearching">search</mat-icon>
           <mat-icon matSuffix *ngIf="isSearching" class="searching-icon">hourglass_empty</mat-icon>
         </mat-form-field>
-
       </div>
       
-      <!-- Table -->
-      <div class="table-container">
-        <!-- Loading indicator -->
-        <div *ngIf="isLoading" class="loading-state">
-          <mat-icon>hourglass_empty</mat-icon>
-          <p>در حال بارگذاری...</p>
-        </div>
-        
-        <table mat-table [dataSource]="filteredKnowledgeItems" class="knowledge-table" *ngIf="!isLoading">
+      <!-- Loading indicator -->
+      <div *ngIf="isLoading" class="loading-state">
+        <mat-icon>hourglass_empty</mat-icon>
+        <p>در حال بارگذاری...</p>
+      </div>
+
+      <!-- Desktop Table View -->
+      <div class="table-container desktop-view" *ngIf="!isLoading">
+        <table mat-table [dataSource]="filteredKnowledgeItems" class="knowledge-table">
           <!-- Title Column -->
           <ng-container matColumnDef="title">
             <th mat-header-cell *matHeaderCellDef>عنوان</th>
-            <td mat-cell *matCellDef="let item">
-              {{ item.title }}
-              <span *ngIf="item.file_name" class="file-badge" [matTooltip]="'فایل: ' + item.file_name">
-                <mat-icon>attach_file</mat-icon>
-              </span>
+            <td mat-cell *matCellDef="let item" class="title-cell">
+              <div class="title-content">
+                <span class="title-text" [matTooltip]="item.title">{{ item.title }}</span>
+                <span *ngIf="item.file_name" class="file-badge" [matTooltip]="'فایل: ' + item.file_name">
+                  <mat-icon>attach_file</mat-icon>
+                </span>
+              </div>
             </td>
           </ng-container>
     
           <!-- Tags Column -->
           <ng-container matColumnDef="tags">
             <th mat-header-cell *matHeaderCellDef>برچسب‌ها</th>
-            <td mat-cell *matCellDef="let item">{{ item.meta_tags?.join(', ') || '' }}</td>
+            <td mat-cell *matCellDef="let item" class="tags-cell">
+              <div class="tags-content" [matTooltip]="item.meta_tags?.join(', ') || ''">
+                <span class="tag-chip" *ngFor="let tag of item.meta_tags?.slice(0, 2)">{{ tag }}</span>
+                <span class="more-tags" *ngIf="item.meta_tags && item.meta_tags.length > 2">
+                  +{{ item.meta_tags.length - 2 }}
+                </span>
+              </div>
+            </td>
           </ng-container>
           
           <!-- Author Column -->
           <ng-container matColumnDef="author">
             <th mat-header-cell *matHeaderCellDef>نویسنده</th>
-            <td mat-cell *matCellDef="let item">{{ item.author_name || 'نامشخص' }}</td>
+            <td mat-cell *matCellDef="let item" class="author-cell">
+              <span [matTooltip]="item.author_name || 'نامشخص'">{{ item.author_name || 'نامشخص' }}</span>
+            </td>
           </ng-container>
           
           <!-- Synced Column -->
           <ng-container matColumnDef="synced">
-            <th mat-header-cell *matHeaderCellDef>وضعیت همگام‌سازی</th>
+            <th mat-header-cell *matHeaderCellDef>وضعیت</th>
             <td mat-cell *matCellDef="let item">
               <span *ngIf="item.synced === true" class="sync-status synced" matTooltip="همگام‌سازی شده">
                 <mat-icon>check_circle</mat-icon>
-                همگام‌سازی شده
+                <span class="status-text">همگام‌سازی شده</span>
               </span>
               <span *ngIf="item.synced === false" class="sync-status not-synced" matTooltip="همگام‌سازی نشده">
                 <mat-icon>cancel</mat-icon>
-                همگام‌سازی نشده
+                <span class="status-text">همگام‌سازی نشده</span>
               </span>
               <span *ngIf="item.synced === null || item.synced === undefined" class="sync-status unknown" matTooltip="وضعیت نامشخص">
                 <mat-icon>help</mat-icon>
-                نامشخص
+                <span class="status-text">نامشخص</span>
               </span>
             </td>
           </ng-container>
@@ -86,27 +85,92 @@
           <!-- Actions Column -->
           <ng-container matColumnDef="actions">
             <th mat-header-cell *matHeaderCellDef>عملیات</th>
-            <td mat-cell *matCellDef="let item">
-              <button mat-icon-button color="primary" (click)="viewKnowledge(item)" matTooltip="مشاهده">
-                <mat-icon>visibility</mat-icon>
-              </button>
-              <button 
-                mat-icon-button 
-                color="warn" 
-                (click)="deleteKnowledge(item)" 
-                [disabled]="item.synced === false"
-                [matTooltip]="item.synced === false ? 'امکان حذف سند همگام‌سازی نشده وجود ندارد' : 'حذف'">
-                <mat-icon>delete</mat-icon>
-              </button>
+            <td mat-cell *matCellDef="let item" class="actions-cell">
+              <div class="action-buttons">
+                <button mat-icon-button color="primary" (click)="viewKnowledge(item)" matTooltip="مشاهده">
+                  <mat-icon>visibility</mat-icon>
+                </button>
+                <button 
+                  mat-icon-button 
+                  color="warn" 
+                  (click)="deleteKnowledge(item)" 
+                  [disabled]="item.synced === false"
+                  [matTooltip]="item.synced === false ? 'امکان حذف سند همگام‌سازی نشده وجود ندارد' : 'حذف'">
+                  <mat-icon>delete</mat-icon>
+                </button>
+              </div>
             </td>
           </ng-container>
           
           <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-          <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+          <tr mat-row *matRowDef="let row; columns: displayedColumns;" class="table-row"></tr>
         </table>
         
         <!-- Empty State -->
-        <div *ngIf="!isLoading && filteredKnowledgeItems.length === 0" class="empty-state">
+        <div *ngIf="filteredKnowledgeItems.length === 0" class="empty-state">
+          <mat-icon>info</mat-icon>
+          <p>هیچ موردی یافت نشد.</p>
+        </div>
+      </div>
+
+      <!-- Mobile Card View -->
+      <div class="mobile-view" *ngIf="!isLoading">
+        <div class="knowledge-card" *ngFor="let item of filteredKnowledgeItems">
+          <div class="card-header">
+            <h3 class="card-title">{{ item.title }}</h3>
+            <span *ngIf="item.file_name" class="file-badge" [matTooltip]="'فایل: ' + item.file_name">
+              <mat-icon>attach_file</mat-icon>
+            </span>
+          </div>
+          
+          <div class="card-body">
+            <div class="card-row" *ngIf="item.meta_tags && item.meta_tags.length > 0">
+              <span class="card-label">برچسب‌ها:</span>
+              <div class="tags-content">
+                <span class="tag-chip" *ngFor="let tag of item.meta_tags">{{ tag }}</span>
+              </div>
+            </div>
+            
+            <div class="card-row">
+              <span class="card-label">نویسنده:</span>
+              <span>{{ item.author_name || 'نامشخص' }}</span>
+            </div>
+            
+            <div class="card-row">
+              <span class="card-label">وضعیت:</span>
+              <span *ngIf="item.synced === true" class="sync-status synced">
+                <mat-icon>check_circle</mat-icon>
+                همگام‌سازی شده
+              </span>
+              <span *ngIf="item.synced === false" class="sync-status not-synced">
+                <mat-icon>cancel</mat-icon>
+                همگام‌سازی نشده
+              </span>
+              <span *ngIf="item.synced === null || item.synced === undefined" class="sync-status unknown">
+                <mat-icon>help</mat-icon>
+                نامشخص
+              </span>
+            </div>
+          </div>
+          
+          <div class="card-actions">
+            <button mat-raised-button color="primary" (click)="viewKnowledge(item)">
+              <mat-icon>visibility</mat-icon>
+              مشاهده
+            </button>
+            <button 
+              mat-raised-button 
+              color="warn" 
+              (click)="deleteKnowledge(item)" 
+              [disabled]="item.synced === false">
+              <mat-icon>delete</mat-icon>
+              حذف
+            </button>
+          </div>
+        </div>
+        
+        <!-- Empty State -->
+        <div *ngIf="filteredKnowledgeItems.length === 0" class="empty-state">
           <mat-icon>info</mat-icon>
           <p>هیچ موردی یافت نشد.</p>
         </div>

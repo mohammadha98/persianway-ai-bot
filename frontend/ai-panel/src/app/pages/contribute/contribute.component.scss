@@ -183,6 +183,33 @@
         border-radius: 12px;
       }
     }
+
+    .public-toggle {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 16px 20px;
+      background: rgba(33, 150, 243, 0.05);
+      border: 1px solid rgba(33, 150, 243, 0.12);
+      border-radius: 12px;
+      text-align: right;
+
+      mat-slide-toggle {
+        direction: rtl;
+        .mdc-label {
+          font-weight: 500;
+          color: #1a1a1a;
+          margin-inline-start: 12px;
+        }
+      }
+
+      .toggle-hint {
+        margin: 0;
+        font-size: 0.85rem;
+        color: #4d4d4d;
+        line-height: 1.6;
+      }
+    }
   }
   
   .submit-button {
@@ -449,6 +476,12 @@
   .form-card {
     .contribution-form {
       gap: 12px;
+      .public-toggle {
+        padding: 12px 14px;
+        .toggle-hint {
+          font-size: 0.8rem;
+        }
+      }
     }
   }
   

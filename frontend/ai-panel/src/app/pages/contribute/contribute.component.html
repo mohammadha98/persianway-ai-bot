@@ -56,6 +56,19 @@
                 <mat-hint>برچسب‌ها به بهتر پیدا شدن مطلب کمک می‌کنند</mat-hint>
               </mat-form-field>
 
+              <!-- Public Visibility -->
+              <div class="public-toggle">
+                <mat-slide-toggle
+                  [(ngModel)]="form.is_public"
+                  name="is_public"
+                  color="primary">
+                  انتشار عمومی (محتوای غیر تخصصی)
+                </mat-slide-toggle>
+                <p class="toggle-hint">
+                  با فعال کردن این گزینه، این مطلب در بخش عمومی پایگاه دانش برای کاربران غیر متخصص نمایش داده می‌شود.
+                </p>
+              </div>
+
            
 
 
@@ -118,7 +131,7 @@
   </div>
 
   <!-- Knowledge List Component -->
-<app-knowledge-list></app-knowledge-list>
+<app-knowledge-list #knowledgeList></app-knowledge-list>
 
   <!-- Guidelines Section
   <mat-card class="guidelines-card">

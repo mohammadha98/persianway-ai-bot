@@ -94,9 +94,122 @@ class KnowledgeBaseService:
         
         return self._qa_chain
     
+    def _normalize_documents_for_context(self, docs: List[Any], max_content_length: int = 1500) -> List[Any]:
+        """
+        Normalize and clean documents before passing to the QA chain.
+        Removes unnecessary metadata and limits content length for better LLM performance.
+        
+        This function:
+        - Removes technical metadata (file paths, creation dates, producers, etc.)
+        - Keeps only essential metadata (source, title, page, author, etc.)
+        - Truncates long content to avoid token limit issues
+        - Limits metadata string lengths
+        
+        Args:
+            docs: List of LangChain Document objects
+            max_content_length: Maximum length for document content (default: 1500 chars)
+            
+        Returns:
+            List of cleaned Document objects with minimal, relevant metadata
+        """
+        from langchain.schema import Document
+        
+        normalized_docs = []
+        total_original_size = 0
+        total_normalized_size = 0
+        
+        for idx, doc in enumerate(docs):
+            # Track original size
+            original_size = len(str(doc.page_content)) + len(str(doc.metadata))
+            total_original_size += original_size
+            
+            # Extract only relevant metadata fields
+            clean_metadata = {}
+            
+            # Keep only essential metadata fields
+            essential_fields = {
+                'source': 100,        # File name or source identifier
+                'title': 200,         # Document or section title
+                'page': None,         # Page number (keep as is)
+                'source_type': 50,    # Type of source (qa, pdf, excel, etc.)
+                'question': 300,      # For QA pairs
+                'answer': 500,        # For QA pairs
+                'meta_tags': 200,     # Tags for categorization
+                'author_name': 100    # Author information
+            }
+            
+            for field, max_length in essential_fields.items():
+                if field in doc.metadata and doc.metadata[field]:
+                    value = doc.metadata[field]
+                    
+                    # Handle different value types
+                    if isinstance(value, str):
+                        # Trim whitespace
+                        value = value.strip()
+                        # Limit string length if max_length is specified
+                        if max_length and len(value) > max_length:
+                            value = value[:max_length] + "..."
+                        clean_metadata[field] = value
+                    elif isinstance(value, (int, float, bool)):
+                        # Keep numeric and boolean values as is
+                        clean_metadata[field] = value
+                    elif value is not None:
+                        # Convert other types to string and limit length
+                        str_value = str(value)
+                        if max_length and len(str_value) > max_length:
+                            str_value = str_value[:max_length] + "..."
+                        clean_metadata[field] = str_value
+            
+            # Limit page content to reasonable length (avoid token limit issues)
+            clean_content = doc.page_content.strip()
+            if len(clean_content) > max_content_length:
+                # Try to cut at a sentence boundary if possible
+                truncated = clean_content[:max_content_length]
+                last_period = truncated.rfind('.')
+                last_newline = truncated.rfind('\n')
+                cut_point = max(last_period, last_newline)
+                
+                if cut_point > max_content_length * 0.8:  # Only use sentence boundary if it's not too far back
+                    clean_content = truncated[:cut_point + 1] + "..."
+                else:
+                    clean_content = truncated + "..."
+            
+            # Create a new document with cleaned data
+            normalized_doc = Document(
+                page_content=clean_content,
+                metadata=clean_metadata
+            )
+            normalized_docs.append(normalized_doc)
+            
+            # Track normalized size
+            normalized_size = len(clean_content) + len(str(clean_metadata))
+            total_normalized_size += normalized_size
+            
+            # Log individual document normalization (debug level)
+            logging.debug(
+                f"Normalized doc {idx+1}: "
+                f"original_size={original_size}, "
+                f"normalized_size={normalized_size}, "
+                f"reduction={((original_size - normalized_size) / original_size * 100):.1f}%"
+            )
+        
+        # Log overall normalization stats
+        if total_original_size > 0:
+            reduction_percent = ((total_original_size - total_normalized_size) / total_original_size * 100)
+            logging.info(
+                f"Document normalization complete: "
+                f"{len(docs)} docs, "
+                f"original_size={total_original_size} chars, "
+                f"normalized_size={total_normalized_size} chars, "
+                f"reduction={reduction_percent:.1f}%"
+            )
+        
+        return normalized_docs
+    
     def _calculate_confidence_score(self, similarity_score: float) -> float:
         """
-        Converts the similarity score (distance) from the vector store to a confidence score.
+        Converts the similarity score (distance) from the vector store to a confidence score
+        using a logistic decay function. This provides more control over the score conversion.
         Lower distance scores indicate higher similarity.
 
         Args:
@@ -105,16 +218,22 @@ class KnowledgeBaseService:
         Returns:
             A confidence score between 0 and 1, where 1 is most confident.
         """
-        # ChromaDB returns L2 distance scores which can be any positive value.
-        # Lower scores mean higher similarity. We use exponential decay to convert to confidence.
-        # This approach handles scores > 1.0 gracefully and provides smooth scaling.
-        
-        # Use exponential decay: confidence = e^(-distance)
-        # This naturally maps: distance=0 -> confidence=1, distance=∞ -> confidence=0
         import math
-        confidence = math.exp(-similarity_score)
-        
-        # Ensure the result is within [0, 1] range
+
+        # --- Tunable Parameters for Logistic Decay ---
+        # Midpoint: The distance score at which confidence is 50%.
+        # A lower midpoint makes the confidence drop sooner.
+        midpoint = 1.5
+
+        # Scale: Controls the steepness of the decay.
+        # A higher scale creates a sharper drop in confidence around the midpoint.
+        scale = 5.0
+        # -----------------------------------------
+
+        # Logistic decay function: 1 / (1 + exp(scale * (x - midpoint)))
+        # This maps distance scores to a 0-1 confidence range.
+        confidence = 1.0 / (1.0 + math.exp(scale * (similarity_score - midpoint)))
+
         return max(0.0, min(confidence, 1.0))
     
     def _log_human_referral(self, query: str, answer: str, confidence: float) -> None:
@@ -330,137 +449,6 @@ class KnowledgeBaseService:
             # Re-raise the exception so the route can handle it and return a 500 error
             raise
     
-    def _is_content_relevant(self, query: str, qa_content: str) -> bool:
-        """Check if the QA content is relevant to the user's query using semantic similarity.
-        
-        Args:
-            query: The user's question
-            qa_content: The QA pair content to check
-            
-        Returns:
-            True if content appears relevant, False otherwise
-        """
-        # Convert to lowercase for comparison
-        query_lower = query.lower()
-        content_lower = qa_content.lower()
-        
-        # Extract key terms from query (remove common words)
-        common_words = {'که', 'این', 'آن', 'در', 'به', 'از', 'با', 'برای', 'تا', 'و', 'یا', 'اما', 'چه', 'چی', 'کی', 'کجا', 'چرا', 'چگونه', 'بین', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
-        query_words = [word for word in query_lower.split() if word not in common_words and len(word) > 2]
-        
-        # Check for direct word matches
-        direct_matches = sum(1 for word in query_words if word in content_lower)
-        match_ratio = direct_matches / max(len(query_words), 1)
-        
-        # If we have good word overlap, consider it relevant
-        if match_ratio >= 0.5:  # At least 50% of query words should match
-            return True
-            
-        # Define domain-specific keywords to detect topic mismatch
-        domain_keywords = {
-            'agriculture': [
-                'کود', 'کشاورزی', 'خاک', 'کاشت', 'برداشت', 'آفت', 'بیماری', 'گیاه', 'محصول',
-                'آبیاری', 'بذر', 'نهال', 'درخت', 'میوه', 'سبزی', 'غلات', 'دام', 'طیور',
-                'fertilizer', 'agriculture', 'soil', 'plant', 'crop', 'farming', 'irrigation'
-            ],
-            'health_beauty': [
-                'پوست', 'صورت', 'ماسک', 'کرم', 'زیبایی', 'سلامت', 'درمان', 'دارو', 'بیمار',
-                'معده', 'شکم', 'ماساژ', 'روغن', 'مالت', 'خرما', 'شیر', 'کودک', 'نوزاد', 'مو', 'ریزش',
-                'skin', 'face', 'mask', 'cream', 'beauty', 'health', 'treatment', 'medicine', 'hair'
-            ],
-            'technology': [
-                'کامپیوتر', 'نرم افزار', 'اپلیکیشن', 'وب سایت', 'برنامه نویسی', 'شبکه',
-                'computer', 'software', 'application', 'website', 'programming', 'network'
-            ],
-            'finance': [
-                'پول', 'بانک', 'سرمایه گذاری', 'بورس', 'اقتصاد', 'مالی', 'حسابداری',
-                'money', 'bank', 'investment', 'stock', 'economy', 'financial', 'accounting'
-            ]
-        }
-        
-        # Detect query domain
-        query_domain = None
-        for domain, keywords in domain_keywords.items():
-            if any(keyword in query_lower for keyword in keywords):
-                query_domain = domain
-                break
-        
-        # Detect content domain
-        content_domain = None
-        for domain, keywords in domain_keywords.items():
-            if any(keyword in content_lower for keyword in keywords):
-                content_domain = domain
-                break
-        
-        # If query domain is known and content domain is known and they differ, it's irrelevant
-        if query_domain and content_domain and query_domain != content_domain:
-            return False
-        
-        # Check for semantic relevance using expanded keyword matching
-        semantic_keywords = {
-            # Health and beauty semantic mapping
-            'پوست': ['skin', 'face', 'facial', 'dermal'],
-            'مو': ['hair', 'scalp'],
-            'ریزش': ['loss', 'fall', 'thinning'],
-            'زیبایی': ['beauty', 'cosmetic'],
-            'سلامت': ['health', 'wellness'],
-            'درمان': ['treatment', 'therapy', 'cure'],
-            'دارو': ['medicine', 'medication', 'drug'],
-            # Agriculture semantic mapping
-            'کود': ['fertilizer', 'nutrient'],
-            'کشاورزی': ['agriculture', 'farming'],
-            'خاک': ['soil', 'earth'],
-            'گیاه': ['plant', 'vegetation'],
-            'محصول': ['crop', 'produce']
-        }
-        
-        # Check for semantic matches
-        for persian_term, english_terms in semantic_keywords.items():
-            if persian_term in query_lower:
-                if persian_term in content_lower or any(term in content_lower for term in english_terms):
-                    return True
-            for eng_term in english_terms:
-                if eng_term in query_lower:
-                    if persian_term in content_lower or eng_term in content_lower:
-                        return True
-        
-        # If the content contains highly specific patterns from a different domain, it's likely irrelevant
-        if query_domain and query_domain != 'health_beauty':
-            highly_specific_health_patterns = [
-                'مالت خرما',
-                'شکم کودک',
-                'سفیر سلامت',
-                'پوست صورت',
-                'جوشهای سرسیاه'
-            ]
-            if any(pattern in content_lower for pattern in highly_specific_health_patterns):
-                return False
-
-        # Add explicit checks for political/unrelated content
-        political_patterns = [
-            'سیاست', 'انتخابات', 'دولت', 'مکتب', 'دیدگاه سیاسی', 'جنگ', 'politics', 'political', 'government', 'war'
-        ]
-        if any(pattern in query_lower for pattern in political_patterns):
-            return False
-            
-        # Be more conservative - only return True if we have strong evidence of relevance
-        # Either through domain matching or semantic keyword matching
-        if query_domain and content_domain and query_domain == content_domain:
-            return True
-            
-        # Check if we found semantic matches earlier
-        for persian_term, english_terms in semantic_keywords.items():
-            if persian_term in query_lower:
-                if persian_term in content_lower or any(term in content_lower for term in english_terms):
-                    return True
-            for eng_term in english_terms:
-                if eng_term in query_lower:
-                    if persian_term in content_lower or eng_term in content_lower:
-                        return True
-        
-        # Default to False for better precision
-        return False
-    
 
     async def expand_query(self, query: str) -> Dict[str, Any]:
         """Expand a query using GPT-4o-mini to improve search results.
@@ -480,6 +468,7 @@ class KnowledgeBaseService:
             # Create a prompt for query expansion
             prompt = f"""Given the following query, generate 3 alternative versions that capture the same intent but with different wording or additional context. 
             Focus on expanding concepts, adding synonyms, and considering both Persian and English terminology.
+            If the query refers to a company or its services without explicitly mentioning the brand name, append both "پرشین وی" and "Persian Way" to each expanded query.
             
             Original query: {query}
             
@@ -493,7 +482,7 @@ class KnowledgeBaseService:
             }}
             """
             
-            # Call GPT-4o-mini
+            # Call gpt-4o-mini
             response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
@@ -574,7 +563,7 @@ class KnowledgeBaseService:
         Args:
             history: List of conversation messages with 'role' and 'content' keys
             user_message: The current user message to rewrite
-            max_history: Maximum number of previous messages to consider
+            max_history: Maximum number of previous messages to consider (default: 4 = 2 exchanges)
             
         Returns:
             str: The rewritten query that incorporates conversation context
@@ -582,10 +571,25 @@ class KnowledgeBaseService:
         # If no history, return original message
         if not history:
             return user_message
+        
+        # Take only the most recent messages to avoid token overflow and confusion
+        # max_history=4 means last 2 exchanges (user+assistant, user+assistant)
+        recent_history = history[-max_history:] if len(history) > max_history else history
+        
+        # Truncate very long messages to avoid token limit
+        truncated_history = []
+        for msg in recent_history:
+            content = msg.get('content', '')
+            if len(content) > 300:
+                content = content[:300] + "..."
+            truncated_history.append({
+                'role': msg['role'],
+                'content': content
+            })
             
         # Build multi-turn context window
         recent_context = "\n".join(
-            [f"{msg['role'].capitalize()}: {msg['content']}" for msg in history[-max_history:]]
+            [f"{msg['role'].capitalize()}: {msg['content']}" for msg in truncated_history]
         )
         
         prompt = f"""
@@ -603,7 +607,7 @@ class KnowledgeBaseService:
         
         try:
             # Use the existing LLM infrastructure from chat_service
-            llm = await get_llm(temperature=0, max_tokens=100)
+            llm = await get_llm(model_name="gpt-4o-mini",temperature=0, max_tokens=100)
             
             # Create messages for the LLM
             from langchain.schema import SystemMessage, HumanMessage
@@ -636,12 +640,34 @@ class KnowledgeBaseService:
             A dictionary with the answer, confidence score, and source information
         """
         try:
+            # Log the incoming query for debugging
+            logging.info(f"[KB Query] Original query: '{query[:100]}...'")
+            
             # Extract conversation history and rewrite query with context if available
             extracted_history = self._extract_conversation_history(conversation_history)
+            logging.debug(f"[KB Query] Extracted {len(extracted_history)} messages from conversation history")
+            
             if extracted_history:
-                # Rewrite the query to include conversation context
-                query = await self.rewrite_query_with_context(extracted_history, query)
-                logging.info(f"Query rewritten with context: {query}")
+                # IMPORTANT: Remove the current user message from history if it exists
+                # This prevents the system from using the current query in its own context
+                filtered_history = []
+                for msg in extracted_history:
+                    # Skip if this message matches the current query
+                    if msg.get('role') == 'user' and msg.get('content', '').strip() == query.strip():
+                        logging.info(f"[KB Query] Skipping current query from history: '{query[:50]}...'")
+                        continue
+                    filtered_history.append(msg)
+                
+                logging.debug(f"[KB Query] After filtering: {len(filtered_history)} messages remain for context")
+                
+                # Only rewrite if we have actual previous context (not just the current message)
+                if filtered_history:
+                    original_query = query
+                    # Rewrite the query to include conversation context
+                    query = await self.rewrite_query_with_context(filtered_history, query)
+                    logging.info(f"[KB Query] Query rewritten: '{original_query[:50]}...' -> '{query[:100]}...'")
+                else:
+                    logging.debug("[KB Query] No previous conversation context found, using original query")
             
             # First, check if we have an exact or semantically similar match in our QA database
             vector_store = self.document_processor.get_vector_store()
@@ -657,7 +683,7 @@ class KnowledgeBaseService:
             expanded_query_result = await self.expand_query(query)
             all_queries = [expanded_query_result["original_query"]] + expanded_query_result["expanded_queries"]
             
-            search_kwargs = {"k": 20}
+            search_kwargs = {"k": rag_settings.top_k_results}
             if is_public:
                 search_kwargs["filter"] = {"is_public": True}
             
@@ -680,40 +706,7 @@ class KnowledgeBaseService:
             # Take the top results after deduplication
             docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
             
-            # Check all documents equally for high-confidence matches, regardless of source type
-            for doc, score in docs_with_scores:
-                # For QA-type documents, check if we have a direct answer
-                if doc.metadata.get("source_type") in ["excel_qa", "qa_contribution"]:
-                    qa_question = doc.metadata.get("question", "") or doc.metadata.get("title", "")
-                    qa_answer = doc.metadata.get("answer", "") or doc.metadata.get("content", "")
-                    
-                    # Check if this QA pair is relevant to the query
-                    if self._is_content_relevant(query, qa_question) and qa_answer:
-                        # Calculate confidence based on the vector search similarity score
-                        confidence = self._calculate_confidence_score(score)
-                        
-                        # Load dynamic configuration for thresholds
-                        await self.config_service._load_config()
-                        rag_settings = await self.config_service.get_rag_settings()
-                        
-                        # If confidence is high enough, return the answer directly
-                        if confidence >= rag_settings.qa_match_threshold:
-                            return {
-                                "answer": qa_answer,
-                                "confidence_score": confidence,
-                                "source_type": doc.metadata.get("source_type", "qa_contribution"),
-                                "requires_human_support": False,
-                                "query_id": None,
-                                "sources": [{
-                                    "content": qa_answer,
-                                    "source": doc.metadata.get("source", "Unknown"),
-                                    "page": doc.metadata.get("page", 1),
-                                    "source_type": doc.metadata.get("source_type", "qa_contribution"),
-                                    "title": qa_question
-                                }]
-                            }
-            
-            # If no high-confidence direct match found, use the QA chain with all documents
+            # Use the QA chain with retrieved documents
             qa_chain = await self._get_qa_chain()
             
             # If QA chain is not available, return a fallback message
@@ -732,7 +725,28 @@ class KnowledgeBaseService:
                 
             # Get answer from QA chain using new input format
             docs = [doc for doc, score in docs_with_scores]
-            result = qa_chain.invoke({"input": query, "context": docs})
+            
+            # Normalize documents before passing to QA chain
+            normalized_docs = self._normalize_documents_for_context(docs)
+            
+            # Log normalized document info for debugging
+            logging.info(f"Passing {len(normalized_docs)} normalized documents to QA chain")
+            for i, doc in enumerate(normalized_docs):
+                logging.debug(f"Doc {i+1}: content_length={len(doc.page_content)}, metadata_keys={list(doc.metadata.keys())}")
+            
+            # Extract page content to pass as context
+            context_snippets = [doc.page_content for doc in normalized_docs]
+            logging.debug(f"Context snippet lengths: {[len(snippet) for snippet in context_snippets]}")
+            
+    
+                # knowledge base information
+            full_context = "\n\n".join(f"سند {i+1}:\n{snippet}" for i, snippet in enumerate(context_snippets))
+            
+            # Log context details for debugging
+            logging.info(f"Full context length: {len(full_context)} chars, ~{len(full_context)//4} tokens")
+            logging.debug(f"First 500 chars of context: {full_context[:500]}")
+            
+            result = qa_chain.invoke({"input": query, "context": full_context})
             answer = result.get("answer") or result.get("result")
             if answer is None:
                 raise KeyError("answer")

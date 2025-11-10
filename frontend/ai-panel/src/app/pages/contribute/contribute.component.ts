@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -12,6 +12,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { ContributeService } from '../../services/contribute.service';
 import { KnowledgeListComponent } from '../knowledge-list/knowledge-list.component';
 import { MatExpansionModule } from '@angular/material/expansion';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 
 interface ContributionForm {
   title: string;
@@ -21,6 +22,7 @@ interface ContributionForm {
   source: string;
   author: string;
   additionalReferences: string;
+  is_public: boolean;
 }
 
 @Component({
@@ -38,6 +40,7 @@ interface ContributionForm {
     MatSnackBarModule,
     MatProgressSpinnerModule,
     MatExpansionModule,
+    MatSlideToggleModule,
     KnowledgeListComponent
   ],
   templateUrl: './contribute.component.html',
@@ -46,6 +49,7 @@ interface ContributionForm {
 export class ContributeComponent {
   // Expandable section state
   isExpanded: boolean = true;
+  @ViewChild('knowledgeList') private knowledgeListComponent?: KnowledgeListComponent;
   
   form: ContributionForm = {
     title: '',
@@ -54,7 +58,8 @@ export class ContributeComponent {
     tags: '',
     source: '',
     author: '',
-    additionalReferences: ''
+    additionalReferences: '',
+    is_public:false
   };
 
   categories = [
@@ -109,7 +114,6 @@ export class ContributeComponent {
       this.showMessage('لطفاً تمام فیلدهای ضروری را پر کنید.', 'error');
       return;
     }
-    debugger
     this.isSubmitting = true;
 
     const formData = new FormData();
@@ -119,6 +123,7 @@ export class ContributeComponent {
     formData.append('meta_tags', this.form.tags);
     formData.append('author_name', this.form.author || '');
     formData.append('additional_references', this.form.additionalReferences || '');
+    formData.append('is_public',this.form.is_public.toString());
 
     if (this.selectedFile) {
       formData.append('file', this.selectedFile);
@@ -130,6 +135,8 @@ export class ContributeComponent {
         console.log(response);
         this.showMessage('مشارکت شما با موفقیت ثبت شد. متشکریم!', 'success');
         this.resetForm();
+        this.knowledgeListComponent?.refresh();
+      
       },
       error: (error) => {
         this.isSubmitting = false;
@@ -180,7 +187,8 @@ export class ContributeComponent {
       tags: '',
       source: '',
       author: '',
-      additionalReferences: ''
+      additionalReferences: '',
+      is_public:false
     };
     this.selectedFile = null;
     const fileInput = document.getElementById('fileInput') as HTMLInputElement;
