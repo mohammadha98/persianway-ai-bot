@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 import uuid
 import logging
 import os
+import hashlib
 from datetime import datetime
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -206,34 +207,77 @@ class KnowledgeBaseService:
         
         return normalized_docs
     
-    def _calculate_confidence_score(self, similarity_score: float) -> float:
+    def _calculate_confidence_score(self, docs_with_scores: List[tuple], top_n: int = 3) -> float:
         """
-        Converts the similarity score (distance) from the vector store to a confidence score
-        using a logistic decay function. This provides more control over the score conversion.
-        Lower distance scores indicate higher similarity.
+        Calculates multi-factor confidence score based on:
+        1. Best document score (primary factor)
+        2. Score consistency across top results (secondary factor)
+        3. Number of relevant documents found (coverage factor)
+        
+        Lower distance scores indicate higher similarity in L2 distance.
 
         Args:
-            similarity_score: The distance score from the vector search (e.g., ChromaDB's L2 distance).
+            docs_with_scores: List of (document, score) tuples from vector search
+            top_n: Number of top documents to consider for confidence calculation
 
         Returns:
             A confidence score between 0 and 1, where 1 is most confident.
         """
         import math
+        import numpy as np
+        
+        if not docs_with_scores:
+            return 0.0
+        
+        # Extract scores from top N documents
+        top_scores = [score for _, score in docs_with_scores[:min(top_n, len(docs_with_scores))]]
+        
+        # --- Factor 1: Best Score (60% weight) ---
+        # Convert best similarity score to confidence using logistic decay
+        best_score = top_scores[0]
+        midpoint = 1.5  # Distance at which confidence is 50%
+        scale = 5.0     # Steepness of decay
+        best_confidence = 1.0 / (1.0 + math.exp(scale * (best_score - midpoint)))
+        
+        # --- Factor 2: Score Consistency (30% weight) ---
+        # Lower standard deviation = more consistent = higher confidence
+        if len(top_scores) > 1:
+            score_std = float(np.std(top_scores))
+            # Normalize std to 0-1 range (assuming std usually < 0.5 for good results)
+            consistency_score = 1.0 / (1.0 + score_std * 2.0)
+        else:
+            consistency_score = 1.0  # Single result = perfect consistency
+        
+        # --- Factor 3: Coverage (10% weight) ---
+        # Having multiple relevant docs increases confidence
+        coverage_score = min(len(docs_with_scores) / top_n, 1.0)
+        
+        # --- Combined Confidence ---
+        final_confidence = (
+            best_confidence * 0.6 + 
+            consistency_score * 0.3 + 
+            coverage_score * 0.1
+        )
+        
+        return max(0.0, min(final_confidence, 1.0))
+    
+    def _calculate_single_score_confidence(self, similarity_score: float) -> float:
+        """
+        Legacy method for single score confidence calculation.
+        Used for backward compatibility.
+        
+        Args:
+            similarity_score: The distance score from the vector search
 
-        # --- Tunable Parameters for Logistic Decay ---
-        # Midpoint: The distance score at which confidence is 50%.
-        # A lower midpoint makes the confidence drop sooner.
+        Returns:
+            A confidence score between 0 and 1
+        """
+        import math
+        
         midpoint = 1.5
-
-        # Scale: Controls the steepness of the decay.
-        # A higher scale creates a sharper drop in confidence around the midpoint.
         scale = 5.0
-        # -----------------------------------------
-
-        # Logistic decay function: 1 / (1 + exp(scale * (x - midpoint)))
-        # This maps distance scores to a 0-1 confidence range.
         confidence = 1.0 / (1.0 + math.exp(scale * (similarity_score - midpoint)))
-
+        
         return max(0.0, min(confidence, 1.0))
     
     def _log_human_referral(self, query: str, answer: str, confidence: float) -> None:
@@ -661,7 +705,13 @@ class KnowledgeBaseService:
         return []
 
     async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False) -> Dict[str, Any]:
-        """Query the knowledge base with a question.
+        """Query the knowledge base with a question using improved retrieval strategy.
+        
+        Improvements:
+        - Weighted multi-query search (original query gets higher weight)
+        - Similarity threshold filtering
+        - MMR for diversity
+        - Multi-factor confidence calculation
         
         Args:
             query: The question to ask
@@ -716,28 +766,164 @@ class KnowledgeBaseService:
 
             rag_settings = await self.config_service.get_rag_settings()
             
-            search_kwargs = {"k": rag_settings.top_k_results}
+            # ===== IMPROVEMENT 1: Weighted Multi-Query Search with MMR =====
+            logging.info(f"[KB Query] Performing weighted multi-query search with {len(all_queries)} queries")
+            
+            # Prepare base search kwargs
+            base_search_kwargs = {}
             if is_public:
-                search_kwargs["filter"] = {"is_public": True}
+                base_search_kwargs["filter"] = {"is_public": True}
             
-            # Search for similar documents with scores using all queries
-            all_docs_with_scores = []
-            for search_query in all_queries:
-                if search_query.strip():  # Only search non-empty queries
-                    docs_with_scores = vector_store.similarity_search_with_score(search_query, **search_kwargs)
-                    all_docs_with_scores.extend(docs_with_scores)
+            # Calculate fetch_k for MMR (fetch more candidates, then apply diversity)
+            fetch_k = rag_settings.top_k_results * rag_settings.fetch_k_multiplier
             
-            # Remove duplicates and sort by score (lower is better for similarity)
-            seen_docs = set()
-            unique_docs_with_scores = []
-            for doc, score in sorted(all_docs_with_scores, key=lambda x: x[1]):
+            # Weighted search across all queries
+            weighted_docs_with_scores = []
+            for idx, search_query in enumerate(all_queries):
+                if not search_query.strip():
+                    continue
+                
+                # Assign weight: original/rewritten query gets higher weight
+                # First query is the rewritten one (most important)
+                if idx == 0:
+                    weight = rag_settings.original_query_weight
+                    query_type = "rewritten"
+                else:
+                    weight = rag_settings.expanded_query_weight
+                    query_type = f"expanded_{idx}"
+                
+                logging.debug(f"[KB Query] Searching with {query_type} query (weight={weight:.2f}): '{search_query[:50]}...'")
+                
+                try:
+                    # Use MMR search for diversity (better than plain similarity)
+                    # Note: ChromaDB doesn't have max_marginal_relevance_search_with_score,
+                    # so we use MMR to get diverse docs, then calculate scores separately
+                    
+                    # First, get diverse documents using MMR
+                    mmr_kwargs = {
+                        **base_search_kwargs,
+                        "k": rag_settings.top_k_results,
+                        "fetch_k": fetch_k,
+                        "lambda_mult": rag_settings.mmr_diversity_score
+                    }
+                    
+                    # MMR search returns documents without scores
+                    mmr_docs = vector_store.max_marginal_relevance_search(
+                        search_query,
+                        **mmr_kwargs
+                    )
+                    
+                    if not mmr_docs:
+                        logging.debug(f"[KB Query] No documents found via MMR for {query_type} query")
+                        continue
+                    
+                    # Now calculate scores for MMR documents using similarity search
+                    # We need to get scores for the documents returned by MMR
+                    # Strategy: Get more results with similarity search, then match with MMR results
+                    similarity_docs_with_scores = vector_store.similarity_search_with_score(
+                        search_query,
+                        k=fetch_k,  # Get enough candidates to match MMR results
+                        **base_search_kwargs
+                    )
+                    
+                    # Create a mapping of document to score for quick lookup
+                    # Use full content hash + metadata for precise matching
+                    doc_to_score = {}
+                    for sim_doc, sim_score in similarity_docs_with_scores:
+                        # Use a unique key based on content hash and metadata for precise matching
+                        content_hash = hashlib.md5(sim_doc.page_content.encode('utf-8')).hexdigest()[:8]
+                        doc_key = (
+                            content_hash,
+                            sim_doc.metadata.get("source", ""),
+                            sim_doc.metadata.get("page", 0)
+                        )
+                        # Keep the best (lowest) score if duplicate
+                        if doc_key not in doc_to_score or sim_score < doc_to_score[doc_key]:
+                            doc_to_score[doc_key] = sim_score
+                    
+                    # Match MMR documents with their scores
+                    docs_with_scores = []
+                    for mmr_doc in mmr_docs:
+                        mmr_content_hash = hashlib.md5(mmr_doc.page_content.encode('utf-8')).hexdigest()[:8]
+                        mmr_key = (
+                            mmr_content_hash,
+                            mmr_doc.metadata.get("source", ""),
+                            mmr_doc.metadata.get("page", 0)
+                        )
+                        
+                        if mmr_key in doc_to_score:
+                            score = doc_to_score[mmr_key]
+                            docs_with_scores.append((mmr_doc, score))
+                        else:
+                            # If not found in similarity results, try to find by content similarity
+                            # This can happen if MMR returns a doc that's not in top fetch_k similarity results
+                            # In this case, we'll use a conservative score (threshold)
+                            logging.debug(f"[KB Query] MMR doc not in similarity top {fetch_k}, using threshold score")
+                            docs_with_scores.append((mmr_doc, rag_settings.similarity_threshold))
+                    
+                    # Apply weight to scores (divide by weight to boost - lower score is better)
+                    for doc, score in docs_with_scores:
+                        weighted_score = score / weight
+                        weighted_docs_with_scores.append((doc, weighted_score, search_query, query_type))
+                        
+                    logging.debug(f"[KB Query] Found {len(docs_with_scores)} docs via MMR for {query_type} query")
+                    
+                except Exception as e:
+                    logging.warning(f"[KB Query] MMR search failed for query '{search_query[:50]}...': {str(e)}")
+                    # Fallback to regular similarity search
+                    try:
+                        docs_with_scores = vector_store.similarity_search_with_score(
+                            search_query,
+                            k=rag_settings.top_k_results,
+                            **base_search_kwargs
+                        )
+                        for doc, score in docs_with_scores:
+                            weighted_score = score / weight
+                            weighted_docs_with_scores.append((doc, weighted_score, search_query, query_type))
+                        logging.debug(f"[KB Query] Fallback to similarity search: found {len(docs_with_scores)} docs")
+                    except Exception as e2:
+                        logging.error(f"[KB Query] Fallback search also failed: {str(e2)}")
+                        continue
+            
+            # ===== IMPROVEMENT 2: Similarity Threshold Filtering =====
+            # Filter out documents with scores above threshold (higher score = less similar in L2 distance)
+            filtered_docs = [
+                (doc, score, query, qtype) 
+                for doc, score, query, qtype in weighted_docs_with_scores
+                if score <= rag_settings.similarity_threshold
+            ]
+            
+            if filtered_docs:
+                removed_count = len(weighted_docs_with_scores) - len(filtered_docs)
+                if removed_count > 0:
+                    logging.info(f"[KB Query] Filtered out {removed_count} documents below similarity threshold ({rag_settings.similarity_threshold})")
+            else:
+                # If all filtered out, keep best ones anyway (graceful degradation)
+                logging.warning(f"[KB Query] All documents below threshold, keeping top {rag_settings.top_k_results} anyway")
+                filtered_docs = weighted_docs_with_scores
+            
+            # ===== IMPROVEMENT 3: Deduplication with Source Tracking =====
+            # Remove duplicates while preserving the best score and tracking source query
+            seen_docs = {}
+            for doc, score, source_query, query_type in sorted(filtered_docs, key=lambda x: x[1]):
                 doc_key = (doc.page_content, doc.metadata.get("source", ""), doc.metadata.get("page", 0))
-                if doc_key not in seen_docs:
-                    seen_docs.add(doc_key)
-                    unique_docs_with_scores.append((doc, score))
+                
+                # Keep only the best score for each unique document
+                if doc_key not in seen_docs or score < seen_docs[doc_key][1]:
+                    seen_docs[doc_key] = (doc, score, source_query, query_type)
             
-            # Take the top results after deduplication
+            # Convert back to list and sort by score
+            unique_docs_with_scores = sorted(
+                [(doc, score) for doc, score, _, _ in seen_docs.values()],
+                key=lambda x: x[1]
+            )
+            
+            # Take top K results
             docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
+            
+            logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {len(weighted_docs_with_scores)} initial candidates)")
+            if docs_with_scores:
+                logging.debug(f"[KB Query] Score range: {docs_with_scores[0][1]:.4f} (best) to {docs_with_scores[-1][1]:.4f} (worst)")
             
             # Use the QA chain with retrieved documents
             qa_chain = await self._get_qa_chain()
@@ -785,15 +971,21 @@ class KnowledgeBaseService:
                 raise KeyError("answer")
             source_docs = result.get("context") or result.get("source_documents") or []
             
-            # Calculate confidence score
-            confidence = 0.0
-            if source_docs:
-                # Use the score of the most relevant document for confidence calculation
-                if docs_with_scores:
-                    most_relevant_score = docs_with_scores[0][1]  # score is the second item in the tuple
-                    confidence = self._calculate_confidence_score(most_relevant_score)
-                else:
-                    confidence = 0.0
+            # ===== IMPROVEMENT 4: Multi-factor Confidence Calculation =====
+            # Calculate confidence based on multiple factors:
+            # - Best document score (60% weight)
+            # - Score consistency across top documents (30% weight)
+            # - Number of relevant documents found (10% weight)
+            if docs_with_scores:
+                confidence = self._calculate_confidence_score(docs_with_scores, top_n=3)
+                logging.info(f"[KB Query] Multi-factor confidence score: {confidence:.4f}")
+                
+                # Log individual document scores for debugging
+                for i, (doc, score) in enumerate(docs_with_scores[:3]):
+                    logging.debug(f"[KB Query] Top doc {i+1} score: {score:.4f}")
+            else:
+                confidence = 0.0
+                logging.warning("[KB Query] No documents found, confidence = 0.0")
             
             # Get dynamic configuration if not already loaded
             if 'rag_settings' not in locals():

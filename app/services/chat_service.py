@@ -355,10 +355,9 @@ Title:"""
         
         Returns:
             A dictionary with:
-                - intent: One of "PUBLIC", "PRIVATE", "NEEDS_CLARIFICATION", or "OFF_TOPIC"
+                - intent: One of "PUBLIC", "PRIVATE", or "OFF_TOPIC"
                 - is_public: Boolean indicating if it's a public query (for backward compatibility)
                 - explanation: Reason for the classification
-                - clarification_prompt: Optional message to ask user for clarification (for NEEDS_CLARIFICATION)
                 - off_topic_message: Optional message to redirect user (for OFF_TOPIC)
         """
         if not message or not message.strip():
@@ -434,13 +433,7 @@ Title:"""
             "   - Questions about services, features, or what the company offers\n"
             "   - Personal account issues or specific user problems\n"
             "   - General knowledge questions that MIGHT relate to these areas\n\n"
-            "3. NEEDS_CLARIFICATION - Unclear or vague questions that need more details:\n"
-            "   - Questions that are too vague or ambiguous to understand the intent\n"
-            "   - Questions missing critical context or details\n"
-            "   - Single words or very short phrases without clear meaning\n"
-            "   - Questions with pronouns (این, اون, اینا) without clear references\n"
-            "   - Incomplete questions or fragmented sentences\n\n"
-            "4. OFF_TOPIC - Questions clearly UNRELATED to our expertise areas:\n"
+            "3. OFF_TOPIC - Questions clearly UNRELATED to our expertise areas:\n"
             "   - Topics completely outside agriculture, health, beauty, and company info\n"
             "   - Politics, sports, entertainment, technology, real estate, finance\n"
             "   - Unrelated products or services we don't provide\n"
@@ -451,7 +444,6 @@ Title:"""
             "- When in doubt between PUBLIC and PRIVATE, choose PRIVATE\n"
             "- When in doubt between PRIVATE and OFF_TOPIC, choose PRIVATE (be lenient)\n"
             "- Only use OFF_TOPIC if the question is OBVIOUSLY and COMPLETELY unrelated\n"
-            "- Only use NEEDS_CLARIFICATION if genuinely unclear or missing critical information\n"
             "- If conversation history provides context, use it to understand references\n\n"
             "Examples:\n"
             "PUBLIC:\n"
@@ -470,10 +462,6 @@ Title:"""
             "- 'محصولات شما چیه؟' → PRIVATE\n"
             "- 'قیمت محصول چقدره؟' → PRIVATE\n"
             "- 'چطور سفارش بدم؟' → PRIVATE\n\n"
-            "NEEDS_CLARIFICATION:\n"
-            "- 'چطور؟' → NEEDS_CLARIFICATION (too vague)\n"
-            "- 'اینا چیه؟' → NEEDS_CLARIFICATION (no context)\n"
-            "- 'بهتر' → NEEDS_CLARIFICATION (incomplete)\n\n"
             "OFF_TOPIC (clearly unrelated):\n"
             "- 'بهترین تیم فوتبال کدومه؟' → OFF_TOPIC (sports)\n"
             "- 'چطور برنامه نویسی یاد بگیرم؟' → OFF_TOPIC (technology)\n"
@@ -482,9 +470,8 @@ Title:"""
             "- 'نظرت درباره انتخابات چیه؟' → OFF_TOPIC (politics)\n\n"
             "Respond ONLY with valid JSON:\n"
             "{\n"
-            "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"NEEDS_CLARIFICATION\" | \"OFF_TOPIC\",\n"
+            "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\",\n"
             "  \"explanation\": \"brief reason for classification\",\n"
-            "  \"clarification_prompt\": \"optional: what to ask if NEEDS_CLARIFICATION (in Persian)\",\n"
             "  \"off_topic_message\": \"optional: redirect message if OFF_TOPIC (in Persian)\"\n"
             "}"
         )
@@ -552,7 +539,7 @@ Title:"""
             off_topic_message = payload.get("off_topic_message")
             
             # Validate intent
-            if intent not in ["PUBLIC", "PRIVATE", "NEEDS_CLARIFICATION", "OFF_TOPIC"]:
+            if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC"]:
                 logger.warning(f"Invalid intent '{intent}', defaulting to PRIVATE")
                 intent = "PRIVATE"
             
@@ -698,33 +685,7 @@ Title:"""
                         "answer": answer
                     }
                 
-                # Handle clarification requests
-                if intent_result["intent"] == "NEEDS_CLARIFICATION":
-                    clarification_msg = intent_result.get("clarification_prompt") or (
-                        "سوال شما کمی مبهم است. لطفاً جزئیات بیشتری ارائه دهید تا بتوانم بهتر به شما کمک کنم.\n\n"
-                        "مثلاً:\n"
-                        "- به چه محصول یا موضوع خاصی اشاره دارید؟\n"
-                        "- چه اطلاعاتی نیاز دارید؟\n"
-                        "- مشکل یا سوال دقیق شما چیست؟"
-                    )
-                    
-                    answer = clarification_msg
-                    query_analysis["confidence_score"] = 0.5
-                    query_analysis["knowledge_source"] = "clarification_request"
-                    query_analysis["requires_human_referral"] = False
-                    query_analysis["reasoning"] = f"Query needs clarification: {intent_result['explanation']}"
-                    
-                    # Add to conversation memory
-                    conversation = await self._get_or_create_session(user_id, model, parameters)
-                    conversation.memory.chat_memory.add_user_message(message)
-                    conversation.memory.chat_memory.add_ai_message(answer)
-                    
-                    return {
-                        "query_analysis": query_analysis,
-                        "response_parameters": response_parameters,
-                        "answer": answer
-                    }
-                
+           
                 # Proceed with knowledge base query
                 is_public = intent_result["is_public"]
                 try:
