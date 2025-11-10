@@ -140,6 +140,87 @@ curl -X POST "http://localhost:8000/api/chat/" \
      -d '{"user_id": "user123", "message": "Hello, how can you help me today?"}'
 ```
 
+### Document Processing and Knowledge Base
+
+The system includes advanced document processing capabilities for both **PDF** and **Word (.docx)** files. Documents are processed, converted to embeddings, and stored in a vector database for semantic search and retrieval.
+
+#### Supported File Formats
+
+- **PDF Files**: Full support for PDF documents with text and table extraction
+- **Word Documents (.docx)**: Complete support for Word documents including tables and formatting
+- **Persian/RTL Languages**: Native support for Persian, Arabic, and other RTL languages
+- **Table Extraction**: Automatic detection and extraction of tables from both PDF and DOCX files
+
+#### Key Features
+
+1. **Automatic Text Extraction**
+   - Clean text extraction from PDF and DOCX files
+   - Persian text normalization (Arabic to Persian numerals, etc.)
+   - Header and structure detection
+   - Markdown conversion for easy viewing
+
+2. **Table Processing**
+   - Automatic table detection in both formats
+   - Conversion to structured DataFrames
+   - Markdown table formatting
+   - Metadata preservation (rows, columns, page numbers)
+
+3. **Vector Store Integration**
+   - Automatic chunking of documents
+   - OpenAI embeddings generation
+   - ChromaDB vector storage
+   - Semantic similarity search
+
+4. **Batch Processing**
+   - Process multiple files in a directory
+   - Progress tracking and statistics
+   - Mixed PDF/DOCX processing
+   - Error handling and recovery
+
+#### Quick Start
+
+```python
+from app.services.document_processor import get_document_processor
+
+processor = get_document_processor()
+
+# Process a single DOCX file
+documents = processor.process_docx("path/to/file.docx")
+
+# Process all documents in a directory (PDF + DOCX)
+results = processor.process_all_documents()
+
+# Batch process with statistics
+stats = processor.batch_process_mixed_directory(
+    input_dir="docs",
+    output_dir="processed",
+    create_vectors=True
+)
+
+# Search processed documents
+results = processor.search_documents("your query", k=5)
+```
+
+#### Installation
+
+Install the required dependencies:
+
+```bash
+pip install python-docx pymupdf pandas tabulate arabic-reshaper python-bidi
+```
+
+Or use the requirements file:
+
+```bash
+pip install -r requirements.txt
+```
+
+#### Documentation
+
+For detailed documentation on document processing features, see:
+- [DOCX Processing Documentation](docs/DOCX_PROCESSING.md)
+- [Examples](examples/docx_processing_example.py)
+
 ### Running the Server
 
 ```bash

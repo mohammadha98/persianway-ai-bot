@@ -91,12 +91,18 @@ export class ContributeComponent {
     const file = event.target.files[0];
     if (file) {
       // Check file type
-      const allowedTypes = ['application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+      const allowedTypes = [
+        'application/pdf',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+        'application/msword' // .doc
+      ];
       if (allowedTypes.includes(file.type)) {
         this.selectedFile = file;
         this.showMessage('فایل انتخاب شد: ' + file.name);
       } else {
-        this.showMessage('فقط فایل‌های PDF و Excel پذیرفته می‌شوند.', 'error');
+        this.showMessage('فقط فایل‌های PDF، Word و Excel پذیرفته می‌شوند.', 'error');
         event.target.value = '';
       }
     }

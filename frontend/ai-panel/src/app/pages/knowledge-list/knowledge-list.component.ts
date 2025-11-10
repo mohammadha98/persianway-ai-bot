@@ -52,7 +52,7 @@ interface CategoryOption {
 })
 export class KnowledgeListComponent implements OnInit, OnDestroy {
   // Table configuration
-  displayedColumns: string[] = ['title', 'tags', 'author', 'synced', 'actions'];
+  displayedColumns: string[] = ['title', 'tags', 'synced', 'actions'];
   
   // Pagination
   pageSize = 10;

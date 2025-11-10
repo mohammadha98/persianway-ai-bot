@@ -95,14 +95,14 @@
               <mat-icon>cloud_upload</mat-icon>
             </div>
             <mat-card-title>آپلود فایل</mat-card-title>
-            <mat-card-subtitle>فایل‌های PDF یا Excel خود را آپلود کنید</mat-card-subtitle>
+            <mat-card-subtitle>فایل‌های PDF، Word یا Excel خود را آپلود کنید</mat-card-subtitle>
           </mat-card-header>
           
           <mat-card-content>
             <div class="upload-area">
               <input type="file" id="fileInput" 
                     (change)="onFileSelected($event)"
-                    accept=".pdf,.xls,.xlsx"
+                    accept=".pdf,.docx,.xls,.xlsx"
                     style="display: none;">
               
               <div class="file-drop-zone" (click)="onFileDropZoneClick()">
@@ -112,7 +112,7 @@
                   یا اینجا بکشید و رها کنید
                 </p>
                 <p class="upload-hint">
-                  فرمت‌های پذیرفته شده: PDF, Excel (.xls, .xlsx)
+                  فرمت‌های پذیرفته شده: PDF, Word (.docx), Excel (.xls, .xlsx)
                 </p>
               </div>
               

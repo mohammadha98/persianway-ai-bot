@@ -16,6 +16,15 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.schema import Document
 
 try:
+    from docx import Document as DocxDocument
+    from docx.table import Table as DocxTable
+    from docx.text.paragraph import Paragraph as DocxParagraph
+    DOCX_SUPPORT = True
+except ImportError:
+    DOCX_SUPPORT = False
+    logging.warning("DOCX processing libraries not available. Install python-docx for Word document support.")
+
+try:
     from arabic_reshaper import reshape
     from bidi.algorithm import get_display
     PERSIAN_SUPPORT = True
@@ -782,6 +791,449 @@ class DocumentProcessor:
             json.dump(stats, f, ensure_ascii=False, indent=2)
         
         logging.info(f"Batch processing complete. Processed {stats['successful']}/{stats['total_files']} files successfully")
+        logging.info(f"Total pages: {stats['total_pages']}, Total tables: {stats['total_tables']}")
+        logging.info(f"Processing time: {stats['processing_time']:.2f} seconds")
+        logging.info(f"Statistics saved to: {stats_file}")
+        
+        return stats
+    
+    def extract_tables_from_docx(self, docx_path: str) -> List[Dict[str, Any]]:
+        """Extract tables from DOCX file.
+        
+        Args:
+            docx_path: Path to the DOCX file
+            
+        Returns:
+            List of dictionaries containing table data
+        """
+        if not DOCX_SUPPORT:
+            logging.error("DOCX support not available. Install python-docx library.")
+            return []
+        
+        tables_data = []
+        
+        try:
+            doc = DocxDocument(docx_path)
+            
+            for table_index, table in enumerate(doc.tables):
+                try:
+                    # Extract table data
+                    table_data = []
+                    for row in table.rows:
+                        row_data = [cell.text.strip() for cell in row.cells]
+                        table_data.append(row_data)
+                    
+                    if table_data and len(table_data) > 1:  # Ensure we have header and data rows
+                        # Convert to pandas DataFrame
+                        df = pd.DataFrame(table_data[1:], columns=table_data[0])
+                        
+                        # Clean Persian text in table cells
+                        for col in df.columns:
+                            df[col] = df[col].astype(str).apply(self.clean_persian_text)
+                        
+                        # Convert to Markdown format
+                        markdown_table = df.to_markdown(index=False, tablefmt='pipe')
+                        
+                        # Store table information
+                        table_info = {
+                            'table_index': table_index + 1,
+                            'dataframe': df,
+                            'markdown': markdown_table,
+                            'rows': len(df),
+                            'columns': len(df.columns)
+                        }
+                        
+                        tables_data.append(table_info)
+                        
+                except Exception as e:
+                    logging.warning(f"Error extracting table {table_index + 1}: {e}")
+                    continue
+            
+        except Exception as e:
+            logging.error(f"Error processing DOCX {docx_path}: {e}")
+        
+        return tables_data
+    
+    def load_docx_as_markdown(self, docx_path: str, output_dir: str = None) -> str:
+        """Load DOCX file and convert to Markdown format.
+        
+        Args:
+            docx_path: Path to the DOCX file (relative to project root)
+            output_dir: Output directory for saving files
+            
+        Returns:
+            Markdown content as string
+        """
+        if not DOCX_SUPPORT:
+            raise ImportError("DOCX support not available. Install python-docx library.")
+        
+        # Convert relative path to absolute
+        if not os.path.isabs(docx_path):
+            docx_path = os.path.join(os.getcwd(), docx_path)
+        
+        if not os.path.exists(docx_path):
+            raise FileNotFoundError(f"DOCX file not found: {docx_path}")
+        
+        markdown_content = []
+        filename = Path(docx_path).stem
+        
+        try:
+            # Load DOCX document
+            doc = DocxDocument(docx_path)
+            
+            # Add document title
+            markdown_content.append(f"# {filename}\n")
+            
+            # Extract tables first
+            tables = self.extract_tables_from_docx(docx_path)
+            table_index = 0
+            
+            # Process paragraphs and tables in order
+            for element in doc.element.body:
+                # Check if element is a paragraph
+                if element.tag.endswith('p'):
+                    # Find the corresponding paragraph object
+                    for para in doc.paragraphs:
+                        if para._element == element:
+                            text = para.text.strip()
+                            if text:
+                                # Clean Persian text
+                                cleaned_text = self.clean_persian_text(text)
+                                
+                                # Check if it's a heading based on style
+                                if para.style.name.startswith('Heading'):
+                                    heading_level = int(para.style.name.replace('Heading ', ''))
+                                    markdown_content.append(f"\n{'#' * heading_level} {cleaned_text}\n")
+                                else:
+                                    # Detect headers using existing logic
+                                    formatted_text = self.detect_rtl_headers(cleaned_text)
+                                    markdown_content.append(formatted_text)
+                            break
+                
+                # Check if element is a table
+                elif element.tag.endswith('tbl'):
+                    if table_index < len(tables):
+                        table = tables[table_index]
+                        markdown_content.append(f"\n### جدول {table['table_index']}\n")
+                        markdown_content.append(table['markdown'])
+                        markdown_content.append("\n")
+                        table_index += 1
+            
+            # Join all content
+            final_markdown = "\n".join(markdown_content)
+            
+            # Save to file if output directory is specified
+            if output_dir and self.persian_config['save_intermediate']:
+                output_path = Path(output_dir)
+                markdown_dir = output_path / "markdown"
+                markdown_dir.mkdir(parents=True, exist_ok=True)
+                
+                markdown_file = markdown_dir / f"{filename}.md"
+                with open(markdown_file, 'w', encoding='utf-8') as f:
+                    f.write(final_markdown)
+                
+                logging.info(f"Markdown saved to: {markdown_file}")
+            
+            return final_markdown
+            
+        except Exception as e:
+            logging.error(f"Error converting DOCX to Markdown: {e}")
+            raise
+    
+    def process_docx(self, file_path: str) -> List[Document]:
+        """Process a single DOCX file and return the extracted documents.
+        
+        Args:
+            file_path: Path to the DOCX file
+            
+        Returns:
+            List of Document objects
+        """
+        if not DOCX_SUPPORT:
+            logging.error("DOCX support not available. Install python-docx library.")
+            return []
+        
+        try:
+            # Load DOCX and convert to markdown
+            markdown_content = self.load_docx_as_markdown(file_path)
+            
+            # Extract metadata from filename
+            filename = os.path.basename(file_path)
+            
+            # Split content into chunks
+            chunks = self.persian_text_splitter.split_text(markdown_content)
+            
+            # Create Document objects
+            documents = []
+            for i, chunk in enumerate(chunks):
+                doc = Document(
+                    page_content=chunk,
+                    metadata={
+                        "source": filename,
+                        "file_path": file_path,
+                        "chunk_index": i,
+                        "file_type": "docx"
+                    }
+                )
+                documents.append(doc)
+            
+            return documents
+            
+        except Exception as e:
+            logging.error(f"Error processing DOCX {file_path}: {str(e)}")
+            return []
+    
+    def process_all_docx(self) -> int:
+        """Process all DOCX files in the docs directory and add them to the vector store.
+        
+        Returns:
+            Number of documents processed
+        """
+        if not DOCX_SUPPORT:
+            logging.error("DOCX support not available. Install python-docx library.")
+            return 0
+        
+        all_docs = []
+        
+        # Get all DOCX files in the docs directory
+        docx_files = [os.path.join(self.docs_dir, f) for f in os.listdir(self.docs_dir) 
+                     if f.lower().endswith(('.docx', '.doc'))]
+        
+        # Process each DOCX file
+        for docx_file in docx_files:
+            docs = self.process_docx(docx_file)
+            all_docs.extend(docs)
+        
+        # Add documents to vector store in batches
+        if all_docs:
+            vector_store = self.get_vector_store()
+            
+            # Process in batches of 100 documents
+            batch_size = 100
+            for i in range(0, len(all_docs), batch_size):
+                batch = all_docs[i:i + batch_size]
+                vector_store.add_documents(batch)
+                logging.info(f"Processed batch {i//batch_size + 1}/{(len(all_docs) + batch_size - 1)//batch_size} with {len(batch)} documents")
+            
+            vector_store.persist()
+        
+        return len(all_docs)
+    
+    def process_all_documents(self) -> Dict[str, int]:
+        """Process all PDF and DOCX files in the docs directory.
+        
+        Returns:
+            Dictionary with counts of processed documents by type
+        """
+        pdf_count = self.process_all_pdfs()
+        docx_count = self.process_all_docx()
+        
+        return {
+            'pdf_documents': pdf_count,
+            'docx_documents': docx_count,
+            'total_documents': pdf_count + docx_count
+        }
+    
+    def batch_process_mixed_directory(self, input_dir: str, output_dir: str, create_vectors: bool = True) -> Dict[str, Any]:
+        """Batch process both PDF and DOCX files with progress tracking.
+        
+        Args:
+            input_dir: Directory containing PDF and DOCX files
+            output_dir: Output directory for processed files
+            create_vectors: Whether to create vector embeddings
+            
+        Returns:
+            Processing statistics with progress information
+        """
+        # Convert relative paths to absolute
+        if not os.path.isabs(input_dir):
+            input_dir = os.path.join(os.getcwd(), input_dir)
+        if not os.path.isabs(output_dir):
+            output_dir = os.path.join(os.getcwd(), output_dir)
+        
+        if not os.path.exists(input_dir):
+            raise FileNotFoundError(f"Input directory not found: {input_dir}")
+        
+        # Create output directories
+        output_path = Path(output_dir)
+        for subdir in ["markdown", "structured_json", "vector_db"]:
+            (output_path / subdir).mkdir(parents=True, exist_ok=True)
+        
+        # Find all PDF and DOCX files
+        pdf_files = list(Path(input_dir).glob("*.pdf"))
+        docx_files = list(Path(input_dir).glob("*.docx"))
+        all_files = pdf_files + docx_files
+        total_files = len(all_files)
+        
+        if total_files == 0:
+            logging.warning(f"No PDF or DOCX files found in {input_dir}")
+            return {'total_files': 0, 'successful': 0, 'failed': 0}
+        
+        # Initialize progress tracking
+        stats = {
+            'total_files': total_files,
+            'pdf_files': len(pdf_files),
+            'docx_files': len(docx_files),
+            'successful': 0,
+            'failed': 0,
+            'total_pages': 0,
+            'total_tables': 0,
+            'processing_time': 0,
+            'start_time': datetime.now().isoformat(),
+            'processed_files': [],
+            'failed_files': [],
+            'progress_percentage': 0
+        }
+        
+        start_time = datetime.now()
+        documents_for_vector = []
+        
+        # Process files with progress tracking
+        for i, file_path in enumerate(all_files, 1):
+            try:
+                # Update progress
+                progress = (i / total_files) * 100
+                stats['progress_percentage'] = round(progress, 2)
+                
+                file_type = 'pdf' if file_path.suffix.lower() == '.pdf' else 'docx'
+                logging.info(f"Processing {i}/{total_files} ({progress:.1f}%): {file_path.name} [{file_type.upper()}]")
+                
+                # Process based on file type
+                if file_type == 'pdf':
+                    markdown_content = self.load_persian_pdf_as_markdown(str(file_path), output_dir)
+                    tables = self.extract_tables_from_pdf(str(file_path))
+                    
+                    # Count pages for PDF
+                    page_count = 0
+                    try:
+                        doc = pymupdf.open(str(file_path))
+                        page_count = len(doc)
+                        doc.close()
+                    except:
+                        pass
+                else:  # docx
+                    if not DOCX_SUPPORT:
+                        logging.error(f"Skipping {file_path.name}: DOCX support not available")
+                        stats['failed'] += 1
+                        continue
+                    
+                    markdown_content = self.load_docx_as_markdown(str(file_path), output_dir)
+                    tables = self.extract_tables_from_docx(str(file_path))
+                    page_count = 1  # DOCX doesn't have fixed pages
+                
+                # Generate file checksum
+                file_hash = hashlib.md5(file_path.read_bytes()).hexdigest()
+                
+                # Create structured data
+                structured_data = {
+                    'filename': file_path.name,
+                    'file_path': str(file_path),
+                    'file_type': file_type,
+                    'checksum': file_hash,
+                    'processed_at': datetime.now().isoformat(),
+                    'total_pages': page_count,
+                    'total_tables': len(tables),
+                    'tables': [{
+                        'table_index': table['table_index'],
+                        'rows': table['rows'],
+                        'columns': table['columns'],
+                        'markdown': table['markdown']
+                    } for table in tables],
+                    'markdown_content': markdown_content
+                }
+                
+                # Add page number for PDF tables
+                if file_type == 'pdf':
+                    for idx, table in enumerate(tables):
+                        if 'page_number' in table:
+                            structured_data['tables'][idx]['page_number'] = table['page_number']
+                
+                # Save structured JSON
+                json_file = output_path / "structured_json" / f"{file_path.stem}.json"
+                with open(json_file, 'w', encoding='utf-8') as f:
+                    json.dump(structured_data, f, ensure_ascii=False, indent=2, default=str)
+                
+                # Prepare for vector store
+                if create_vectors:
+                    chunks = self.persian_text_splitter.split_text(markdown_content)
+                    
+                    for chunk_idx, chunk in enumerate(chunks):
+                        has_table = 'جدول' in chunk or '|' in chunk
+                        
+                        doc = Document(
+                            page_content=chunk,
+                            metadata={
+                                'source': str(file_path),
+                                'filename': file_path.name,
+                                'file_type': file_type,
+                                'chunk_index': chunk_idx,
+                                'has_table': has_table,
+                                'file_checksum': file_hash,
+                                'total_pages': page_count,
+                                'processed_at': structured_data['processed_at']
+                            }
+                        )
+                        documents_for_vector.append(doc)
+                
+                # Update statistics
+                stats['successful'] += 1
+                stats['total_pages'] += page_count
+                stats['total_tables'] += len(tables)
+                stats['processed_files'].append({
+                    'filename': file_path.name,
+                    'file_type': file_type,
+                    'pages': page_count,
+                    'tables': len(tables),
+                    'checksum': file_hash,
+                    'processing_order': i
+                })
+                
+            except Exception as e:
+                logging.error(f"Error processing {file_path.name}: {e}")
+                stats['failed'] += 1
+                stats['failed_files'].append({
+                    'filename': file_path.name,
+                    'file_type': file_type if 'file_type' in locals() else 'unknown',
+                    'error': str(e),
+                    'processing_order': i
+                })
+        
+        # Add to vector store in batches
+        if create_vectors and documents_for_vector:
+            try:
+                batch_size = 100
+                vector_store = self.get_vector_store()
+                
+                for i in range(0, len(documents_for_vector), batch_size):
+                    batch = documents_for_vector[i:i + batch_size]
+                    vector_store.add_documents(batch)
+                    logging.info(f"Added batch {i//batch_size + 1} ({len(batch)} documents) to vector store")
+                
+                vector_store.persist()
+                logging.info(f"Successfully added {len(documents_for_vector)} document chunks to vector store")
+                
+            except Exception as e:
+                logging.error(f"Error adding documents to vector store: {e}")
+        
+        # Finalize statistics
+        end_time = datetime.now()
+        stats['processing_time'] = (end_time - start_time).total_seconds()
+        stats['end_time'] = end_time.isoformat()
+        stats['progress_percentage'] = 100.0
+        
+        # Calculate averages
+        if stats['successful'] > 0:
+            stats['avg_pages_per_file'] = round(stats['total_pages'] / stats['successful'], 2)
+            stats['avg_tables_per_file'] = round(stats['total_tables'] / stats['successful'], 2)
+            stats['avg_processing_time_per_file'] = round(stats['processing_time'] / stats['successful'], 2)
+        
+        # Save comprehensive statistics
+        stats_file = output_path / "batch_processing_stats.json"
+        with open(stats_file, 'w', encoding='utf-8') as f:
+            json.dump(stats, f, ensure_ascii=False, indent=2)
+        
+        logging.info(f"Batch processing complete. Processed {stats['successful']}/{stats['total_files']} files successfully")
+        logging.info(f"PDF files: {stats['pdf_files']}, DOCX files: {stats['docx_files']}")
         logging.info(f"Total pages: {stats['total_pages']}, Total tables: {stats['total_tables']}")
         logging.info(f"Processing time: {stats['processing_time']:.2f} seconds")
         logging.info(f"Statistics saved to: {stats_file}")

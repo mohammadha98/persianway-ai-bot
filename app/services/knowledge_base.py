@@ -323,6 +323,29 @@ class KnowledgeBaseService:
                         file_docs.extend(pdf_docs)
                         processed_file = True
                 
+                # Process DOCX file
+                elif file_ext == 'docx':
+                    file_type = 'docx'
+                    # Use the document processor to process the DOCX file
+                    docx_docs = self.document_processor.process_docx(uploaded_file_path)
+                    if docx_docs:
+                        # Add custom metadata to the DOCX documents
+                        for doc in docx_docs:
+                            doc.metadata["source"] = os.path.basename(uploaded_file_path)
+                            doc.metadata["title"] = title
+                            doc.metadata["meta_tags"] = ",".join(meta_tags)
+                            doc.metadata["author_name"] = author_name if author_name else "Unknown"
+                            doc.metadata["additional_references"] = additional_references if additional_references else "None"
+                            doc.metadata["submission_timestamp"] = submitted_at
+                            doc.metadata["entry_type"] = "user_contribution_docx"
+                            doc.metadata["is_public"] = is_public
+                            doc.metadata["hash_id"] = hash_id  # Use hash_id as common identifier
+                            doc.metadata["id"] = hash_id       # Keep id for backward compatibility
+                        
+                        file_docs.extend(docx_docs)
+                        processed_file = True
+                        logging.info(f"Processed DOCX file with {len(docx_docs)} document chunks")
+                
                 # Process Excel file
                 elif file_ext in ['xlsx', 'xls']:
                     file_type = 'excel'
@@ -450,65 +473,150 @@ class KnowledgeBaseService:
             raise
     
 
-    async def expand_query(self, query: str) -> Dict[str, Any]:
-        """Expand a query using GPT-4o-mini to improve search results.
+    async def expand_query_with_context(
+        self, 
+        query: str, 
+        conversation_history: List[Dict[str, str]] = None,
+        max_history: int = 4
+    ) -> Dict[str, Any]:
+        """Rewrite query based on conversation context and expand it for better search results.
+        
+        This method combines contextual query rewriting and query expansion:
+        1. If conversation history exists, rewrites the query to be self-contained
+        2. Expands the query (original or rewritten) into multiple variations
+        3. Returns all queries for comprehensive search
         
         Args:
             query: The original query string
+            conversation_history: List of conversation messages with 'role' and 'content' keys
+            max_history: Maximum number of previous messages to consider (default: 4 = 2 exchanges)
             
         Returns:
-            A dictionary containing the original query and expanded queries
+            A dictionary containing:
+                - original_query: The original user query
+                - rewritten_query: Query rewritten with context (same as original if no history)
+                - expanded_queries: List of expanded query variations
+                - all_queries: Combined list of all queries for search
         """
         try:
             from openai import AsyncOpenAI
+            import json
             
             # Initialize OpenAI client
             client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
             
-            # Create a prompt for query expansion
-            prompt = f"""Given the following query, generate 3 alternative versions that capture the same intent but with different wording or additional context. 
-            Focus on expanding concepts, adding synonyms, and considering both Persian and English terminology.
-            If the query refers to a company or its services without explicitly mentioning the brand name, append both "پرشین وی" and "Persian Way" to each expanded query.
+            rewritten_query = query
             
-            Original query: {query}
+            # Step 1: Rewrite query with conversation context if history exists
+            if conversation_history:
+                # Take only the most recent messages
+                recent_history = conversation_history[-max_history:] if len(conversation_history) > max_history else conversation_history
+                
+                # Truncate very long messages to avoid token limit
+                truncated_history = []
+                for msg in recent_history:
+                    content = msg.get('content', '')
+                    if len(content) > 300:
+                        content = content[:300] + "..."
+                    truncated_history.append({
+                        'role': msg['role'],
+                        'content': content
+                    })
+                
+                # Build context window
+                recent_context = "\n".join(
+                    [f"{msg['role'].capitalize()}: {msg['content']}" for msg in truncated_history]
+                )
+                
+                # Create prompt for contextual rewriting and expansion
+                prompt = f"""با توجه به گفتگوی زیر، دو کار انجام بده:
+1. پرسش جدید را بازنویسی کن تا بدون نیاز به متن‌های قبلی قابل جست‌وجو باشد
+2. سه نسخه جایگزین از پرسش بازنویسی‌شده ایجاد کن با کلمات مختلف و مترادف‌ها
+
+فقط از اطلاعات خود گفتگو استفاده کن. اگر پرسش به شرکت یا خدماتش اشاره دارد بدون ذکر نام، "پرشین وی" و "Persian Way" را به پرسش‌ها اضافه کن.
+---
+گفتگو:
+{recent_context}
+
+پرسش جدید کاربر:
+{query}
+---
+فقط یک JSON برگردان با این فرمت:
+{{
+    "rewritten_query": "پرسش بازنویسی‌شده",
+    "expanded_queries": [
+        "نسخه جایگزین اول",
+        "نسخه جایگزین دوم",
+        "نسخه جایگزین سوم"
+    ]
+}}
+"""
+            else:
+                # No conversation history - just expand the original query
+                prompt = f"""برای پرسش زیر، سه نسخه جایگزین ایجاد کن که همان منظور را با کلمات و عبارات متفاوت بیان کنند.
+روی گسترش مفاهیم، اضافه کردن مترادف‌ها و در نظر گرفتن اصطلاحات فارسی و انگلیسی تمرکز کن.
+اگر پرسش به شرکت یا خدماتش اشاره دارد بدون ذکر نام، "پرشین وی" و "Persian Way" را به هر پرسش اضافه کن.
+
+پرسش: {query}
+
+فقط یک JSON برگردان با این فرمت:
+{{
+    "rewritten_query": "{query}",
+    "expanded_queries": [
+        "نسخه جایگزین اول",
+        "نسخه جایگزین دوم",
+        "نسخه جایگزین سوم"
+    ]
+}}
+"""
             
-            Return ONLY a JSON object with the following format:
-            {{
-                "expanded_queries": [
-                    "first alternative query",
-                    "second alternative query",
-                    "third alternative query"
-                ]
-            }}
-            """
-            
-            # Call gpt-4o-mini
+            # Call gpt-4o-mini for both rewriting and expansion
             response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that expands search queries to improve retrieval results."},
+                    {
+                        "role": "system", 
+                        "content": "تو دستیار هوشمندی هستی که پرسش‌ها را بازنویسی و گسترش می‌دهی برای بهبود نتایج جست‌وجو."
+                    },
                     {"role": "user", "content": prompt}
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.3,
-                max_tokens=700
+                max_tokens=800
             )
             
             # Parse the response
-            import json
-            expanded_queries = json.loads(response.choices[0].message.content)
+            result = json.loads(response.choices[0].message.content)
+            rewritten_query = result.get("rewritten_query", query)
+            expanded_queries = result.get("expanded_queries", [])
             
-            # Return the original query and expanded queries
+            # Combine all queries for search (rewritten + expanded)
+            # Remove duplicates while preserving order
+            all_queries = [rewritten_query]
+            for eq in expanded_queries:
+                if eq and eq not in all_queries:
+                    all_queries.append(eq)
+            
+            logging.info(f"[Query Expansion] Original: '{query[:50]}...'")
+            if rewritten_query != query:
+                logging.info(f"[Query Expansion] Rewritten: '{rewritten_query[:50]}...'")
+            logging.info(f"[Query Expansion] Generated {len(expanded_queries)} expanded variations")
+            
             return {
                 "original_query": query,
-                "expanded_queries": expanded_queries.get("expanded_queries", [])
+                "rewritten_query": rewritten_query,
+                "expanded_queries": expanded_queries,
+                "all_queries": all_queries
             }
+            
         except Exception as e:
-            logging.error(f"Error in query expansion: {str(e)}")
+            logging.error(f"Error in expand_query_with_context: {str(e)}")
             # Return just the original query if there's an error
             return {
                 "original_query": query,
-                "expanded_queries": []
+                "rewritten_query": query,
+                "expanded_queries": [],
+                "all_queries": [query]
             }
 
     def _extract_conversation_history(self, conversation_history) -> List[Dict[str, str]]:
@@ -552,82 +660,6 @@ class KnowledgeBaseService:
         
         return []
 
-    async def rewrite_query_with_context(self, history: List[Dict[str, str]], 
-                                       user_message: str, 
-                                       max_history: int = 4) -> str:
-        """
-        Rewrites the user's query based on recent conversation context
-        (without adding knowledge outside the chat).
-        Designed for contextual query building in Persian RAG pipelines.
-        
-        Args:
-            history: List of conversation messages with 'role' and 'content' keys
-            user_message: The current user message to rewrite
-            max_history: Maximum number of previous messages to consider (default: 4 = 2 exchanges)
-            
-        Returns:
-            str: The rewritten query that incorporates conversation context
-        """
-        # If no history, return original message
-        if not history:
-            return user_message
-        
-        # Take only the most recent messages to avoid token overflow and confusion
-        # max_history=4 means last 2 exchanges (user+assistant, user+assistant)
-        recent_history = history[-max_history:] if len(history) > max_history else history
-        
-        # Truncate very long messages to avoid token limit
-        truncated_history = []
-        for msg in recent_history:
-            content = msg.get('content', '')
-            if len(content) > 300:
-                content = content[:300] + "..."
-            truncated_history.append({
-                'role': msg['role'],
-                'content': content
-            })
-            
-        # Build multi-turn context window
-        recent_context = "\n".join(
-            [f"{msg['role'].capitalize()}: {msg['content']}" for msg in truncated_history]
-        )
-        
-        prompt = f"""
-بازنویسی کن پرسش زیر به گونه‌ای که بدون نیاز به متن‌های قبلی قابل
-جست‌وجو در پایگاه دانش باشد.
-فقط از اطلاعات خود گفتگو استفاده کن و هیچ دانشی از بیرون اضافه نکن.
----
-گفتگو:
-{recent_context}
-پرسش جدید کاربر:
-{user_message}
----
-پرسش بازنویسی‌شده:
-"""
-        
-        try:
-            # Use the existing LLM infrastructure from chat_service
-            llm = await get_llm(model_name="gpt-4o-mini",temperature=0, max_tokens=100)
-            
-            # Create messages for the LLM
-            from langchain.schema import SystemMessage, HumanMessage
-            messages = [
-                SystemMessage(content="تو فقط بازنویسی contextual انجام می‌دهی."),
-                HumanMessage(content=prompt)
-            ]
-            
-            # Get response from LLM
-            response = await llm.agenerate([messages])
-            rewritten_text = response.generations[0][0].text.strip()
-            
-            # Return rewritten query or fallback to original
-            return rewritten_text if rewritten_text else user_message
-            
-        except Exception as e:
-            logging.error(f"Error in rewrite_query_with_context: {e}")
-            # Fallback to original message if rewriting fails
-            return user_message
-
     async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False) -> Dict[str, Any]:
         """Query the knowledge base with a question.
         
@@ -643,14 +675,13 @@ class KnowledgeBaseService:
             # Log the incoming query for debugging
             logging.info(f"[KB Query] Original query: '{query[:100]}...'")
             
-            # Extract conversation history and rewrite query with context if available
+            # Extract conversation history
             extracted_history = self._extract_conversation_history(conversation_history)
             logging.debug(f"[KB Query] Extracted {len(extracted_history)} messages from conversation history")
             
+            # Filter out the current query from history to prevent circular context
+            filtered_history = []
             if extracted_history:
-                # IMPORTANT: Remove the current user message from history if it exists
-                # This prevents the system from using the current query in its own context
-                filtered_history = []
                 for msg in extracted_history:
                     # Skip if this message matches the current query
                     if msg.get('role') == 'user' and msg.get('content', '').strip() == query.strip():
@@ -659,15 +690,21 @@ class KnowledgeBaseService:
                     filtered_history.append(msg)
                 
                 logging.debug(f"[KB Query] After filtering: {len(filtered_history)} messages remain for context")
-                
-                # Only rewrite if we have actual previous context (not just the current message)
-                if filtered_history:
-                    original_query = query
-                    # Rewrite the query to include conversation context
-                    query = await self.rewrite_query_with_context(filtered_history, query)
-                    logging.info(f"[KB Query] Query rewritten: '{original_query[:50]}...' -> '{query[:100]}...'")
-                else:
-                    logging.debug("[KB Query] No previous conversation context found, using original query")
+            
+            # Use the combined method to rewrite query with context and expand it
+            # This handles both contextual rewriting and query expansion in one step
+            query_expansion_result = await self.expand_query_with_context(
+                query=query,
+                conversation_history=filtered_history if filtered_history else None
+            )
+            
+            # Get all queries for search
+            all_queries = query_expansion_result["all_queries"]
+            rewritten_query = query_expansion_result["rewritten_query"]
+            
+            # Log the query transformation
+            if rewritten_query != query:
+                logging.info(f"[KB Query] Query rewritten with context: '{query[:50]}...' -> '{rewritten_query[:50]}...'")
             
             # First, check if we have an exact or semantically similar match in our QA database
             vector_store = self.document_processor.get_vector_store()
@@ -678,10 +715,6 @@ class KnowledgeBaseService:
                 
 
             rag_settings = await self.config_service.get_rag_settings()
-            
-            # Expand the query for better search results
-            expanded_query_result = await self.expand_query(query)
-            all_queries = [expanded_query_result["original_query"]] + expanded_query_result["expanded_queries"]
             
             search_kwargs = {"k": rag_settings.top_k_results}
             if is_public:
@@ -746,7 +779,7 @@ class KnowledgeBaseService:
             logging.info(f"Full context length: {len(full_context)} chars, ~{len(full_context)//4} tokens")
             logging.debug(f"First 500 chars of context: {full_context[:500]}")
             
-            result = qa_chain.invoke({"input": query, "context": full_context})
+            result = qa_chain.invoke({"input": rewritten_query, "context": full_context})
             answer = result.get("answer") or result.get("result")
             if answer is None:
                 raise KeyError("answer")

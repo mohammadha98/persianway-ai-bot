@@ -184,12 +184,17 @@ async def contribute_knowledge(
     author_name: Optional[str] = Form(None, description="Name of the contributor (optional)."),
     additional_references: Optional[str] = Form(None, description="URLs or citation text for further reading (optional)."),
     is_public: bool = Form(False, description="Mark the contribution as public information."),
-    file: Optional[UploadFile] = File(None, description="Optional PDF or Excel file to be processed and added to the knowledge base.")
+    file: Optional[UploadFile] = File(None, description="Optional PDF, Word (docx), or Excel file to be processed and added to the knowledge base.")
 ):
     """Allows users to contribute new agricultural knowledge entries.
 
     The endpoint accepts form-data for various fields describing the knowledge.
     It validates the input, processes it, and stores it in the vector knowledge base.
+    
+    Supported file formats:
+    - PDF (.pdf): Text and tables extracted
+    - Word (.docx): Text and tables extracted with Persian support
+    - Excel (.xlsx, .xls): Question-Answer pairs extracted
     """
     try:
         # Basic input sanitation (FastAPI handles basic type validation)
@@ -210,10 +215,10 @@ async def contribute_knowledge(
         if file:
             # Validate file type
             file_ext = file.filename.lower().split('.')[-1]
-            if file_ext not in ['pdf', 'xlsx', 'xls']:
+            if file_ext not in ['pdf', 'docx', 'xlsx', 'xls']:
                 return KnowledgeContributionResponse(
                     success=False, 
-                    message="Unsupported file format. Only PDF and Excel (xlsx, xls) files are supported."
+                    message="Unsupported file format. Only PDF, Word (docx), and Excel (xlsx, xls) files are supported."
                 )
             
             # Save the uploaded file to the docs directory
