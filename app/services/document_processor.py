@@ -91,11 +91,13 @@ class DocumentProcessor:
         
         # Persian configuration parameters
         self.persian_config = {
-            'chunk_size': 500,
-            'chunk_overlap': 50,
+            'chunk_size': 1500,
+            'chunk_overlap': 200,
             'persian_separators': ["\n\n", "\n", ".", "،", "؛", " ", ""],
             'table_extraction': True,
             'save_intermediate': True,
+            'add_start_index': True,
+            'length_function': len,
             'output_format': 'markdown'
         }
         

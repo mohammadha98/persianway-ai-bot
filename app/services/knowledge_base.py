@@ -6,6 +6,7 @@ import hashlib
 from datetime import datetime
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
+from app.services.reranker import EmbeddingReranker
 from app.services.chat_service import get_llm
 from langchain.prompts import PromptTemplate
 from langchain_core.prompts import ChatPromptTemplate
@@ -40,6 +41,22 @@ class KnowledgeBaseService:
         # Initialize the retrieval QA chain
         self._qa_chain = None
         self.llm = None
+
+        # Initialize reranker if embeddings are available
+        try:
+            if (
+                hasattr(self.document_processor, 'embeddings_available') and
+                self.document_processor.embeddings_available and
+                getattr(self.document_processor, 'embeddings', None) is not None
+            ):
+                self.reranker = EmbeddingReranker(self.document_processor.embeddings)
+                logging.info("[KB SERVICE] Reranker initialized")
+            else:
+                self.reranker = None
+                logging.info("[KB SERVICE] Reranker disabled: embeddings not available")
+        except Exception as e:
+            self.reranker = None
+            logging.warning(f"[KB SERVICE] Reranker initialization failed: {str(e)}")
     
     async def _get_qa_chain(self):
         """Get or create the QA chain.
@@ -888,19 +905,47 @@ class KnowledgeBaseService:
             # ===== IMPROVEMENT 2: Similarity Threshold Filtering =====
             # Filter out documents with scores above threshold (higher score = less similar in L2 distance)
             filtered_docs = [
-                (doc, score, query, qtype) 
+                (doc, score, query, qtype)
                 for doc, score, query, qtype in weighted_docs_with_scores
                 if score <= rag_settings.similarity_threshold
             ]
-            
+
             if filtered_docs:
                 removed_count = len(weighted_docs_with_scores) - len(filtered_docs)
                 if removed_count > 0:
-                    logging.info(f"[KB Query] Filtered out {removed_count} documents below similarity threshold ({rag_settings.similarity_threshold})")
+                    logging.info(
+                        f"[KB Query] Filtered out {removed_count} documents below similarity threshold ({rag_settings.similarity_threshold})"
+                    )
             else:
                 # If all filtered out, keep best ones anyway (graceful degradation)
-                logging.warning(f"[KB Query] All documents below threshold, keeping top {rag_settings.top_k_results} anyway")
+                logging.warning(
+                    f"[KB Query] All documents below threshold, keeping top {rag_settings.top_k_results} anyway"
+                )
                 filtered_docs = weighted_docs_with_scores
+
+            # ===== NEW: Embedding-based Re-ranking (before deduplication) =====
+            if self.reranker is not None and filtered_docs:
+                logging.info(f"[RERANKER] Starting with {len(filtered_docs)} docs")
+                docs_to_rerank = [doc for doc, _, _, _ in filtered_docs]
+                original_scores = [score for _, score, _, _ in filtered_docs]
+
+                reranked_results = self.reranker.rerank(
+                    query=rewritten_query,
+                    documents=docs_to_rerank,
+                    original_scores=original_scores,
+                    top_k=rag_settings.top_k_results,
+                    alpha=rag_settings.reranker_alpha,
+                )
+
+                if reranked_results:
+                    logging.info(
+                        f"[RERANKER] Before L2={filtered_docs[0][1]:.3f}, After Combined={reranked_results[0][1]:.3f}"
+                    )
+                    # Convert reranked results to the structure expected downstream: (doc, score, source_query, query_type)
+                    filtered_docs = [
+                        (doc, meta.get('combined_score', score), rewritten_query, 'reranked')
+                        for (doc, score, meta) in reranked_results
+                    ]
             
             # ===== IMPROVEMENT 3: Deduplication with Source Tracking =====
             # Remove duplicates while preserving the best score and tracking source query
@@ -979,6 +1024,7 @@ class KnowledgeBaseService:
             if docs_with_scores:
                 confidence = self._calculate_confidence_score(docs_with_scores, top_n=3)
                 logging.info(f"[KB Query] Multi-factor confidence score: {confidence:.4f}")
+                logging.debug(f"[DEBUG] KB raw confidence: {confidence:.3f}")
                 
                 # Log individual document scores for debugging
                 for i, (doc, score) in enumerate(docs_with_scores[:3]):

@@ -31,11 +31,12 @@ class RAGSettings(BaseModel):
     top_k_results: int = Field(default=5, gt=0, description="Number of top results to retrieve from vector store")
     temperature: float = Field(default=0.1, ge=0.0, le=2.0, description="Temperature for RAG responses")
     # New fields for improved retrieval
-    similarity_threshold: float = Field(default=1.5, ge=0.0, description="Maximum distance score to consider a document relevant (lower is better for L2 distance)")
+    similarity_threshold: float = Field(default=1.4, ge=0.0, description="Maximum distance score to consider a document relevant (lower is better for L2 distance)")
     mmr_diversity_score: float = Field(default=0.3, ge=0.0, le=1.0, description="Balance between relevance and diversity in MMR (0=max diversity, 1=max relevance)")
-    fetch_k_multiplier: int = Field(default=3, gt=0, description="Multiplier for initial fetch size before MMR filtering (fetch_k = top_k * multiplier)")
+    fetch_k_multiplier: int = Field(default=4, gt=0, description="Multiplier for initial fetch size before MMR filtering (fetch_k = top_k * multiplier)")
     original_query_weight: float = Field(default=1.0, ge=0.1, description="Weight for original query vs expanded queries")
     expanded_query_weight: float = Field(default=0.7, ge=0.1, description="Weight for expanded/rewritten queries")
+    reranker_alpha: float = Field(default=0.7, ge=0.0, le=1.0, description="Weight for cosine similarity in reranker (1-alpha for normalized L2)")
     prompt_template: str = Field(
         default="""## دستورالعمل پاسخ‌دهی
 
