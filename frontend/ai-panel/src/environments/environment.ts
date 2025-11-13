@@ -1,4 +1,4 @@
 export const environment = {
   production: false,
-  apiUrl: 'https://ai.persianway.co'
+  apiUrl: 'http://localhost:8000'
 };

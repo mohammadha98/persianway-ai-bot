@@ -707,7 +707,7 @@ class KnowledgeBaseService:
         """
         try:
             # Log the incoming query for debugging
-            logging.info(f"[KB Query] Original query: '{query[:100]}...'")
+            logging.info(f"[KB Query] Original query: '{query[:100]}...', is_public={is_public}")
             
             # Extract conversation history
             extracted_history = self._extract_conversation_history(conversation_history)
@@ -759,6 +759,15 @@ class KnowledgeBaseService:
             base_search_kwargs = {}
             if is_public:
                 base_search_kwargs["filter"] = {"is_public": True}
+
+            def _validate_is_public(doc) -> bool:
+                doc_is_public = doc.metadata.get("is_public", False)
+                if is_public:
+                    result = (doc_is_public is True)
+                    if not result:
+                        logging.debug(f"[Filter] Rejected: {doc.metadata.get('source', '')[:50]}")
+                    return result
+                return True
             
             # Calculate fetch_k for MMR (fetch more candidates, then apply diversity)
             fetch_k = rag_settings.top_k_results * rag_settings.fetch_k_multiplier
@@ -800,6 +809,7 @@ class KnowledgeBaseService:
                         search_query,
                         **mmr_kwargs
                     )
+                    mmr_docs = [doc for doc in mmr_docs if _validate_is_public(doc)]
                     
                     if not mmr_docs:
                         logging.debug(f"[KB Query] No documents found via MMR for {query_type} query")
@@ -813,6 +823,7 @@ class KnowledgeBaseService:
                         k=fetch_k,  # Get enough candidates to match MMR results
                         **base_search_kwargs
                     )
+                    similarity_docs_with_scores = [(doc, score) for doc, score in similarity_docs_with_scores if _validate_is_public(doc)]
                     
                     # Create a mapping of document to score for quick lookup
                     # Use full content hash + metadata for precise matching
@@ -864,6 +875,7 @@ class KnowledgeBaseService:
                             k=rag_settings.top_k_results,
                             **base_search_kwargs
                         )
+                        docs_with_scores = [(doc, score) for doc, score in docs_with_scores if _validate_is_public(doc)]
                         for doc, score in docs_with_scores:
                             weighted_score = score * normalized_weight
                             weighted_docs_with_scores.append((doc, weighted_score, search_query, query_type))
@@ -872,6 +884,12 @@ class KnowledgeBaseService:
                         logging.error(f"[KB Query] Fallback search also failed: {str(e2)}")
                         continue
             
+            # Validate public flag before threshold filtering
+            weighted_docs_with_scores = [
+                (doc, s, q, t) for doc, s, q, t in weighted_docs_with_scores if _validate_is_public(doc)
+            ]
+            logging.info(f"[Filter] After validation: {len(weighted_docs_with_scores)} docs")
+
             # ===== IMPROVEMENT 2: Similarity Threshold Filtering =====
             # Filter out documents with scores above threshold (higher score = less similar in L2 distance)
             filtered_docs = [
@@ -927,6 +945,7 @@ class KnowledgeBaseService:
                     filtered_docs = [
                         (doc, meta.get('combined_score', score), combined_query, 'reranked')
                         for (doc, score, meta) in reranked_results
+                        if _validate_is_public(doc)
                     ]
             
             # ===== IMPROVEMENT 3: Deduplication with Source Tracking =====
@@ -943,6 +962,8 @@ class KnowledgeBaseService:
             seen_hashes = {}
             deduplicated_docs = []
             for doc, score, source_query, query_type in sorted(filtered_docs, key=lambda x: x[1]):
+                if not _validate_is_public(doc):
+                    continue
                 doc_hash = _get_doc_hash(doc)
                 if doc_hash in seen_hashes:
                     existing_score = seen_hashes[doc_hash][1]
@@ -1049,13 +1070,20 @@ class KnowledgeBaseService:
                         "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
                         "source": doc.metadata.get("source", "Unknown"),
                         "page": doc.metadata.get("page", 1),
-                        "source_type": doc.metadata.get("source_type", "unknown")
+                        "source_type": doc.metadata.get("source_type", "unknown"),
+                        "is_public": doc.metadata.get("is_public", False)
                     })
             
             # Prepare response
             source_type = "unknown"
             if source_docs:
                 source_type = source_docs[0].metadata.get("source_type", "unknown")
+            if is_public and docs_with_scores:
+                public_count = sum(1 for doc, _ in docs_with_scores if doc.metadata.get("is_public") is True)
+                logging.info(f"[Filter] Final: {public_count}/{len(docs_with_scores)} have is_public=True")
+                if public_count != len(docs_with_scores):
+                    logging.error(f"[Filter] CRITICAL: Found {len(docs_with_scores) - public_count} invalid docs!")
+
             response = {
                 "answer": answer,
                 "confidence_score": confidence,
