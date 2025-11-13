@@ -123,6 +123,7 @@ class ChatService:
         self._memories: Dict[str, ConversationBufferMemory] = {}
         self.config_service = ConfigService()
         self.generalAnswer = False
+        self._config_updated_at: Optional[str] = None
         # Note: API key validation is now done dynamically in get_llm function
         
 
@@ -136,6 +137,7 @@ class ChatService:
         Returns:
             A LangChain ConversationChain for the user
         """
+        await self._ensure_latest_config()
         if user_id not in self._sessions:
             # Get dynamic configuration for system prompt
             await self.config_service._load_config()
@@ -161,6 +163,22 @@ class ChatService:
             self._sessions[user_id].memory.chat_memory.add_message(SystemMessage(content=system_prompt))
         
         return self._sessions[user_id]
+
+    async def _ensure_latest_config(self) -> None:
+        await self.config_service._load_config()
+        cfg = await self.config_service.get_config()
+        ts = cfg.updated_at or cfg.created_at
+        if ts != self._config_updated_at:
+            self._sessions.clear()
+            self._memories.clear()
+            self._config_updated_at = ts
+
+    async def refresh(self) -> None:
+        await self.config_service._load_config()
+        cfg = await self.config_service.get_config()
+        self._sessions.clear()
+        self._memories.clear()
+        self._config_updated_at = cfg.updated_at or cfg.created_at
     
     def _is_topic_related_to_domain(self, query: str) -> bool:
         """Check if the query is related to the knowledge base domain.
@@ -731,6 +749,7 @@ Title:"""
                 query_analysis["requires_human_referral"] = True
                 query_analysis["reasoning"] = f"Query is outside our domain expertise because it contains the keyword '{unrelated_keyword}', and requires human specialist attention."
             else:
+                await self._ensure_latest_config()
                 # Domain-related topic - first check intent
                 intent_result = await self.detect_query_intent(message, conversation_history)
                 

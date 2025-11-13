@@ -111,6 +111,12 @@ class KnowledgeBaseService:
             self._qa_chain = create_retrieval_chain(retriever, document_chain)
         
         return self._qa_chain
+
+    async def refresh(self):
+        logging.info("[KB SERVICE] Force refresh requested")
+        self._qa_chain = None
+        self.llm = None
+        await self._get_qa_chain()
     
     def _normalize_documents_for_context(
         self,

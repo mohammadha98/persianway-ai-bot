@@ -3,6 +3,8 @@ from typing import Dict, Any
 
 from app.schemas.config import DynamicConfig, ConfigUpdateRequest, ConfigResponse
 from app.services.config_service import get_config_service, ConfigService
+from app.services.knowledge_base import get_knowledge_base_service, KnowledgeBaseService
+from app.services.chat_service import get_chat_service, ChatService
 
 # Create router for configuration endpoints
 router = APIRouter(prefix="/config", tags=["configuration"])
@@ -29,7 +31,9 @@ async def get_configuration(config_service: ConfigService = Depends(get_config_s
 @router.put("/", response_model=ConfigResponse)
 async def update_configuration(
     request: ConfigUpdateRequest,
-    config_service: ConfigService = Depends(get_config_service)
+    config_service: ConfigService = Depends(get_config_service),
+    kb_service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+    chat_service: ChatService = Depends(get_chat_service)
 ):
     """Update the dynamic configuration.
     
@@ -60,7 +64,8 @@ async def update_configuration(
             )
         
         updated_config = await config_service.update_config(updates)
-        
+        await kb_service.refresh()
+        await chat_service.refresh()
         return ConfigResponse(
             success=True,
             message="Configuration updated successfully",
