@@ -112,116 +112,67 @@ class KnowledgeBaseService:
         
         return self._qa_chain
     
-    def _normalize_documents_for_context(self, docs: List[Any], max_content_length: int = 1500) -> List[Any]:
-        """
-        Normalize and clean documents before passing to the QA chain.
-        Removes unnecessary metadata and limits content length for better LLM performance.
-        
-        This function:
-        - Removes technical metadata (file paths, creation dates, producers, etc.)
-        - Keeps only essential metadata (source, title, page, author, etc.)
-        - Truncates long content to avoid token limit issues
-        - Limits metadata string lengths
-        
-        Args:
-            docs: List of LangChain Document objects
-            max_content_length: Maximum length for document content (default: 1500 chars)
-            
-        Returns:
-            List of cleaned Document objects with minimal, relevant metadata
-        """
-        from langchain.schema import Document
-        
+    def _normalize_documents_for_context(
+        self,
+        docs: List[Any],
+        max_total_tokens: int = 3000,
+        max_chars_per_doc: int = 1200
+    ) -> List[Any]:
+        from langchain_core.documents import Document
+        if not docs:
+            return []
+        CHARS_PER_TOKEN = 4
+        max_total_chars = max_total_tokens * CHARS_PER_TOKEN
+        chars_per_doc = min(max_total_chars // len(docs), max_chars_per_doc)
+        logging.info(
+            f"[Context Normalization] Processing {len(docs)} docs, "
+            f"max_total_tokens={max_total_tokens}, "
+            f"max_chars_per_doc={chars_per_doc}"
+        )
         normalized_docs = []
-        total_original_size = 0
-        total_normalized_size = 0
-        
+        total_chars = 0
+        total_original_chars = 0
+        essential_metadata_keys = {"source", "page", "source_type", "hash_id"}
         for idx, doc in enumerate(docs):
-            # Track original size
-            original_size = len(str(doc.page_content)) + len(str(doc.metadata))
-            total_original_size += original_size
-            
-            # Extract only relevant metadata fields
-            clean_metadata = {}
-            
-            # Keep only essential metadata fields
-            essential_fields = {
-                'source': 100,        # File name or source identifier
-                'title': 200,         # Document or section title
-                'page': None,         # Page number (keep as is)
-                'source_type': 50,    # Type of source (qa, pdf, excel, etc.)
-                'question': 300,      # For QA pairs
-                'answer': 500,        # For QA pairs
-                'meta_tags': 200,     # Tags for categorization
-                'author_name': 100    # Author information
-            }
-            
-            for field, max_length in essential_fields.items():
-                if field in doc.metadata and doc.metadata[field]:
-                    value = doc.metadata[field]
-                    
-                    # Handle different value types
-                    if isinstance(value, str):
-                        # Trim whitespace
-                        value = value.strip()
-                        # Limit string length if max_length is specified
-                        if max_length and len(value) > max_length:
-                            value = value[:max_length] + "..."
-                        clean_metadata[field] = value
-                    elif isinstance(value, (int, float, bool)):
-                        # Keep numeric and boolean values as is
-                        clean_metadata[field] = value
-                    elif value is not None:
-                        # Convert other types to string and limit length
-                        str_value = str(value)
-                        if max_length and len(str_value) > max_length:
-                            str_value = str_value[:max_length] + "..."
-                        clean_metadata[field] = str_value
-            
-            # Limit page content to reasonable length (avoid token limit issues)
+            original_size = len(doc.page_content) + len(str(doc.metadata))
+            total_original_chars += original_size
+            clean_metadata = {k: v for k, v in doc.metadata.items() if k in essential_metadata_keys}
             clean_content = doc.page_content.strip()
-            if len(clean_content) > max_content_length:
-                # Try to cut at a sentence boundary if possible
-                truncated = clean_content[:max_content_length]
+            if len(clean_content) > chars_per_doc:
+                truncated = clean_content[:chars_per_doc]
                 last_period = truncated.rfind('.')
                 last_newline = truncated.rfind('\n')
                 cut_point = max(last_period, last_newline)
-                
-                if cut_point > max_content_length * 0.8:  # Only use sentence boundary if it's not too far back
+                if cut_point > chars_per_doc * 0.8:
                     clean_content = truncated[:cut_point + 1] + "..."
                 else:
                     clean_content = truncated + "..."
-            
-            # Create a new document with cleaned data
+                logging.debug(
+                    f"[Context Normalization] Doc {idx+1} truncated: "
+                    f"{len(doc.page_content)} → {len(clean_content)} chars"
+                )
+            doc_size = len(clean_content)
+            if total_chars + doc_size > max_total_chars:
+                logging.warning(
+                    f"[Context Normalization] Reached total char limit at doc {idx+1}. "
+                    f"Stopping with {len(normalized_docs)} docs."
+                )
+                break
             normalized_doc = Document(
                 page_content=clean_content,
                 metadata=clean_metadata
             )
             normalized_docs.append(normalized_doc)
-            
-            # Track normalized size
-            normalized_size = len(clean_content) + len(str(clean_metadata))
-            total_normalized_size += normalized_size
-            
-            # Log individual document normalization (debug level)
-            logging.debug(
-                f"Normalized doc {idx+1}: "
-                f"original_size={original_size}, "
-                f"normalized_size={normalized_size}, "
-                f"reduction={((original_size - normalized_size) / original_size * 100):.1f}%"
-            )
-        
-        # Log overall normalization stats
-        if total_original_size > 0:
-            reduction_percent = ((total_original_size - total_normalized_size) / total_original_size * 100)
+            total_chars += doc_size
+        if total_original_chars > 0:
+            reduction_pct = ((total_original_chars - total_chars) / total_original_chars * 100)
+            estimated_tokens = total_chars // CHARS_PER_TOKEN
             logging.info(
-                f"Document normalization complete: "
-                f"{len(docs)} docs, "
-                f"original_size={total_original_size} chars, "
-                f"normalized_size={total_normalized_size} chars, "
-                f"reduction={reduction_percent:.1f}%"
+                f"[Context Normalization] Complete: "
+                f"{len(normalized_docs)}/{len(docs)} docs, "
+                f"{total_chars} chars (~{estimated_tokens} tokens), "
+                f"reduction={reduction_pct:.1f}%"
             )
-        
         return normalized_docs
     
     def _calculate_confidence_score(self, docs_with_scores: List[tuple], top_n: int = 3) -> float:
@@ -279,22 +230,18 @@ class KnowledgeBaseService:
         return max(0.0, min(final_confidence, 1.0))
     
     def _calculate_single_score_confidence(self, similarity_score: float) -> float:
-        """
-        Legacy method for single score confidence calculation.
-        Used for backward compatibility.
-        
-        Args:
-            similarity_score: The distance score from the vector search
-
-        Returns:
-            A confidence score between 0 and 1
-        """
         import math
-        
-        midpoint = 1.5
-        scale = 5.0
-        confidence = 1.0 / (1.0 + math.exp(scale * (similarity_score - midpoint)))
-        
+        max_distance = 2.5
+        normalized_distance = min(similarity_score / max_distance, 1.0)
+        inverted_score = 1.0 - normalized_distance
+        confidence = math.pow(inverted_score, 0.7)
+        return max(0.0, min(confidence, 1.0))
+
+    def _similarity_to_confidence(self, similarity_score: float, max_distance: float = 2.5) -> float:
+        import math
+        normalized_distance = min(similarity_score / max_distance, 1.0)
+        inverted_score = 1.0 - normalized_distance
+        confidence = math.pow(inverted_score, 0.7)
         return max(0.0, min(confidence, 1.0))
     
     def _log_human_referral(self, query: str, answer: str, confidence: float) -> None:
@@ -646,10 +593,23 @@ class KnowledgeBaseService:
                 max_tokens=800
             )
             
-            # Parse the response
-            result = json.loads(response.choices[0].message.content)
-            rewritten_query = result.get("rewritten_query", query)
-            expanded_queries = result.get("expanded_queries", [])
+            raw_content = response.choices[0].message.content
+            try:
+                result = json.loads(raw_content)
+                if not isinstance(result, dict):
+                    raise ValueError("Invalid JSON type")
+                rewritten_query = result.get("rewritten_query", query)
+                expanded_queries = result.get("expanded_queries", [])
+                if not isinstance(expanded_queries, list):
+                    expanded_queries = []
+                expanded_queries = [eq.strip() for eq in expanded_queries if isinstance(eq, str) and eq and eq.strip()]
+                if len(expanded_queries) > 5:
+                    expanded_queries = expanded_queries[:5]
+                logging.info(f"[Query Expansion] Successfully parsed")
+            except Exception as e:
+                logging.error(f"Error parsing expansion result: {str(e)}")
+                rewritten_query = query
+                expanded_queries = []
             
             # Combine all queries for search (rewritten + expanded)
             # Remove duplicates while preserving order
@@ -721,6 +681,13 @@ class KnowledgeBaseService:
         
         return []
 
+    def _normalize_text_for_comparison(self, text: str) -> str:
+        import re
+        text = text.strip()
+        text = re.sub(r"[؟?!.،,;:\(\)\[\]\{}«»\"']+", "", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.lower().strip()
+
     async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False) -> Dict[str, Any]:
         """Query the knowledge base with a question using improved retrieval strategy.
         
@@ -749,14 +716,16 @@ class KnowledgeBaseService:
             # Filter out the current query from history to prevent circular context
             filtered_history = []
             if extracted_history:
+                normalized_query = self._normalize_text_for_comparison(query)
                 for msg in extracted_history:
-                    # Skip if this message matches the current query
-                    if msg.get('role') == 'user' and msg.get('content', '').strip() == query.strip():
-                        logging.info(f"[KB Query] Skipping current query from history: '{query[:50]}...'")
-                        continue
+                    if msg.get('role') == 'user':
+                        msg_content = msg.get('content', '')
+                        normalized_msg = self._normalize_text_for_comparison(msg_content)
+                        if normalized_msg == normalized_query:
+                            logging.debug(f"[History Filter] Skipping duplicate user message: '{msg_content[:50]}...'")
+                            continue
                     filtered_history.append(msg)
-                
-                logging.debug(f"[KB Query] After filtering: {len(filtered_history)} messages remain for context")
+                logging.info(f"[History Filter] Kept {len(filtered_history)}/{len(extracted_history)} messages")
             
             # Use the combined method to rewrite query with context and expand it
             # This handles both contextual rewriting and query expansion in one step
@@ -793,6 +762,8 @@ class KnowledgeBaseService:
             
             # Calculate fetch_k for MMR (fetch more candidates, then apply diversity)
             fetch_k = rag_settings.top_k_results * rag_settings.fetch_k_multiplier
+            num_expanded = max(len(all_queries) - 1, 0)
+            total_weight = rag_settings.original_query_weight + (rag_settings.expanded_query_weight * num_expanded)
             
             # Weighted search across all queries
             weighted_docs_with_scores = []
@@ -803,13 +774,13 @@ class KnowledgeBaseService:
                 # Assign weight: original/rewritten query gets higher weight
                 # First query is the rewritten one (most important)
                 if idx == 0:
-                    weight = rag_settings.original_query_weight
+                    normalized_weight = (rag_settings.original_query_weight / total_weight) if total_weight > 0 else 1.0
                     query_type = "rewritten"
                 else:
-                    weight = rag_settings.expanded_query_weight
+                    normalized_weight = (rag_settings.expanded_query_weight / total_weight) if total_weight > 0 else 1.0
                     query_type = f"expanded_{idx}"
                 
-                logging.debug(f"[KB Query] Searching with {query_type} query (weight={weight:.2f}): '{search_query[:50]}...'")
+                logging.debug(f"[Weighted Search] Query weight={normalized_weight:.3f} type={query_type}: '{search_query[:50]}...'")
                 
                 try:
                     # Use MMR search for diversity (better than plain similarity)
@@ -878,9 +849,8 @@ class KnowledgeBaseService:
                             logging.debug(f"[KB Query] MMR doc not in similarity top {fetch_k}, using threshold score")
                             docs_with_scores.append((mmr_doc, rag_settings.similarity_threshold))
                     
-                    # Apply weight to scores (divide by weight to boost - lower score is better)
                     for doc, score in docs_with_scores:
-                        weighted_score = score / weight
+                        weighted_score = score * normalized_weight
                         weighted_docs_with_scores.append((doc, weighted_score, search_query, query_type))
                         
                     logging.debug(f"[KB Query] Found {len(docs_with_scores)} docs via MMR for {query_type} query")
@@ -895,7 +865,7 @@ class KnowledgeBaseService:
                             **base_search_kwargs
                         )
                         for doc, score in docs_with_scores:
-                            weighted_score = score / weight
+                            weighted_score = score * normalized_weight
                             weighted_docs_with_scores.append((doc, weighted_score, search_query, query_type))
                         logging.debug(f"[KB Query] Fallback to similarity search: found {len(docs_with_scores)} docs")
                     except Exception as e2:
@@ -929,8 +899,21 @@ class KnowledgeBaseService:
                 docs_to_rerank = [doc for doc, _, _, _ in filtered_docs]
                 original_scores = [score for _, score, _, _ in filtered_docs]
 
+                best_expanded = ""
+                if len(all_queries) > 1:
+                    expanded_queries_info = []
+                    for q in all_queries[1:]:
+                        query_docs = [(doc, s) for doc, s, sq, _ in filtered_docs if sq == q]
+                        if query_docs:
+                            avg_score = sum(s for _, s in query_docs) / len(query_docs)
+                            expanded_queries_info.append((q, avg_score, len(query_docs)))
+                    if expanded_queries_info:
+                        expanded_queries_info.sort(key=lambda x: x[1])
+                        best_expanded = expanded_queries_info[0][0]
+
+                combined_query = f"{rewritten_query} {best_expanded}".strip()
                 reranked_results = self.reranker.rerank(
-                    query=rewritten_query,
+                    query=combined_query,
                     documents=docs_to_rerank,
                     original_scores=original_scores,
                     top_k=rag_settings.top_k_results,
@@ -941,25 +924,38 @@ class KnowledgeBaseService:
                     logging.info(
                         f"[RERANKER] Before L2={filtered_docs[0][1]:.3f}, After Combined={reranked_results[0][1]:.3f}"
                     )
-                    # Convert reranked results to the structure expected downstream: (doc, score, source_query, query_type)
                     filtered_docs = [
-                        (doc, meta.get('combined_score', score), rewritten_query, 'reranked')
+                        (doc, meta.get('combined_score', score), combined_query, 'reranked')
                         for (doc, score, meta) in reranked_results
                     ]
             
             # ===== IMPROVEMENT 3: Deduplication with Source Tracking =====
-            # Remove duplicates while preserving the best score and tracking source query
-            seen_docs = {}
+            def _get_doc_hash(doc) -> str:
+                import hashlib
+                content_sample = doc.page_content[:300].strip()
+                content_sample = ' '.join(content_sample.split())
+                source = doc.metadata.get('source', '')
+                page = doc.metadata.get('page', 0)
+                metadata_str = f"{source}|{page}"
+                combined = f"{content_sample}|{metadata_str}"
+                return hashlib.md5(combined.encode('utf-8')).hexdigest()
+
+            seen_hashes = {}
+            deduplicated_docs = []
             for doc, score, source_query, query_type in sorted(filtered_docs, key=lambda x: x[1]):
-                doc_key = (doc.page_content, doc.metadata.get("source", ""), doc.metadata.get("page", 0))
-                
-                # Keep only the best score for each unique document
-                if doc_key not in seen_docs or score < seen_docs[doc_key][1]:
-                    seen_docs[doc_key] = (doc, score, source_query, query_type)
-            
-            # Convert back to list and sort by score
+                doc_hash = _get_doc_hash(doc)
+                if doc_hash in seen_hashes:
+                    existing_score = seen_hashes[doc_hash][1]
+                    if score < existing_score:
+                        deduplicated_docs = [item for item in deduplicated_docs if _get_doc_hash(item[0]) != doc_hash]
+                        deduplicated_docs.append((doc, score, source_query, query_type))
+                        seen_hashes[doc_hash] = (doc, score, source_query, query_type)
+                else:
+                    deduplicated_docs.append((doc, score, source_query, query_type))
+                    seen_hashes[doc_hash] = (doc, score, source_query, query_type)
+
             unique_docs_with_scores = sorted(
-                [(doc, score) for doc, score, _, _ in seen_docs.values()],
+                [(doc, score) for doc, score, _, _ in deduplicated_docs],
                 key=lambda x: x[1]
             )
             

@@ -4,6 +4,7 @@ from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from app.schemas.config import DynamicConfig, LLMSettings, RAGSettings, DatabaseSettings, AppSettings
+from app.utils.validators import validate_rag_settings
 from app.core.config import settings as static_settings
 from app.services.database import get_database_service
 
@@ -172,9 +173,9 @@ class ConfigService:
         return config.llm_settings
     
     async def get_rag_settings(self) -> RAGSettings:
-        """Get RAG settings with fallback."""
         config = await self.get_config()
-        return config.rag_settings
+        validated = validate_rag_settings(config.rag_settings.dict())
+        return RAGSettings(**validated)
     
     async def get_database_settings(self) -> DatabaseSettings:
         """Get database settings with fallback."""
