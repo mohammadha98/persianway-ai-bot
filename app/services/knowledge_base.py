@@ -4,7 +4,6 @@ import logging
 import os
 import hashlib
 from datetime import datetime
-from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from app.services.reranker import EmbeddingReranker
 from app.services.chat_service import get_llm
@@ -58,65 +57,33 @@ class KnowledgeBaseService:
             self.reranker = None
             logging.warning(f"[KB SERVICE] Reranker initialization failed: {str(e)}")
     
-    async def _get_qa_chain(self):
-        """Get or create the QA chain.
-        
-        Returns:
-            A RetrievalQA chain or None if vector store is not available
+    async def _get_document_chain(self):
+        """Get document processing chain WITHOUT automatic retrieval.
+        Returns only the document chain; retrieval is handled manually in query_knowledge_base.
         """
         if self._qa_chain is None:
-            # Load dynamic configuration
             await self.config_service._load_config()
-            rag_settings =await self.config_service.get_rag_settings()
-            
-            # Initialize LLM if not already done
+            rag_settings = await self.config_service.get_rag_settings()
             if self.llm is None:
                 self.llm = await get_llm(temperature=rag_settings.temperature)
-            
-            # Get the vector store
-            vector_store = self.document_processor.get_vector_store()
-            
-            # Check if vector store is available
-            if vector_store is None:
-                logging.warning("Vector store is not available. QA chain cannot be created.")
+            if self.llm is None:
+                logging.warning("LLM not available")
                 return None
-            
-            # Create a retriever with dynamic settings
-            retriever = vector_store.as_retriever(
-                search_type=rag_settings.search_type,
-                search_kwargs={"k": rag_settings.top_k_results}
-            )
-            
-            # Create a comprehensive prompt template that includes system prompt for better model behavior control
             system_prompt = rag_settings.system_prompt
             base_template = rag_settings.prompt_template
-            
-            # Combine system prompt with the RAG template
             combined_template = f"""{system_prompt}
 
 {base_template}"""
-
-            # The new create_retrieval_chain expects 'input' instead of 'question',
-            # so we replace the placeholder in the template.
             final_template = combined_template.replace("{question}", "{input}")
-            
-            # Create the QA chain with dynamic settings using new LangChain approach
-            # Create a chat prompt template for the new chain
             chat_prompt = ChatPromptTemplate.from_template(final_template)
-            
-            # Create the document chain
-            document_chain = create_stuff_documents_chain(self.llm, chat_prompt)
-            
-            # Create the retrieval chain
-            self._qa_chain = create_retrieval_chain(retriever, document_chain)
-        
+            self._qa_chain = create_stuff_documents_chain(self.llm, chat_prompt)
         return self._qa_chain
 
     async def refresh(self):
         logging.info("[KB SERVICE] Force refresh requested")
         self._qa_chain = None
         self.llm = None
-        await self._get_qa_chain()
+        await self._get_document_chain()
     
     def _normalize_documents_for_context(
         self,
@@ -138,7 +105,7 @@ class KnowledgeBaseService:
         normalized_docs = []
         total_chars = 0
         total_original_chars = 0
-        essential_metadata_keys = {"source", "page", "source_type", "hash_id"}
+        essential_metadata_keys = {"source", "page", "source_type", "hash_id", "is_public"}
         for idx, doc in enumerate(docs):
             original_size = len(doc.page_content) + len(str(doc.metadata))
             total_original_chars += original_size
@@ -993,11 +960,11 @@ class KnowledgeBaseService:
             if docs_with_scores:
                 logging.debug(f"[KB Query] Score range: {docs_with_scores[0][1]:.4f} (best) to {docs_with_scores[-1][1]:.4f} (worst)")
             
-            # Use the QA chain with retrieved documents
-            qa_chain = await self._get_qa_chain()
+            # Get document chain (no internal retrieval)
+            doc_chain = await self._get_document_chain()
             
-            # If QA chain is not available, return a fallback message
-            if qa_chain is None:
+            # If document chain is not available, return a fallback message
+            if doc_chain is None:
                 logging.warning("QA chain not available. Cannot query knowledge base.")
                 await self.config_service._load_config()
                 rag_settings =await self.config_service.get_rag_settings()
@@ -1010,34 +977,22 @@ class KnowledgeBaseService:
                     "sources": []
                 }
                 
-            # Get answer from QA chain using new input format
+            # Prepare documents and manual context
             docs = [doc for doc, score in docs_with_scores]
-            
-            # Normalize documents before passing to QA chain
             normalized_docs = self._normalize_documents_for_context(docs)
-            
-            # Log normalized document info for debugging
-            logging.info(f"Passing {len(normalized_docs)} normalized documents to QA chain")
+            # logging.info(f"[KB Query] Passing {len(normalized_docs)} docs to LLM (context: {sum(len(d.page_content) for d in normalized_docs)} chars)")
             for i, doc in enumerate(normalized_docs):
                 logging.debug(f"Doc {i+1}: content_length={len(doc.page_content)}, metadata_keys={list(doc.metadata.keys())}")
-            
-            # Extract page content to pass as context
             context_snippets = [doc.page_content for doc in normalized_docs]
             logging.debug(f"Context snippet lengths: {[len(snippet) for snippet in context_snippets]}")
-            
-    
-                # knowledge base information
             full_context = "\n\n".join(f"سند {i+1}:\n{snippet}" for i, snippet in enumerate(context_snippets))
-            
-            # Log context details for debugging
             logging.info(f"Full context length: {len(full_context)} chars, ~{len(full_context)//4} tokens")
             logging.debug(f"First 500 chars of context: {full_context[:500]}")
-            
-            result = qa_chain.invoke({"input": rewritten_query, "context": full_context})
-            answer = result.get("answer") or result.get("result")
+            result = doc_chain.invoke({"input": rewritten_query, "context": normalized_docs})
+            answer = result if isinstance(result, str) else result.get("answer") or result.get("result")
             if answer is None:
                 raise KeyError("answer")
-            source_docs = result.get("context") or result.get("source_documents") or []
+            source_docs = normalized_docs
             
             # ===== IMPROVEMENT 4: Multi-factor Confidence Calculation =====
             # Calculate confidence based on multiple factors:
