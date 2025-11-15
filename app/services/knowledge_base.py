@@ -2,17 +2,12 @@ from typing import List, Dict, Any, Optional
 import uuid
 import logging
 import os
-import hashlib
 from datetime import datetime
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from app.services.reranker import EmbeddingReranker
 from app.services.chat_service import get_llm
 from langchain.schema import HumanMessage, SystemMessage
-from langchain.prompts import PromptTemplate
 from langchain_core.prompts import ChatPromptTemplate
-from langchain.memory import ConversationBufferMemory
-
-from app.core.config import settings
 from app.services.document_processor import get_document_processor
 from app.services.excel_processor import get_excel_qa_processor
 from app.services.config_service import ConfigService
@@ -650,6 +645,9 @@ class KnowledgeBaseService:
         text = re.sub(r"[؟?!.،,;:\(\)\[\]\{}«»\"']+", "", text)
         text = re.sub(r"\s+", " ", text)
         return text.lower().strip()
+    
+
+
 
     async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False) -> Dict[str, Any]:
         """Query the knowledge base with a question using improved retrieval strategy.
@@ -894,14 +892,7 @@ class KnowledgeBaseService:
             # Prepare documents and manual context
             docs = [doc for doc, score in docs_with_scores]
             normalized_docs = self._normalize_documents_for_context(docs)
-            # logging.info(f"[KB Query] Passing {len(normalized_docs)} docs to LLM (context: {sum(len(d.page_content) for d in normalized_docs)} chars)")
-            for i, doc in enumerate(normalized_docs):
-                logging.debug(f"Doc {i+1}: content_length={len(doc.page_content)}, metadata_keys={list(doc.metadata.keys())}")
-            context_snippets = [doc.page_content for doc in normalized_docs]
-            logging.debug(f"Context snippet lengths: {[len(snippet) for snippet in context_snippets]}")
-            full_context = "\n\n".join(f"سند {i+1}:\n{snippet}" for i, snippet in enumerate(context_snippets))
-            logging.info(f"Full context length: {len(full_context)} chars, ~{len(full_context)//4} tokens")
-            logging.debug(f"First 500 chars of context: {full_context[:500]}")
+     
             result = doc_chain.invoke({"input": rewritten_query, "context": normalized_docs})
             answer = result if isinstance(result, str) else result.get("answer") or result.get("result")
             if answer is None:
