@@ -7,6 +7,7 @@ from datetime import datetime
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from app.services.reranker import EmbeddingReranker
 from app.services.chat_service import get_llm
+from langchain.schema import HumanMessage, SystemMessage
 from langchain.prompts import PromptTemplate
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.memory import ConversationBufferMemory
@@ -480,11 +481,9 @@ class KnowledgeBaseService:
                 - all_queries: Combined list of all queries for search
         """
         try:
-            from openai import AsyncOpenAI
             import json
             
-            # Initialize OpenAI client
-            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            llm = await get_llm(model_name="mistralai/mistral-nemo", temperature=0.3, max_tokens=800)
             
             rewritten_query = query
             
@@ -552,21 +551,12 @@ class KnowledgeBaseService:
 """
             
             # Call gpt-4o-mini for both rewriting and expansion
-            response = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": "تو دستیار هوشمندی هستی که پرسش‌ها را بازنویسی و گسترش می‌دهی برای بهبود نتایج جست‌وجو."
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.3,
-                max_tokens=800
-            )
+            response = await llm.ainvoke([
+                SystemMessage(content="تو دستیار هوشمندی هستی که پرسش‌ها را بازنویسی و گسترش می‌دهی برای بهبود نتایج جست‌وجو. فقط JSON معتبر برگردان."),
+                HumanMessage(content=prompt)
+            ])
             
-            raw_content = response.choices[0].message.content
+            raw_content = getattr(response, "content", "")
             try:
                 result = json.loads(raw_content)
                 if not isinstance(result, dict):
@@ -710,7 +700,8 @@ class KnowledgeBaseService:
             # Get all queries for search
             all_queries = query_expansion_result["all_queries"]
             rewritten_query = query_expansion_result["rewritten_query"]
-            
+            logging.info(f"[KB Query] All queries: {all_queries}")
+            logging.debug(f"[KB Query] Original query: {query}")
             # Log the query transformation
             if rewritten_query != query:
                 logging.info(f"[KB Query] Query rewritten with context: '{query[:50]}...' -> '{rewritten_query[:50]}...'")
@@ -725,8 +716,8 @@ class KnowledgeBaseService:
 
             rag_settings = await self.config_service.get_rag_settings()
             
-            # ===== IMPROVEMENT 1: Weighted Multi-Query Search with MMR =====
-            logging.info(f"[KB Query] Performing weighted multi-query search with {len(all_queries)} queries")
+            # ===== Retrieval: Weighted Multi-Query Similarity Search =====
+            logging.info(f"[KB Query] Performing weighted multi-query similarity search with {len(all_queries)} queries")
             
             # Prepare base search kwargs
             base_search_kwargs = {}
@@ -742,120 +733,42 @@ class KnowledgeBaseService:
                     return result
                 return True
             
-            # Calculate fetch_k for MMR (fetch more candidates, then apply diversity)
-            fetch_k = rag_settings.top_k_results * rag_settings.fetch_k_multiplier
+            # Calculate weights for original vs expanded queries
             num_expanded = max(len(all_queries) - 1, 0)
-            total_weight = rag_settings.original_query_weight + (rag_settings.expanded_query_weight * num_expanded)
             
             # Weighted search across all queries
             weighted_docs_with_scores = []
             for idx, search_query in enumerate(all_queries):
                 if not search_query.strip():
                     continue
-                
+
                 # Assign weight: original/rewritten query gets higher weight
                 # First query is the rewritten one (most important)
                 if idx == 0:
-                    normalized_weight = (rag_settings.original_query_weight / total_weight) if total_weight > 0 else 1.0
+                    weight = rag_settings.original_query_weight
                     query_type = "rewritten"
                 else:
-                    normalized_weight = (rag_settings.expanded_query_weight / total_weight) if total_weight > 0 else 1.0
+                    weight = rag_settings.expanded_query_weight
                     query_type = f"expanded_{idx}"
-                
-                logging.debug(f"[Weighted Search] Query weight={normalized_weight:.3f} type={query_type}: '{search_query[:50]}...'")
-                
+
+                logging.debug(f"[Weighted Search] Query weight={weight:.3f} type={query_type}: '{search_query[:50]}...'")
+
                 try:
-                    # Use MMR search for diversity (better than plain similarity)
-                    # Note: ChromaDB doesn't have max_marginal_relevance_search_with_score,
-                    # so we use MMR to get diverse docs, then calculate scores separately
-                    
-                    # First, get diverse documents using MMR
-                    mmr_kwargs = {
-                        **base_search_kwargs,
-                        "k": rag_settings.top_k_results,
-                        "fetch_k": fetch_k,
-                        "lambda_mult": rag_settings.mmr_diversity_score
-                    }
-                    
-                    # MMR search returns documents without scores
-                    mmr_docs = vector_store.max_marginal_relevance_search(
+                    docs_with_scores = vector_store.similarity_search_with_score(
                         search_query,
-                        **mmr_kwargs
-                    )
-                    mmr_docs = [doc for doc in mmr_docs if _validate_is_public(doc)]
-                    
-                    if not mmr_docs:
-                        logging.debug(f"[KB Query] No documents found via MMR for {query_type} query")
-                        continue
-                    
-                    # Now calculate scores for MMR documents using similarity search
-                    # We need to get scores for the documents returned by MMR
-                    # Strategy: Get more results with similarity search, then match with MMR results
-                    similarity_docs_with_scores = vector_store.similarity_search_with_score(
-                        search_query,
-                        k=fetch_k,  # Get enough candidates to match MMR results
+                        k=rag_settings.top_k_results,
                         **base_search_kwargs
                     )
-                    similarity_docs_with_scores = [(doc, score) for doc, score in similarity_docs_with_scores if _validate_is_public(doc)]
-                    
-                    # Create a mapping of document to score for quick lookup
-                    # Use full content hash + metadata for precise matching
-                    doc_to_score = {}
-                    for sim_doc, sim_score in similarity_docs_with_scores:
-                        # Use a unique key based on content hash and metadata for precise matching
-                        content_hash = hashlib.md5(sim_doc.page_content.encode('utf-8')).hexdigest()[:8]
-                        doc_key = (
-                            content_hash,
-                            sim_doc.metadata.get("source", ""),
-                            sim_doc.metadata.get("page", 0)
-                        )
-                        # Keep the best (lowest) score if duplicate
-                        if doc_key not in doc_to_score or sim_score < doc_to_score[doc_key]:
-                            doc_to_score[doc_key] = sim_score
-                    
-                    # Match MMR documents with their scores
-                    docs_with_scores = []
-                    for mmr_doc in mmr_docs:
-                        mmr_content_hash = hashlib.md5(mmr_doc.page_content.encode('utf-8')).hexdigest()[:8]
-                        mmr_key = (
-                            mmr_content_hash,
-                            mmr_doc.metadata.get("source", ""),
-                            mmr_doc.metadata.get("page", 0)
-                        )
-                        
-                        if mmr_key in doc_to_score:
-                            score = doc_to_score[mmr_key]
-                            docs_with_scores.append((mmr_doc, score))
-                        else:
-                            # If not found in similarity results, try to find by content similarity
-                            # This can happen if MMR returns a doc that's not in top fetch_k similarity results
-                            # In this case, we'll use a conservative score (threshold)
-                            logging.debug(f"[KB Query] MMR doc not in similarity top {fetch_k}, using threshold score")
-                            docs_with_scores.append((mmr_doc, rag_settings.similarity_threshold))
-                    
+                    docs_with_scores = [(doc, score) for doc, score in docs_with_scores if _validate_is_public(doc)]
+
                     for doc, score in docs_with_scores:
-                        weighted_score = score * normalized_weight
-                        weighted_docs_with_scores.append((doc, weighted_score, search_query, query_type))
-                        
-                    logging.debug(f"[KB Query] Found {len(docs_with_scores)} docs via MMR for {query_type} query")
-                    
+                        # Lower score is better (L2 distance), divide by weight to favor higher-weight queries
+                        adjusted_score = score / max(weight, 1e-6)
+                        weighted_docs_with_scores.append((doc, adjusted_score, search_query, query_type))
+                    logging.debug(f"[KB Query] Found {len(docs_with_scores)} docs via similarity for {query_type} query")
                 except Exception as e:
-                    logging.warning(f"[KB Query] MMR search failed for query '{search_query[:50]}...': {str(e)}")
-                    # Fallback to regular similarity search
-                    try:
-                        docs_with_scores = vector_store.similarity_search_with_score(
-                            search_query,
-                            k=rag_settings.top_k_results,
-                            **base_search_kwargs
-                        )
-                        docs_with_scores = [(doc, score) for doc, score in docs_with_scores if _validate_is_public(doc)]
-                        for doc, score in docs_with_scores:
-                            weighted_score = score * normalized_weight
-                            weighted_docs_with_scores.append((doc, weighted_score, search_query, query_type))
-                        logging.debug(f"[KB Query] Fallback to similarity search: found {len(docs_with_scores)} docs")
-                    except Exception as e2:
-                        logging.error(f"[KB Query] Fallback search also failed: {str(e2)}")
-                        continue
+                    logging.error(f"[KB Query] Similarity search failed for query '{search_query[:50]}...': {str(e)}")
+                    continue
             
             # Validate public flag before threshold filtering
             weighted_docs_with_scores = [
@@ -974,7 +887,8 @@ class KnowledgeBaseService:
                     "source_type": "system",
                     "requires_human_support": True,
                     "query_id": str(uuid.uuid4()),
-                    "sources": []
+                    "sources": [],
+                    "retrieval_method": "similarity_search"
                 }
                 
             # Prepare documents and manual context
@@ -1051,7 +965,8 @@ class KnowledgeBaseService:
                 "source_type": source_type,
                 "requires_human_support": requires_human,
                 "query_id": str(uuid.uuid4()) if requires_human else None,
-                "sources": sources
+                "sources": sources,
+                "retrieval_method": "similarity_search"
             }
          
             return response
@@ -1072,7 +987,8 @@ class KnowledgeBaseService:
                 "source_type": "system",
                 "requires_human_support": True,
                 "query_id": str(uuid.uuid4()),
-                "sources": []
+                "sources": [],
+                "retrieval_method": "similarity_search"
             }
 
     async def remove_knowledge_contribution(self, hash_id: str) -> Dict[str, Any]:
