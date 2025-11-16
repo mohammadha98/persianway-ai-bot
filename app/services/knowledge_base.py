@@ -213,6 +213,42 @@ class KnowledgeBaseService:
         confidence = math.pow(inverted_score, 0.7)
         return max(0.0, min(confidence, 1.0))
     
+    def _compute_adjusted_scores(self, records: List[tuple], rag_settings) -> List[tuple]:
+        import numpy as np
+        embeddings = getattr(self.document_processor, "embeddings", None)
+        if embeddings is None:
+            return [(doc, 1.0 / max(weight, 1e-6), query, qtype) for (doc, weight, query, qtype) in records]
+        def cosine_distance(a, b):
+            denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+            if denom == 0.0:
+                return 1.0
+            sim = float(np.dot(a, b) / denom)
+            return 1.0 - sim
+        query_cache = {}
+        doc_cache = {}
+        adjusted = []
+        for doc, weight, query, qtype in records:
+            if query not in query_cache:
+                try:
+                    query_cache[query] = embeddings.embed_query(query)
+                except Exception:
+                    query_cache[query] = None
+            doc_key = id(doc)
+            if doc_key not in doc_cache:
+                try:
+                    doc_cache[doc_key] = embeddings.embed_query(doc.page_content[:3000])
+                except Exception:
+                    doc_cache[doc_key] = None
+            qv = query_cache.get(query)
+            dv = doc_cache.get(doc_key)
+            if qv is None or dv is None:
+                distance = 1.0
+            else:
+                distance = cosine_distance(qv, dv)
+            adjusted_score = distance / max(weight, 1e-6)
+            adjusted.append((doc, adjusted_score, query, qtype))
+        return adjusted
+    
     def _log_human_referral(self, query: str, answer: str, confidence: float) -> None:
         """Log a query that requires human attention.
         
@@ -713,13 +749,17 @@ class KnowledgeBaseService:
 
             rag_settings = await self.config_service.get_rag_settings()
             
-            # ===== Retrieval: Weighted Multi-Query Similarity Search =====
-            logging.info(f"[KB Query] Performing weighted multi-query similarity search with {len(all_queries)} queries")
+            logging.info(f"[KB Query] Retrieval switched to db.as_retriever(), search_type={rag_settings.search_type}")
+            logging.info(f"[KB Query] Performing weighted multi-query retriever search with {len(all_queries)} queries")
             
-            # Prepare base search kwargs
-            base_search_kwargs = {}
-            if is_public:
-                base_search_kwargs["filter"] = {"is_public": True}
+            retriever = vector_store.as_retriever(
+                search_type=rag_settings.search_type,
+                search_kwargs={
+                    "k": rag_settings.top_k_results,
+                    "filter": {"is_public": True} if is_public else None,
+                
+                },
+            )
 
             def _validate_is_public(doc) -> bool:
                 doc_is_public = doc.metadata.get("is_public", False)
@@ -733,8 +773,7 @@ class KnowledgeBaseService:
             # Calculate weights for original vs expanded queries
             num_expanded = max(len(all_queries) - 1, 0)
             
-            # Weighted search across all queries
-            weighted_docs_with_scores = []
+            aggregated_records = []
             for idx, search_query in enumerate(all_queries):
                 if not search_query.strip():
                     continue
@@ -751,38 +790,30 @@ class KnowledgeBaseService:
                 logging.debug(f"[Weighted Search] Query weight={weight:.3f} type={query_type}: '{search_query[:50]}...'")
 
                 try:
-                    docs_with_scores = vector_store.similarity_search_with_score(
-                        search_query,
-                        k=rag_settings.top_k_results,
-                        **base_search_kwargs
-                    )
-                    docs_with_scores = [(doc, score) for doc, score in docs_with_scores if _validate_is_public(doc)]
-
-                    for doc, score in docs_with_scores:
-                        # Lower score is better (L2 distance), divide by weight to favor higher-weight queries
-                        adjusted_score = score / max(weight, 1e-6)
-                        weighted_docs_with_scores.append((doc, adjusted_score, search_query, query_type))
-                    logging.debug(f"[KB Query] Found {len(docs_with_scores)} docs via similarity for {query_type} query")
+                    relevant_docs = retriever.invoke(search_query)
+                    relevant_docs = [doc for doc in relevant_docs if _validate_is_public(doc)]
+                    for doc in relevant_docs:
+                        aggregated_records.append((doc, weight, search_query, query_type))
+                    logging.debug(f"[KB Query] Found {len(relevant_docs)} docs via retriever for {query_type} query")
                 except Exception as e:
-                    logging.error(f"[KB Query] Similarity search failed for query '{search_query[:50]}...': {str(e)}")
+                    logging.error(f"[KB Query] Retriever search failed for query '{search_query[:50]}...': {str(e)}")
                     continue
             
             # Validate public flag before threshold filtering
-            weighted_docs_with_scores = [
-                (doc, s, q, t) for doc, s, q, t in weighted_docs_with_scores if _validate_is_public(doc)
+            aggregated_records = [
+                (doc, w, q, t) for doc, w, q, t in aggregated_records if _validate_is_public(doc)
             ]
-            logging.info(f"[Filter] After validation: {len(weighted_docs_with_scores)} docs")
+            logging.info(f"[Filter] After validation: {len(aggregated_records)} docs")
 
-            # ===== IMPROVEMENT 2: Similarity Threshold Filtering =====
-            # Filter out documents with scores above threshold (higher score = less similar in L2 distance)
+            adjusted_with_scores = self._compute_adjusted_scores(aggregated_records, rag_settings)
             filtered_docs = [
                 (doc, score, query, qtype)
-                for doc, score, query, qtype in weighted_docs_with_scores
+                for doc, score, query, qtype in adjusted_with_scores
                 if score <= rag_settings.similarity_threshold
             ]
 
             if filtered_docs:
-                removed_count = len(weighted_docs_with_scores) - len(filtered_docs)
+                removed_count = len(adjusted_with_scores) - len(filtered_docs)
                 if removed_count > 0:
                     logging.info(
                         f"[KB Query] Filtered out {removed_count} documents below similarity threshold ({rag_settings.similarity_threshold})"
@@ -792,7 +823,7 @@ class KnowledgeBaseService:
                 logging.warning(
                     f"[KB Query] All documents below threshold, keeping top {rag_settings.top_k_results} anyway"
                 )
-                filtered_docs = weighted_docs_with_scores
+                filtered_docs = adjusted_with_scores
 
             # ===== NEW: Embedding-based Re-ranking (before deduplication) =====
             if self.reranker is not None and filtered_docs:
@@ -866,7 +897,7 @@ class KnowledgeBaseService:
             # Take top K results
             docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
             
-            logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {len(weighted_docs_with_scores)} initial candidates)")
+            logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {len(aggregated_records)} initial candidates)")
             if docs_with_scores:
                 logging.debug(f"[KB Query] Score range: {docs_with_scores[0][1]:.4f} (best) to {docs_with_scores[-1][1]:.4f} (worst)")
             
@@ -885,7 +916,7 @@ class KnowledgeBaseService:
                     "requires_human_support": True,
                     "query_id": str(uuid.uuid4()),
                     "sources": [],
-                    "retrieval_method": "similarity_search"
+                    "retrieval_method": "retriever_search"
                 }
                 
             # Prepare documents and manual context
@@ -956,7 +987,7 @@ class KnowledgeBaseService:
                 "requires_human_support": requires_human,
                 "query_id": str(uuid.uuid4()) if requires_human else None,
                 "sources": sources,
-                "retrieval_method": "similarity_search"
+                "retrieval_method": "retriever_search"
             }
          
             return response
@@ -978,7 +1009,7 @@ class KnowledgeBaseService:
                 "requires_human_support": True,
                 "query_id": str(uuid.uuid4()),
                 "sources": [],
-                "retrieval_method": "similarity_search"
+                "retrieval_method": "retriever_search"
             }
 
     async def remove_knowledge_contribution(self, hash_id: str) -> Dict[str, Any]:
