@@ -6,7 +6,7 @@ from datetime import datetime
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from app.services.reranker import EmbeddingReranker
 from app.services.chat_service import get_llm
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from app.services.document_processor import get_document_processor
 from app.services.excel_processor import get_excel_qa_processor
@@ -478,7 +478,7 @@ class KnowledgeBaseService:
         try:
             import json
             
-            llm = await get_llm(model_name="mistralai/mistral-nemo", temperature=0.3, max_tokens=800)
+            llm = await get_llm(model_name="mistralai/mistral-nemo", temperature=0.0, max_tokens=800)
             
             rewritten_query = query
             
@@ -508,7 +508,6 @@ class KnowledgeBaseService:
 1. پرسش جدید را بازنویسی کن تا بدون نیاز به متن‌های قبلی قابل جست‌وجو باشد
 2. سه نسخه جایگزین از پرسش بازنویسی‌شده ایجاد کن با کلمات مختلف و مترادف‌ها
 
-فقط از اطلاعات خود گفتگو استفاده کن. اگر پرسش به شرکت یا خدماتش اشاره دارد بدون ذکر نام، "پرشین وی" و "Persian Way" را به پرسش‌ها اضافه کن.
 ---
 گفتگو:
 {recent_context}

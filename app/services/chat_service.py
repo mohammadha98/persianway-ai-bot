@@ -95,7 +95,7 @@ async def get_llm(model_name: str = None, temperature: float = None, max_tokens:
         )
     else:
         raise ValueError("Either OPENAI_API_KEY or OPENROUTER_API_KEY must be set")
-from langchain.schema import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationChain
 
