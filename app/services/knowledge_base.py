@@ -478,7 +478,7 @@ class KnowledgeBaseService:
         try:
             import json
             
-            llm = await get_llm(model_name="mistralai/mistral-nemo", temperature=0.0, max_tokens=800)
+            llm = await get_llm(model_name="gpt-4o-mini", temperature=0.0, max_tokens=800)
             
             rewritten_query = query
             
@@ -529,7 +529,6 @@ class KnowledgeBaseService:
                 # No conversation history - just expand the original query
                 prompt = f"""برای پرسش زیر، سه نسخه جایگزین ایجاد کن که همان منظور را با کلمات و عبارات متفاوت بیان کنند.
 روی گسترش مفاهیم، اضافه کردن مترادف‌ها و در نظر گرفتن اصطلاحات فارسی و انگلیسی تمرکز کن.
-اگر پرسش به شرکت یا خدماتش اشاره دارد بدون ذکر نام، "پرشین وی" و "Persian Way" را به هر پرسش اضافه کن.
 
 پرسش: {query}
 
@@ -544,7 +543,7 @@ class KnowledgeBaseService:
 }}
 """
             
-            # Call gpt-4o-mini for both rewriting and expansion
+            # Call llm for both rewriting and expansion
             response = await llm.ainvoke([
                 SystemMessage(content="تو دستیار هوشمندی هستی که پرسش‌ها را بازنویسی و گسترش می‌دهی برای بهبود نتایج جست‌وجو. فقط JSON معتبر برگردان."),
                 HumanMessage(content=prompt)
