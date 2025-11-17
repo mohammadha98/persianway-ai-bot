@@ -14,7 +14,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.schema import Document
-
+from openai import OpenAI
 try:
     from docx import Document as DocxDocument
     from docx.table import Table as DocxTable
@@ -34,6 +34,41 @@ except ImportError:
 
 from app.core.config import settings
 
+class OpenRouterEmbeddings:
+    def __init__(self, api_key: str, base_url: str, model: str, referer: str = None, site_title: str = None):
+        from openai import OpenAI
+        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.model = model
+        self.extra_headers = {}
+        if referer:
+            self.extra_headers["HTTP-Referer"] = referer
+        if site_title:
+            self.extra_headers["X-Title"] = site_title
+
+    def embed_query(self, text: str):
+        resp = self.client.embeddings.create(
+            model=self.model,
+            input=text,
+            encoding_format="float",
+            extra_headers=self.extra_headers or None,
+        )
+        data = getattr(resp, "data", None)
+        if not data or not getattr(data[0], "embedding", None):
+            raise ValueError("No embedding data received")
+        return data[0].embedding
+
+    def embed_documents(self, texts: List[str]):
+        resp = self.client.embeddings.create(
+            model=self.model,
+            input=texts,
+            encoding_format="float",
+            extra_headers=self.extra_headers or None,
+        )
+        data = getattr(resp, "data", None)
+        if not data:
+            raise ValueError("No embedding data received")
+        return [item.embedding for item in data]
+
 
 class DocumentProcessor:
     """Service for processing PDF documents and creating vector embeddings.
@@ -45,42 +80,57 @@ class DocumentProcessor:
     def __init__(self):
         """Initialize the document processor."""
         self.docs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "docs")
-        self.persist_directory = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vectordb")
+        self.persist_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vectordb")
         
-        # Create persist directory if it doesn't exist
-        os.makedirs(self.persist_directory, exist_ok=True)
+        os.makedirs(self.persist_root, exist_ok=True)
         
-        # Initialize embeddings
-        # Use OpenAI API key for embeddings (OpenRouter doesn't support embeddings)
-        api_key = settings.OPENAI_API_KEY
-    
-        # Always use the fixed OpenAI embedding regardless of the model provider
-        # This ensures the knowledge base works with both OpenAI and OpenRouter
-        if not api_key or api_key == "":
-            logging.error("OpenAI API key is not configured. Please set OPENAI_API_KEY in your environment.")
-            logging.error("Vector embeddings will not be available. Knowledge base cannot function without embeddings.")
+        openrouter_key = settings.OPENROUTER_API_KEY
+        openai_key = settings.OPENAI_API_KEY
+        try:
+            if openrouter_key and openrouter_key != "":
+                provider = "openrouter"
+                model_name = "qwen/qwen3-embedding-0.6b"
+                self.embeddings = OpenRouterEmbeddings(
+                    api_key=openrouter_key,
+                    base_url=getattr(settings, "OPENROUTER_API_BASE", "https://openrouter.ai/api/v1"),
+                    model=model_name,
+                )
+                probe = self.embeddings.embed_query("probe")
+                dim = len(probe) if isinstance(probe, (list, tuple)) else 0
+                self.embeddings_available = True
+                logging.info("OpenRouter embeddings initialized: qwen/qwen3-embedding-0.6b")
+            elif openai_key and openai_key != "":
+                provider = "openai"
+                model_name = settings.OPENAI_EMBEDDING_MODEL
+                self.embeddings = OpenAIEmbeddings(
+                    openai_api_key=openai_key,
+                    model=model_name,
+                )
+                probe = self.embeddings.embed_query("probe")
+                dim = len(probe) if isinstance(probe, (list, tuple)) else 0
+                self.embeddings_available = True
+                logging.info("OpenAI embeddings initialized")
+            else:
+                self.embeddings_available = False
+                self.embeddings = None
+                logging.error("Embeddings are not configured. Provide OPENROUTER_API_KEY or OPENAI_API_KEY.")
+                provider = "none"
+                model_name = "none"
+                dim = 0
+        except Exception as e:
+            logging.error(f"Error initializing embeddings: {str(e)}")
             self.embeddings_available = False
             self.embeddings = None
-        else:
-            try:
-                # We'll always try to use the OpenAI embeddings with the provided key
-                self.embeddings = OpenAIEmbeddings(
-                    openai_api_key=api_key,
-                    model=settings.OPENAI_EMBEDDING_MODEL
-                )
-                # Test the embeddings to make sure they work
-                self.embeddings.embed_query("Test query to verify embeddings")
-                self.embeddings_available = True
-                logging.info("OpenAI embeddings initialized successfully.")
-            except Exception as e:
-                # If there's an error with the embeddings, log it and disable embeddings
-                logging.error(f"Error initializing OpenAI embeddings: {str(e)}")
-                logging.error("Vector embeddings will not be available. Knowledge base cannot function without embeddings.")
-                logging.error("Please check your OpenAI API key and network connection.")
-                # Set a flag to indicate that embeddings are not available
-                self.embeddings_available = False
-                # Create a dummy embeddings object that won't be used
-                self.embeddings = None
+            provider = "error"
+            model_name = "error"
+            dim = 0
+
+        self.persist_directory = os.path.join(
+            self.persist_root,
+            f"{provider}-{model_name.replace('/', '_')}-{dim}"
+        )
+        os.makedirs(self.persist_directory, exist_ok=True)
+
         
         # Initialize text splitter for chunking documents
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -116,7 +166,7 @@ class DocumentProcessor:
         """Get or create the vector store."""
         # If embeddings are not available, return None
         if not hasattr(self, 'embeddings_available') or not self.embeddings_available:
-            logging.warning("Cannot access vector store: OpenAI embeddings are not available.")
+            logging.warning("Cannot access vector store: embeddings are not available.")
             return None
             
         if self._vector_store is None:

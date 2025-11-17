@@ -101,12 +101,25 @@ class KnowledgeBaseService:
         normalized_docs = []
         total_chars = 0
         total_original_chars = 0
-        essential_metadata_keys = {"source", "page", "source_type", "hash_id", "is_public"}
         for idx, doc in enumerate(docs):
             original_size = len(doc.page_content) + len(str(doc.metadata))
             total_original_chars += original_size
-            clean_metadata = {k: v for k, v in doc.metadata.items() if k in essential_metadata_keys}
-            clean_content = doc.page_content.strip()
+            clean_metadata = dict(doc.metadata) if isinstance(doc.metadata, dict) else {}
+            base_content = doc.page_content.strip()
+            if isinstance(clean_metadata, dict) and clean_metadata.get("source_type") == "qa_contribution":
+                t = clean_metadata.get("title")
+                q = clean_metadata.get("question")
+                a = clean_metadata.get("answer")
+                parts = []
+                if t:
+                    parts.append(f"Title: {t}")
+                if q:
+                    parts.append(f"Q: {q}")
+                if a:
+                    parts.append(f"A: {a}")
+                if parts:
+                    base_content = (base_content + "\n\n" + "\n".join(parts)).strip()
+            clean_content = base_content
             if len(clean_content) > chars_per_doc:
                 truncated = clean_content[:chars_per_doc]
                 last_period = truncated.rfind('.')
@@ -506,7 +519,6 @@ class KnowledgeBaseService:
                 # Create prompt for contextual rewriting and expansion
                 prompt = f"""با توجه به گفتگوی زیر، دو کار انجام بده:
 1. پرسش جدید را بازنویسی کن تا بدون نیاز به متن‌های قبلی قابل جست‌وجو باشد
-2. سه نسخه جایگزین از پرسش بازنویسی‌شده ایجاد کن با کلمات مختلف و مترادف‌ها
 
 ---
 گفتگو:
@@ -555,7 +567,7 @@ class KnowledgeBaseService:
                 if not isinstance(result, dict):
                     raise ValueError("Invalid JSON type")
                 rewritten_query = result.get("rewritten_query", query)
-                expanded_queries = result.get("expanded_queries", [])
+                expanded_queries = []
                 if not isinstance(expanded_queries, list):
                     expanded_queries = []
                 expanded_queries = [eq.strip() for eq in expanded_queries if isinstance(eq, str) and eq and eq.strip()]
@@ -570,9 +582,6 @@ class KnowledgeBaseService:
             # Combine all queries for search (rewritten + expanded)
             # Remove duplicates while preserving order
             all_queries = [rewritten_query]
-            for eq in expanded_queries:
-                if eq and eq not in all_queries:
-                    all_queries.append(eq)
             
             logging.info(f"[Query Expansion] Original: '{query[:50]}...'")
             if rewritten_query != query:
@@ -693,11 +702,9 @@ class KnowledgeBaseService:
                 conversation_history=filtered_history if filtered_history else None
             )
             
-            # Get all queries for search
-            all_queries = query_expansion_result["all_queries"]
             rewritten_query = query_expansion_result["rewritten_query"]
-            logging.info(f"[KB Query] All queries: {all_queries}")
             logging.debug(f"[KB Query] Original query: {query}")
+            logging.info(f"[KB Query] Using rewritten query: '{rewritten_query[:100]}...'")
             # Log the query transformation
             if rewritten_query != query:
                 logging.info(f"[KB Query] Query rewritten with context: '{query[:50]}...' -> '{rewritten_query[:50]}...'")
@@ -712,13 +719,10 @@ class KnowledgeBaseService:
 
             rag_settings = await self.config_service.get_rag_settings()
             
-            # ===== Retrieval: Weighted Multi-Query Similarity Search =====
-            logging.info(f"[KB Query] Performing weighted multi-query similarity search with {len(all_queries)} queries")
+            logging.info(f"[KB Query] Performing parallel similarity search across entry_type groups")
             
-            # Prepare base search kwargs
+            # Prepare base search kwargs (no filter here; filters applied per group)
             base_search_kwargs = {}
-            if is_public:
-                base_search_kwargs["filter"] = {"is_public": True}
 
             def _validate_is_public(doc) -> bool:
                 doc_is_public = doc.metadata.get("is_public", False)
@@ -729,59 +733,61 @@ class KnowledgeBaseService:
                     return result
                 return True
             
-            # Calculate weights for original vs expanded queries
-            num_expanded = max(len(all_queries) - 1, 0)
-            
-            # Weighted search across all queries
-            weighted_docs_with_scores = []
-            for idx, search_query in enumerate(all_queries):
-                if not search_query.strip():
-                    continue
-
-                # Assign weight: original/rewritten query gets higher weight
-                # First query is the rewritten one (most important)
-                if idx == 0:
-                    weight = rag_settings.original_query_weight
-                    query_type = "rewritten"
-                else:
-                    weight = rag_settings.expanded_query_weight
-                    query_type = f"expanded_{idx}"
-
-                logging.debug(f"[Weighted Search] Query weight={weight:.3f} type={query_type}: '{search_query[:50]}...'")
-
+            search_query = rewritten_query.strip()
+            if not search_query:
+                logging.warning("[KB Query] Empty rewritten query")
+                docs_with_scores = []
+                initial_count = 0
+            else:
                 try:
-                    docs_with_scores = vector_store.similarity_search_with_score(
-                        search_query,
-                        k=rag_settings.top_k_results,
-                        **base_search_kwargs
-                    )
-                    docs_with_scores = [(doc, score) for doc, score in docs_with_scores if _validate_is_public(doc)]
-
-                    for doc, score in docs_with_scores:
-                        # Lower score is better (L2 distance), divide by weight to favor higher-weight queries
-                        adjusted_score = score / max(weight, 1e-6)
-                        weighted_docs_with_scores.append((doc, adjusted_score, search_query, query_type))
-                    logging.debug(f"[KB Query] Found {len(docs_with_scores)} docs via similarity for {query_type} query")
+                    import asyncio
+                    filters = {
+                        "contrib": {"entry_type": {"$in": ["user_contribution"]}},
+                        "docx": {"entry_type": {"$in": ["user_contribution_docx"]}},
+                        "excel": {"entry_type": {"$in": ["user_contribution_excel"]}},
+                    }
+                    K = getattr(rag_settings, "top_k_results", 20)
+                    async def _run(filter_obj):
+                        return await asyncio.to_thread(
+                            vector_store.similarity_search_with_score,
+                            search_query,
+                            k=K,
+                            filter=filter_obj,
+                            **base_search_kwargs,
+                        )
+                    tasks = [
+                        _run(f)
+                        for f in filters.values()
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    combined = []
+                    for res in results:
+                        if isinstance(res, Exception):
+                            logging.error(f"[KB Query] Parallel search error: {res}")
+                            continue
+                        combined.extend(res or [])
+                    # Sort globally by score descending (as requested)
+                    combined.sort(key=lambda x: x[1], reverse=True)
+                    docs_with_scores = [(doc, score) for doc, score in combined if _validate_is_public(doc)]
+                    initial_count = len(docs_with_scores)
+                    logging.debug(f"[KB Query] Parallel search found {len(docs_with_scores)} combined docs")
                 except Exception as e:
-                    logging.error(f"[KB Query] Similarity search failed for query '{search_query[:50]}...': {str(e)}")
-                    continue
+                    logging.error(f"[KB Query] Parallel similarity search failed for query '{search_query[:50]}...': {str(e)}")
+                    docs_with_scores = []
+                    initial_count = 0
             
-            # Validate public flag before threshold filtering
-            weighted_docs_with_scores = [
-                (doc, s, q, t) for doc, s, q, t in weighted_docs_with_scores if _validate_is_public(doc)
-            ]
-            logging.info(f"[Filter] After validation: {len(weighted_docs_with_scores)} docs")
+            logging.info(f"[Filter] After validation: {len(docs_with_scores)} docs")
 
             # ===== IMPROVEMENT 2: Similarity Threshold Filtering =====
             # Filter out documents with scores above threshold (higher score = less similar in L2 distance)
             filtered_docs = [
-                (doc, score, query, qtype)
-                for doc, score, query, qtype in weighted_docs_with_scores
+                (doc, score, search_query, "single")
+                for doc, score in docs_with_scores
                 if score <= rag_settings.similarity_threshold
             ]
 
             if filtered_docs:
-                removed_count = len(weighted_docs_with_scores) - len(filtered_docs)
+                removed_count = len(docs_with_scores) - len(filtered_docs)
                 if removed_count > 0:
                     logging.info(
                         f"[KB Query] Filtered out {removed_count} documents below similarity threshold ({rag_settings.similarity_threshold})"
@@ -791,7 +797,7 @@ class KnowledgeBaseService:
                 logging.warning(
                     f"[KB Query] All documents below threshold, keeping top {rag_settings.top_k_results} anyway"
                 )
-                filtered_docs = weighted_docs_with_scores
+                filtered_docs = [(doc, score, search_query, "single") for doc, score in docs_with_scores]
 
             # ===== NEW: Embedding-based Re-ranking (before deduplication) =====
             if self.reranker is not None and filtered_docs:
@@ -799,19 +805,7 @@ class KnowledgeBaseService:
                 docs_to_rerank = [doc for doc, _, _, _ in filtered_docs]
                 original_scores = [score for _, score, _, _ in filtered_docs]
 
-                best_expanded = ""
-                if len(all_queries) > 1:
-                    expanded_queries_info = []
-                    for q in all_queries[1:]:
-                        query_docs = [(doc, s) for doc, s, sq, _ in filtered_docs if sq == q]
-                        if query_docs:
-                            avg_score = sum(s for _, s in query_docs) / len(query_docs)
-                            expanded_queries_info.append((q, avg_score, len(query_docs)))
-                    if expanded_queries_info:
-                        expanded_queries_info.sort(key=lambda x: x[1])
-                        best_expanded = expanded_queries_info[0][0]
-
-                combined_query = f"{rewritten_query} {best_expanded}".strip()
+                combined_query = rewritten_query
                 reranked_results = self.reranker.rerank(
                     query=combined_query,
                     documents=docs_to_rerank,
@@ -865,7 +859,7 @@ class KnowledgeBaseService:
             # Take top K results
             docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
             
-            logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {len(weighted_docs_with_scores)} initial candidates)")
+            logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {initial_count} initial candidates)")
             if docs_with_scores:
                 logging.debug(f"[KB Query] Score range: {docs_with_scores[0][1]:.4f} (best) to {docs_with_scores[-1][1]:.4f} (worst)")
             
@@ -935,7 +929,11 @@ class KnowledgeBaseService:
                         "source": doc.metadata.get("source", "Unknown"),
                         "page": doc.metadata.get("page", 1),
                         "source_type": doc.metadata.get("source_type", "unknown"),
-                        "is_public": doc.metadata.get("is_public", False)
+                        "is_public": doc.metadata.get("is_public", False),
+                        "title": doc.metadata.get("title"),
+                        "question": doc.metadata.get("question"),
+                        "answer": doc.metadata.get("answer"),
+                        "meta_tags": doc.metadata.get("meta_tags")
                     })
             
             # Prepare response
