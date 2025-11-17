@@ -467,7 +467,7 @@ class KnowledgeBaseService:
         self, 
         query: str, 
         conversation_history: List[Dict[str, str]] = None,
-        max_history: int = 4
+        max_history: int = 6
     ) -> Dict[str, Any]:
         """Rewrite query based on conversation context and expand it for better search results.
         
@@ -491,7 +491,7 @@ class KnowledgeBaseService:
         try:
             import json
             
-            llm = await get_llm(model_name="gpt-4o-mini", temperature=0.0, max_tokens=800)
+            llm = await get_llm(model_name="anthropic/claude-3.5-sonnet", temperature=0.0, max_tokens=800)
             
             rewritten_query = query
             
@@ -517,17 +517,64 @@ class KnowledgeBaseService:
                 )
                 
                 # Create prompt for contextual rewriting and expansion
-                prompt = f"""با توجه به گفتگوی زیر، دو کار انجام بده:
-1. پرسش جدید را بازنویسی کن تا بدون نیاز به متن‌های قبلی قابل جست‌وجو باشد
+                prompt = f"""**وظیفه‌ات:**
+1. پرسش جدید را **کاملاً مستقل** از گفتگوی قبلی بازنویسی کن
+2. **اشاره‌های ضمنی** را به صراحت جایگزین کن:
+   - "مرحله بعد" → "مرحله دوم" یا "مرحله بعدی از X"
+   - "این" → نام دقیق چیزی که به آن اشاره دارد
+   - "آن محصول" → نام محصول
+   - "همون" → نام دقیق موضوع
+3. سه نسخه جایگزین با کلمات و عبارات متفاوت ایجاد کن
 
 ---
-گفتگو:
+**گفتگوی قبلی:**
 {recent_context}
 
-پرسش جدید کاربر:
+**پرسش جدید:**
 {query}
 ---
-فقط یک JSON برگردان با این فرمت:
+
+---
+**مثال‌های خوب:**
+
+مثال 1:
+گفتگو:
+User: مرحله اول کوددهی به پنبه به چه صورت هست؟
+Bot: مرحله اول با گابری گلدن انجام می‌شود
+
+User: مرحله بعد چیه؟
+
+Output:
+{{
+    "rewritten_query": "مرحله دوم کوددهی به پنبه چیست؟",
+    "expanded_queries": [
+        "مرحله دوم کوددهی پنبه چگونه است؟",
+        "در مرحله بعدی کوددهی پنبه چه کاری باید انجام شود؟",
+        "بعد از زیرکشت گابری گلدن برای پنبه چه کار کنیم؟"
+    ]
+}}
+
+مثال 2:
+گفتگو:
+User: محصول مناسب برای کبد چرب چیه؟
+Bot: سیلی مارین و...
+
+User: این محصول چند تومنه؟
+
+Output:
+{{
+    "rewritten_query": "قیمت سیلی مارین چقدر است؟",
+    "expanded_queries": [
+        "سیلی مارین چند تومان است؟",
+        "محصول سیلی مارین چه قیمتی دارد؟",
+        "هزینه خرید سیلی مارین"
+    ]
+}}
+
+---
+**حالا همین کار را برای پرسش بالا انجام بده:**
+
+فقط یک JSON معتبر برگردان با این فرمت:
 {{
     "rewritten_query": "پرسش بازنویسی‌شده",
     "expanded_queries": [
