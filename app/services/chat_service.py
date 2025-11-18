@@ -522,6 +522,17 @@ Title:"""
     "   ✓ 'آب‌وهوای تهران چطوره؟' (weather)\n\n"
     
     "═══════════════════════════════\n\n"
+
+    "4️⃣ GREETING (سلام و شروع مکالمه)\n"
+    "   Simple greetings or pleasantries indicating the user starts a conversation:\n"
+    "   Examples:\n"
+    "   ✓ 'سلام'\n"
+    "   ✓ 'درود'\n"
+    "   ✓ 'خسته نباشید'\n"
+    "   ✓ 'سلام وقت بخیر'\n"
+    "   ✓ 'hello'\n"
+    "   ✓ 'hi'\n"
+    "   ✓ 'hey'\n\n"
     
     "🎯 DECISION FLOWCHART:\n"
     "═══════════════════════\n\n"
@@ -579,18 +590,19 @@ Title:"""
     
     "Respond with valid JSON only:\n"
     "{\n"
-    "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\",\n"
+    "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\" | \"GREETING\",\n"
     "  \"category\": \"company_info\" | \"mlm_business\" | \"agriculture\" | \"health\" | \"beauty\" | \"unrelated\",\n"
     "  \"confidence\": 0.0-1.0,\n"
     "  \"explanation\": \"brief reason in English\",\n"
     "  \"off_topic_message\": \"optional: redirect message in Persian if OFF_TOPIC\"\n"
+    "  \"greeting_message\": \"optional: greeting message and introduce yourself as Persianway AI Assistant in Persian if GREETING\"\n"
     "}"
     )
 
 
         try:
             classifier_llm = llm or await get_llm(
-                model_name="mistralai/mistral-small-3.1-24b-instruct",
+                model_name="qwen/qwen-2.5-7b-instruct",
                 temperature=0.1,
                 top_p=0.1
             )
@@ -649,9 +661,10 @@ Title:"""
             explanation = payload.get("explanation", "No explanation provided")
             clarification_prompt = payload.get("clarification_prompt")
             off_topic_message = payload.get("off_topic_message")
+            greeting_message = payload.get("greeting_message")
             
             # Validate intent
-            if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC"]:
+            if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC", "GREETING"]:
                 logger.warning(f"Invalid intent '{intent}', defaulting to PRIVATE")
                 intent = "PRIVATE"
             
@@ -669,7 +682,8 @@ Title:"""
                 "is_public": is_public,
                 "explanation": explanation,
                 "clarification_prompt": clarification_prompt,
-                "off_topic_message": off_topic_message
+                "off_topic_message": off_topic_message,
+                "greeting_message": greeting_message
             }
 
         # Fallback: try old format for backward compatibility
@@ -792,6 +806,29 @@ Title:"""
                     conversation.memory.chat_memory.add_user_message(message)
                     conversation.memory.chat_memory.add_ai_message(answer)
                     
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                if intent_result["intent"] == "GREETING":
+                    answer =  intent_result.get("greeting_message") or (
+                        "درود! خوش آمدید به پرشین وی 🌷\n\n"
+                        "می‌تونید در این زمینه‌ها سوال بپرسید:\n\n"
+                        "🌱 کشاورزی: کاشت، داشت، کوددهی، آبیاری، کنترل آفات\n"
+                        "💊 سلامت: مکمل‌ها، تداخل‌ها، دوز مصرف، تغذیه\n"
+                        "💄 زیبایی: مراقبت از پوست، ترکیبات، روتین‌ها\n"
+                        "🏢 اطلاعات شرکت: ثبت‌نام، پورسانت، قوانین، سفارش و ارسال\n\n"
+                        "هر سوالی دارید بفرمایید؛ با کمال میل راهنمایی می‌کنم."
+                    )
+                    query_analysis["confidence_score"] = 0.5
+                    query_analysis["knowledge_source"] = "greeting"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "User initiated conversation with a greeting."
+                    response_parameters["temperature"] = 0.2
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
                     return {
                         "query_analysis": query_analysis,
                         "response_parameters": response_parameters,

@@ -9,6 +9,7 @@ from app.services.chat_service import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from app.services.document_processor import get_document_processor
+from app.services.hybrid_retrieval import HybridRetrievalService
 from app.services.excel_processor import get_excel_qa_processor
 from app.services.config_service import ConfigService
 
@@ -766,7 +767,7 @@ Output:
 
             rag_settings = await self.config_service.get_rag_settings()
             
-            logging.info(f"[KB Query] Performing parallel similarity search across entry_type groups")
+            logging.info(f"[KB Query] Performing hybrid retrieval (dense + BM25)")
             
             # Prepare base search kwargs (no filter here; filters applied per group)
             base_search_kwargs = {}
@@ -787,39 +788,18 @@ Output:
                 initial_count = 0
             else:
                 try:
-                    import asyncio
-                    filters = {
-                        "contrib": {"entry_type": {"$in": ["user_contribution"]}},
-                        "docx": {"entry_type": {"$in": ["user_contribution_docx"]}},
-                        "excel": {"entry_type": {"$in": ["user_contribution_excel"]}},
-                    }
-                    K = getattr(rag_settings, "top_k_results", 20)
-                    async def _run(filter_obj):
-                        return await asyncio.to_thread(
-                            vector_store.similarity_search_with_score,
-                            search_query,
-                            k=K,
-                            filter=filter_obj,
-                            **base_search_kwargs,
-                        )
-                    tasks = [
-                        _run(f)
-                        for f in filters.values()
-                    ]
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-                    combined = []
-                    for res in results:
-                        if isinstance(res, Exception):
-                            logging.error(f"[KB Query] Parallel search error: {res}")
-                            continue
-                        combined.extend(res or [])
-                    # Sort globally by score descending (as requested)
-                    combined.sort(key=lambda x: x[1], reverse=True)
-                    docs_with_scores = [(doc, score) for doc, score in combined if _validate_is_public(doc)]
+                    hrs = HybridRetrievalService(self.document_processor)
+                    hybrid_docs = await hrs.hybrid_retrieve(search_query)
+                    hybrid_docs = [doc for doc in hybrid_docs if _validate_is_public(doc)]
+                    docs_with_scores = []
+                    for doc in hybrid_docs:
+                        hs = float(doc.metadata.get("hybrid_score", 0.0) or 0.0)
+                        pseudo_distance = 1.0 - max(0.0, min(1.0, hs))
+                        docs_with_scores.append((doc, pseudo_distance))
                     initial_count = len(docs_with_scores)
-                    logging.debug(f"[KB Query] Parallel search found {len(docs_with_scores)} combined docs")
+                    logging.debug(f"[KB Query] Hybrid retrieval produced {len(docs_with_scores)} docs")
                 except Exception as e:
-                    logging.error(f"[KB Query] Parallel similarity search failed for query '{search_query[:50]}...': {str(e)}")
+                    logging.error(f"[KB Query] Hybrid retrieval failed for query '{search_query[:50]}...': {str(e)}")
                     docs_with_scores = []
                     initial_count = 0
             
