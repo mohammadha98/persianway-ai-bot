@@ -769,6 +769,7 @@ Output:
             
             logging.info(f"[KB Query] Performing hybrid retrieval (dense + BM25)")
             
+            # TODO: ADD IS_PUBLIC FILTERING FOR HYBRID RETRIEVAL
             # Prepare base search kwargs (no filter here; filters applied per group)
             base_search_kwargs = {}
 
