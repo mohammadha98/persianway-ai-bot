@@ -89,7 +89,7 @@ class DocumentProcessor:
         try:
             if openrouter_key and openrouter_key != "":
                 provider = "openrouter"
-                model_name = "openai/text-embedding-ada-002"
+                model_name = "qwen/qwen3-embedding-4b"
                 self.embeddings = OpenRouterEmbeddings(
                     api_key=openrouter_key,
                     base_url=getattr(settings, "OPENROUTER_API_BASE", "https://openrouter.ai/api/v1"),
@@ -99,7 +99,7 @@ class DocumentProcessor:
                 dim = len(probe) if isinstance(probe, (list, tuple)) else 0
                 self.embeddings_available = True
                 # logging.info("OpenRouter embeddings initialized: qwen/qwen3-embedding-0.6b")
-                logging.info("OpenRouter embeddings initialized: mistralai/mistral-embed-2312")
+                logging.info("OpenRouter embeddings initialized: qwen/qwen3-embedding-4b")
             elif openai_key and openai_key != "":
                 provider = "openai"
                 model_name = settings.OPENAI_EMBEDDING_MODEL

@@ -150,7 +150,7 @@ class HybridRetrievalService:
         return res
 
     async def hybrid_retrieve(self, query: str) -> List[Document]:
-        k = 5
+        k = 15
         dense_pairs = await self._dense_parallel(query, k)
         bm25_pairs = self._bm25_parallel(query, k)
         dense_norm = self._normalize_dense(dense_pairs)

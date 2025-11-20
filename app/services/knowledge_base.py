@@ -84,29 +84,23 @@ class KnowledgeBaseService:
     
     def _normalize_documents_for_context(
         self,
-        docs: List[Any],
-        max_total_tokens: int = 3000,
-        max_chars_per_doc: int = 1200
+        docs: List[Any]
     ) -> List[Any]:
         from langchain_core.documents import Document
         if not docs:
             return []
-        CHARS_PER_TOKEN = 4
-        max_total_chars = max_total_tokens * CHARS_PER_TOKEN
-        chars_per_doc = min(max_total_chars // len(docs), max_chars_per_doc)
-        logging.info(
-            f"[Context Normalization] Processing {len(docs)} docs, "
-            f"max_total_tokens={max_total_tokens}, "
-            f"max_chars_per_doc={chars_per_doc}"
-        )
+        def _normalize_whitespace(text: str) -> str:
+            lines = (text or "").splitlines()
+            return "\n".join([" ".join(line.split()) for line in lines]).strip()
+        logging.info(f"[Context Normalization] Processing {len(docs)} docs (no length limits)")
         normalized_docs = []
-        total_chars = 0
         total_original_chars = 0
+        total_chars = 0
         for idx, doc in enumerate(docs):
-            original_size = len(doc.page_content) + len(str(doc.metadata))
+            original_size = len(getattr(doc, 'page_content', '') or '') + len(str(getattr(doc, 'metadata', {})))
             total_original_chars += original_size
             clean_metadata = dict(doc.metadata) if isinstance(doc.metadata, dict) else {}
-            base_content = doc.page_content.strip()
+            base_content = _normalize_whitespace((doc.page_content or "").strip())
             if isinstance(clean_metadata, dict) and clean_metadata.get("source_type") == "qa_contribution":
                 t = clean_metadata.get("title")
                 q = clean_metadata.get("question")
@@ -121,40 +115,12 @@ class KnowledgeBaseService:
                 if parts:
                     base_content = (base_content + "\n\n" + "\n".join(parts)).strip()
             clean_content = base_content
-            if len(clean_content) > chars_per_doc:
-                truncated = clean_content[:chars_per_doc]
-                last_period = truncated.rfind('.')
-                last_newline = truncated.rfind('\n')
-                cut_point = max(last_period, last_newline)
-                if cut_point > chars_per_doc * 0.8:
-                    clean_content = truncated[:cut_point + 1] + "..."
-                else:
-                    clean_content = truncated + "..."
-                logging.debug(
-                    f"[Context Normalization] Doc {idx+1} truncated: "
-                    f"{len(doc.page_content)} → {len(clean_content)} chars"
-                )
-            doc_size = len(clean_content)
-            if total_chars + doc_size > max_total_chars:
-                logging.warning(
-                    f"[Context Normalization] Reached total char limit at doc {idx+1}. "
-                    f"Stopping with {len(normalized_docs)} docs."
-                )
-                break
-            normalized_doc = Document(
-                page_content=clean_content,
-                metadata=clean_metadata
-            )
-            normalized_docs.append(normalized_doc)
-            total_chars += doc_size
+            total_chars += len(clean_content)
+            normalized_docs.append(Document(page_content=clean_content, metadata=clean_metadata))
         if total_original_chars > 0:
             reduction_pct = ((total_original_chars - total_chars) / total_original_chars * 100)
-            estimated_tokens = total_chars // CHARS_PER_TOKEN
             logging.info(
-                f"[Context Normalization] Complete: "
-                f"{len(normalized_docs)}/{len(docs)} docs, "
-                f"{total_chars} chars (~{estimated_tokens} tokens), "
-                f"reduction={reduction_pct:.1f}%"
+                f"[Context Normalization] Complete: {len(normalized_docs)}/{len(docs)} docs, total_chars={total_chars}, reduction={reduction_pct:.1f}%"
             )
         return normalized_docs
     
@@ -492,7 +458,7 @@ class KnowledgeBaseService:
         try:
             import json
             
-            llm = await get_llm(model_name="anthropic/claude-3.5-sonnet", temperature=0.0, max_tokens=800)
+            llm = await get_llm(model_name="anthropic/claude-3.5-sonnet", temperature=0.1, max_tokens=800)
             
             rewritten_query = query
             
@@ -525,7 +491,7 @@ class KnowledgeBaseService:
    - "این" → نام دقیق چیزی که به آن اشاره دارد
    - "آن محصول" → نام محصول
    - "همون" → نام دقیق موضوع
-3. سه نسخه جایگزین با کلمات و عبارات متفاوت ایجاد کن
+
 
 ---
 **گفتگوی قبلی:**
@@ -548,11 +514,6 @@ User: مرحله بعد چیه؟
 Output:
 {{
     "rewritten_query": "مرحله دوم کوددهی به پنبه چیست؟",
-    "expanded_queries": [
-        "مرحله دوم کوددهی پنبه چگونه است؟",
-        "در مرحله بعدی کوددهی پنبه چه کاری باید انجام شود؟",
-        "بعد از زیرکشت گابری گلدن برای پنبه چه کار کنیم؟"
-    ]
 }}
 
 مثال 2:
@@ -565,11 +526,6 @@ User: این محصول چند تومنه؟
 Output:
 {{
     "rewritten_query": "قیمت سیلی مارین چقدر است؟",
-    "expanded_queries": [
-        "سیلی مارین چند تومان است؟",
-        "محصول سیلی مارین چه قیمتی دارد؟",
-        "هزینه خرید سیلی مارین"
-    ]
 }}
 
 ---
@@ -578,16 +534,11 @@ Output:
 فقط یک JSON معتبر برگردان با این فرمت:
 {{
     "rewritten_query": "پرسش بازنویسی‌شده",
-    "expanded_queries": [
-        "نسخه جایگزین اول",
-        "نسخه جایگزین دوم",
-        "نسخه جایگزین سوم"
-    ]
 }}
 """
             else:
                 # No conversation history - just expand the original query
-                prompt = f"""برای پرسش زیر، سه نسخه جایگزین ایجاد کن که همان منظور را با کلمات و عبارات متفاوت بیان کنند.
+                prompt = f"""برای پرسش زیر، یک نسخه جایگزین ایجاد کن که همان منظور را با کلمات و عبارات بیشتر و مرتبط ای بیان کند.
 روی گسترش مفاهیم، اضافه کردن مترادف‌ها و در نظر گرفتن اصطلاحات فارسی و انگلیسی تمرکز کن.
 
 پرسش: {query}
@@ -595,11 +546,7 @@ Output:
 فقط یک JSON برگردان با این فرمت:
 {{
     "rewritten_query": "{query}",
-    "expanded_queries": [
-        "نسخه جایگزین اول",
-        "نسخه جایگزین دوم",
-        "نسخه جایگزین سوم"
-    ]
+
 }}
 """
             
