@@ -152,6 +152,46 @@ class KnowledgeContributionResponse(BaseModel):
     }
 
 
+class SyncResponse(BaseModel):
+    """Schema for MongoDB to VectorDB sync operation response."""
+    success: bool = Field(..., description="Indicates if the sync operation completed successfully")
+    processed_count: int = Field(0, description="Number of documents successfully processed")
+    skipped_count: int = Field(0, description="Number of documents skipped (already synced)")
+    error_count: int = Field(0, description="Number of documents that failed to process")
+    total_documents: int = Field(0, description="Total number of documents found in MongoDB")
+    start_time: Optional[str] = Field(None, description="Sync operation start timestamp")
+    end_time: Optional[str] = Field(None, description="Sync operation end timestamp")
+    total_time_seconds: Optional[float] = Field(None, description="Total sync duration in seconds")
+    message: Optional[str] = Field(None, description="Additional message about the sync operation")
+
+    model_config = {
+        "json_schema_extra": {
+            "example_success": {
+                "success": True,
+                "processed_count": 15,
+                "skipped_count": 3,
+                "error_count": 0,
+                "total_documents": 18,
+                "start_time": "2024-06-01T14:10:22+03:30",
+                "end_time": "2024-06-01T14:11:05+03:30",
+                "total_time_seconds": 43.2,
+                "message": "Sync completed successfully"
+            },
+            "example_failure": {
+                "success": False,
+                "processed_count": 0,
+                "skipped_count": 0,
+                "error_count": 5,
+                "total_documents": 5,
+                "start_time": "2024-06-01T14:10:22+03:30",
+                "end_time": "2024-06-01T14:10:25+03:30",
+                "total_time_seconds": 3.0,
+                "message": "Failed to process documents due to connection error"
+            }
+        }
+    }
+
+
 class KnowledgeRemovalResponse(BaseModel):
     """Schema for the knowledge removal API response."""
     success: bool = Field(..., description="Indicates if the removal was successful")

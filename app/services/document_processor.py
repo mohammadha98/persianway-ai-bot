@@ -1,6 +1,6 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import os
-import tempfile
+
 import logging
 import re
 import hashlib
@@ -14,7 +14,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.schema import Document
-from openai import OpenAI
+from app.services.database import DatabaseService
 try:
     from docx import Document as DocxDocument
     from docx.table import Table as DocxTable
@@ -1290,6 +1290,121 @@ class DocumentProcessor:
         logging.info(f"Total pages: {stats['total_pages']}, Total tables: {stats['total_tables']}")
         logging.info(f"Processing time: {stats['processing_time']:.2f} seconds")
         logging.info(f"Statistics saved to: {stats_file}")
+        
+        return stats
+
+    async def sync_mongodb_to_vectordb(self, knowledge_base_service, batch_size: int = 10) -> Dict[str, Any]:
+        """
+        Sync user_contribution documents from MongoDB to vector database.
+        
+        This function retrieves documents with entry_type: "user_contribution" from MongoDB
+        and adds them to the vector database using the add_knowledge_contribution function.
+        
+        Args:
+            knowledge_base_service: An instance of KnowledgeBaseService
+            batch_size: Number of documents to process in each batch
+            
+        Returns:
+            Dictionary with sync statistics including processed_count, skipped_count, and error_count
+        """
+        stats = {
+            'processed_count': 0,
+            'skipped_count': 0,
+            'error_count': 0,
+            'start_time': datetime.now().isoformat(),
+            'processed_documents': [],
+            'failed_documents': []
+        }
+        
+        try:
+            # Initialize database service
+            db_service = DatabaseService()
+            await db_service.connect()
+            
+            
+            
+            # Retrieve user_contribution documents from MongoDB
+            collection = db_service.get_knowledgebase_collection()
+            
+            # Query for user_contribution documents with synced filter
+            query = {"entry_type": {"$in": ["user_contribution"]}, "synced": True}
+            cursor = collection.find(query)
+            documents = await cursor.to_list(length=None)
+            
+            logging.info(f"Found {len(documents)} user_contribution documents in MongoDB")
+            
+            # Process documents in batches
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i:i + batch_size]
+                
+                for doc in batch:
+                    try:
+                        # Extract document fields
+                        title = doc.get('title', '')
+                        content = doc.get('content', '')
+                        meta_tags = doc.get('meta_tags', [])
+                        source = doc.get('source')
+                        author_name = doc.get('author_name')
+                        additional_references = doc.get('additional_references')
+                        uploaded_file_path = doc.get('uploaded_file_path')
+                        is_public = doc.get("is_public", False)
+                        
+                        # Skip documents with missing required fields
+                        if not title or not content:
+                            logging.warning(f"Skipping document {doc.get('_id')}: missing title or content")
+                            stats['skipped_count'] += 1
+                            continue
+                        
+                        # Add to vector database using existing function
+                        result = await knowledge_base_service.add_knowledge_contribution(
+                            title=title,
+                            content=content,
+                            meta_tags=meta_tags,
+                            source=source,
+                            author_name=author_name,
+                            additional_references=additional_references,
+                            uploaded_file_path=uploaded_file_path,
+                            is_public=is_public
+                        )
+                        
+                        stats['processed_count'] += 1
+                        stats['processed_documents'].append({
+                            'document_id': str(doc.get('_id')),
+                            'title': title,
+                            'result': result
+                        })
+                        
+                        logging.info(f"Successfully processed document: {title}")
+                        
+                    except Exception as e:
+                        logging.error(f"Error processing document {doc.get('_id')}: {str(e)}")
+                        stats['error_count'] += 1
+                        stats['failed_documents'].append({
+                            'document_id': str(doc.get('_id')),
+                            'title': doc.get('title', 'Unknown'),
+                            'error': str(e)
+                        })
+                
+                # Small delay between batches to avoid overwhelming the system
+                import asyncio
+                await asyncio.sleep(0.1)
+            
+            # Disconnect from database
+            await db_service.disconnect()
+            
+            # Final statistics
+            stats['end_time'] = datetime.now().isoformat()
+            total_time = (datetime.fromisoformat(stats['end_time']) - 
+                         datetime.fromisoformat(stats['start_time'])).total_seconds()
+            stats['total_time_seconds'] = total_time
+            
+            logging.info(f"Sync completed: {stats['processed_count']} processed, "
+                       f"{stats['skipped_count']} skipped, {stats['error_count']} errors")
+            
+        except Exception as e:
+            logging.error(f"Failed to sync MongoDB to vector database: {str(e)}")
+            stats['error_count'] += 1
+            stats['error_message'] = str(e)
         
         return stats
 

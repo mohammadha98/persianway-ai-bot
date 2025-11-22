@@ -12,7 +12,8 @@ from app.services.document_processor import get_document_processor
 from app.services.hybrid_retrieval import HybridRetrievalService
 from app.services.excel_processor import get_excel_qa_processor
 from app.services.config_service import ConfigService
-
+from app.services.context_condenser import batch_condense
+from langchain_core.documents import Document
 # Set up logging for human referrals
 referral_logger = logging.getLogger("human_referral")
 file_handler = logging.FileHandler("human_referrals.log", encoding="utf-8")
@@ -434,7 +435,7 @@ class KnowledgeBaseService:
         self, 
         query: str, 
         conversation_history: List[Dict[str, str]] = None,
-        max_history: int = 6
+        max_history: int = 4
     ) -> Dict[str, Any]:
         """Rewrite query based on conversation context and expand it for better search results.
         
@@ -442,6 +443,7 @@ class KnowledgeBaseService:
         1. If conversation history exists, rewrites the query to be self-contained
         2. Expands the query (original or rewritten) into multiple variations
         3. Returns all queries for comprehensive search
+
         
         Args:
             query: The original query string
@@ -458,16 +460,14 @@ class KnowledgeBaseService:
         try:
             import json
             
-            llm = await get_llm(model_name="anthropic/claude-3.5-sonnet", temperature=0.1, max_tokens=800)
+            llm = await get_llm(model_name="qwen/qwen3-32b", temperature=0.1, max_tokens=800)
             
             rewritten_query = query
             
-            # Step 1: Rewrite query with conversation context if history exists
+            # Build recent context from conversation history if available
+            recent_context = ""
             if conversation_history:
-                # Take only the most recent messages
                 recent_history = conversation_history[-max_history:] if len(conversation_history) > max_history else conversation_history
-                
-                # Truncate very long messages to avoid token limit
                 truncated_history = []
                 for msg in recent_history:
                     content = msg.get('content', '')
@@ -477,78 +477,59 @@ class KnowledgeBaseService:
                         'role': msg['role'],
                         'content': content
                     })
-                
-                # Build context window
                 recent_context = "\n".join(
                     [f"{msg['role'].capitalize()}: {msg['content']}" for msg in truncated_history]
                 )
-                
-                # Create prompt for contextual rewriting and expansion
-                prompt = f"""**وظیفه‌ات:**
-1. پرسش جدید را **کاملاً مستقل** از گفتگوی قبلی بازنویسی کن
-2. **اشاره‌های ضمنی** را به صراحت جایگزین کن:
-   - "مرحله بعد" → "مرحله دوم" یا "مرحله بعدی از X"
-   - "این" → نام دقیق چیزی که به آن اشاره دارد
-   - "آن محصول" → نام محصول
-   - "همون" → نام دقیق موضوع
+
+            prompt = f"""<|im_start|>system
+You are a Query Expander And Rewriter for "Persian Way" (شرکت پرشین وی) RAG System.
+Your task is to convert the user's input into a **SHORT, PRECISE** query.
+
+**🚨 STRICT CONSTRAINTS:**
+1.  **MAX LENGTH:** Output MUST be less than 25 words.
+2.  **NO FLUFF:** No "comprehensive info", "history", "services".
+3.  **IDENTITY:** "Persian Way" is an company. DO NOT associate with VPN.
+4.  **FORMAT:** Return ONLY JSON.
+
+**⚠️ LOGIC FOR "LAST/FINAL":**
+*   **CASE A (Growth End):** "Last stage" -> Inject "Harvest" (برداشت).
+*   **CASE B (Step End):** "End of step 3" -> Focus on step 3 actions.
+*   **CASE C (Price/Qty):** "Last price" -> Just "Price".
+
+**⚠️ LOGIC FOR SEQUENTIAL QUERIES (AVOID LOOPS):**
+If the user asks for "More", "Next", "The rest" (بقیه، بعدی، دیگه چی):
+1.  **Check History:** See what was just discussed (e.g., Cotton Stages 1 & 2).
+2.  **Target NEW Info:** The query MUST target the *next* steps explicitly.
+    *   User: "دیگه چه مراحلی داره؟" (Context: Covered Stage 1-2)
+    *   ❌ Bad Rewrite: "مراحل کوددهی پنبه" (This fetches stage 1 again!)
+    *   ✅ Good Rewrite: "مراحل سوم تا هشتم کوددهی پنبه" (Targeting specific missing parts)
 
 
----
-**گفتگوی قبلی:**
-{recent_context}
+**FEW-SHOT EXAMPLES:**
+- User: در مورد پرشین وی بگو
+  Output: {{ "rewritten_query": "معرفی شرکت پرشین وی و خدمات" }}
 
-**پرسش جدید:**
+- User: مرحله بعد چیه؟ (Context: Cotton Stage 1)
+  Output: {{ "rewritten_query": "مرحله دوم کوددهی پنبه" }}
+
+- User: مرحله آخرش کی هست؟ (Context: Pistachio)
+  Output: {{ "rewritten_query": "مرحله نهایی کوددهی پسته زمان برداشت" }}
+<|im_end|>
+<|im_start|>user
+**Chat History:**
+{recent_context if recent_context else "No history provided."}
+
+**User's Query:**
 {query}
----
 
----
-**مثال‌های خوب:**
-
-مثال 1:
-گفتگو:
-User: مرحله اول کوددهی به پنبه به چه صورت هست؟
-Bot: مرحله اول با گابری گلدن انجام می‌شود
-
-User: مرحله بعد چیه؟
-
-Output:
+**OUTPUT FORMAT:**
+Return ONLY a JSON object in PERSIAN.
 {{
-    "rewritten_query": "مرحله دوم کوددهی به پنبه چیست؟",
+    "rewritten_query": "رشته جستجوی دقیق"
 }}
-
-مثال 2:
-گفتگو:
-User: محصول مناسب برای کبد چرب چیه؟
-Bot: سیلی مارین و...
-
-User: این محصول چند تومنه؟
-
-Output:
-{{
-    "rewritten_query": "قیمت سیلی مارین چقدر است؟",
-}}
-
----
-**حالا همین کار را برای پرسش بالا انجام بده:**
-
-فقط یک JSON معتبر برگردان با این فرمت:
-{{
-    "rewritten_query": "پرسش بازنویسی‌شده",
-}}
-"""
-            else:
-                # No conversation history - just expand the original query
-                prompt = f"""برای پرسش زیر، یک نسخه جایگزین ایجاد کن که همان منظور را با کلمات و عبارات بیشتر و مرتبط ای بیان کند.
-روی گسترش مفاهیم، اضافه کردن مترادف‌ها و در نظر گرفتن اصطلاحات فارسی و انگلیسی تمرکز کن.
-
-پرسش: {query}
-
-فقط یک JSON برگردان با این فرمت:
-{{
-    "rewritten_query": "{query}",
-
-}}
-"""
+<|im_end|>
+<|im_start|>assistant
+ """
             
             # Call llm for both rewriting and expansion
             response = await llm.ainvoke([
@@ -716,9 +697,6 @@ Output:
             
             logging.info(f"[KB Query] Performing hybrid retrieval (dense + BM25)")
             
-            # TODO: ADD IS_PUBLIC FILTERING FOR HYBRID RETRIEVAL
-            # Prepare base search kwargs (no filter here; filters applied per group)
-            base_search_kwargs = {}
 
             def _validate_is_public(doc) -> bool:
                 doc_is_public = doc.metadata.get("is_public", False)
@@ -737,7 +715,7 @@ Output:
             else:
                 try:
                     hrs = HybridRetrievalService(self.document_processor)
-                    hybrid_docs = await hrs.hybrid_retrieve(search_query)
+                    hybrid_docs = await hrs.hybrid_retrieve(search_query,is_public)
                     hybrid_docs = [doc for doc in hybrid_docs if _validate_is_public(doc)]
                     docs_with_scores = []
                     for doc in hybrid_docs:
@@ -859,7 +837,13 @@ Output:
             # Prepare documents and manual context
             docs = [doc for doc, score in docs_with_scores]
             normalized_docs = self._normalize_documents_for_context(docs)
-     
+            # summaries = await batch_condense(normalized_docs, rewritten_query)
+            # summary_docs = []
+            # for summary in summaries:
+            #         summary_docs.append(Document(
+            #         page_content=summary.get("summary", ""),
+            #         metadata={"source_id": summary.get("source_id", "unknown")}
+            # ))
             result = doc_chain.invoke({"input": rewritten_query, "context": normalized_docs})
             answer = result if isinstance(result, str) else result.get("answer") or result.get("result")
             if answer is None:

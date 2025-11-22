@@ -1,11 +1,10 @@
-from logging import Logger
+
 from typing import Dict, List, Optional, Any
 import json
 import re
 from langchain_community.chat_models import ChatOpenAI
 import logging
 from loguru import logger
-from app.services.spell_corrector import get_spell_corrector
 
 async def get_llm(model_name: str = None, temperature: float = None, max_tokens: int = None, top_p: float = None):
     """Initializes and returns the appropriate language model client.
@@ -198,7 +197,7 @@ class ChatService:
             'سیاست', 'انتخابات', 'دولت', 'مجلس', 'رئیس جمهور', 'وزیر', 'حزب',
             'سیاستمدار', 'رای', 'کاندیدا', 'کابینه', 'پارلمان', 'قانون', 'قضاوت',
             'دادگاه', 'وکیل', 'قاضی', 'جرم', 'مجازات', 'زندان', 'پلیس','جنگ',
-            'سفیر', 'دیپلمات', 'سفارت', 'کنسولگری', 'نماینده', 'سازمان ملل',
+            'سفیر', 'دیپلمات', 'سفارت', 'کنسولگری','سازمان ملل',
             'ناتو', 'اتحادیه اروپا', 'سنا', 'کنگره', 'مذاکره', 'تحریم', 'معاهده',
             'استیضاح', 'فساد', 'رشوه', 'اختلاس', 'براندازی', 'کودتا', 'انقلاب',
             'تظاهرات', 'اعتصاب', 'حقوق بشر', 'سانسور',
@@ -537,9 +536,7 @@ Title:"""
     "   Ending the conversation politely. Examples: 'خداحافظ', 'ممنون، روزتون بخیر'\n\n"
     "6️⃣ SMALL_TALK (گفت‌وگوی کوتاه)\n"
     "   Friendly small talk. Examples: 'حالت چطوره؟', 'روز بخیر'\n\n"
-    "7️⃣ HELP_CAPABILITIES (راهنمای قابلیت‌ها)\n"
-    "   Asking what the assistant can do. Examples: 'چه کار می‌کنی؟', 'چطور کمک می‌کنی؟'\n\n"
-    
+  
     "🎯 DECISION FLOWCHART:\n"
     "═══════════════════════\n\n"
     
@@ -596,7 +593,7 @@ Title:"""
     
     "Respond with valid JSON only:\n"
     "{\n"
-    "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\" | \"GREETING\" | \"FAREWELL\" | \"SMALL_TALK\" | \"HELP_CAPABILITIES\",\n"
+    "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\" | \"GREETING\" | \"FAREWELL\" | \"SMALL_TALK\",\n"
     "  \"category\": \"company_info\" | \"mlm_business\" | \"agriculture\" | \"health\" | \"beauty\" | \"unrelated\",\n"
     "  \"confidence\": 0.0-1.0,\n"
     "  \"explanation\": \"brief reason in English\",\n"
@@ -604,16 +601,14 @@ Title:"""
     "  \"greeting_message\": \"optional: greeting message and introduce yourself as Persianway AI Assistant in Persian if GREETING\"\n"
     "  \"farewell_message\": \"optional: polite closing in Persian if FAREWELL\"\n"
     "  \"small_talk_message\": \"optional: friendly short reply in Persian if SMALL_TALK\"\n"
-    "  \"help_message\": \"optional: capabilities summary in Persian if HELP_CAPABILITIES\"\n"
     "}"
     )
 
 
         try:
             classifier_llm = llm or await get_llm(
-                model_name="openai/gpt-5-mini",
-                temperature=0.3,
-                top_p=0.1
+                model_name="openai/gpt-4o-mini",
+                temperature=0.0,
             )
         except Exception as e:
             logger.error(f"Failed to initialize intent detection LLM: {e}")
@@ -673,7 +668,7 @@ Title:"""
             greeting_message = payload.get("greeting_message")
             farewell_message = payload.get("farewell_message")
             small_talk_message = payload.get("small_talk_message")
-            help_message = payload.get("help_message")
+  
             
             # Validate intent
             if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC", "GREETING", "FAREWELL", "SMALL_TALK", "HELP_CAPABILITIES"]:
@@ -698,7 +693,7 @@ Title:"""
                 "greeting_message": greeting_message,
                 "farewell_message": farewell_message,
                 "small_talk_message": small_talk_message,
-                "help_message": help_message
+            
             }
 
         # Fallback: try old format for backward compatibility
@@ -783,8 +778,8 @@ Title:"""
         try:
             # First, check if the topic is related to our domain
              # Check if the topic is related to the domain
-            is_domain_related, unrelated_keyword = self._is_topic_related_to_domain(message)
-            # is_domain_related = True
+            # is_domain_related, unrelated_keyword = self._is_topic_related_to_domain(message)
+            is_domain_related = True
             # is_domain_related=True
             if not is_domain_related:
                 # Unrelated topic - refer to human
@@ -884,7 +879,7 @@ Title:"""
                         "answer": answer
                     }
                 if intent_result["intent"] == "HELP_CAPABILITIES":
-                    answer = intent_result.get("help_message") or (
+                    answer =  (
                         "من دستیار هوشمند پرشین وی هستم 🤖\nمی‌تونم در این حوزه‌ها کمک کنم:\n\n"
                         "🌱 کشاورزی: کوددهی، آبیاری، آفات، روش‌های کشت\n"
                         "💊 سلامت: دوز مکمل‌ها، تداخل‌ها، تغذیه علمی\n"
@@ -972,7 +967,7 @@ Title:"""
                         
                         # Check if the model indicated it needs human referral
                         if any(indicator in response for indicator in referral_indicators):
-                            answer = HUMAN_REFERRAL_MESSAGE
+                            answer = answer
                             query_analysis["requires_human_referral"] = True
                             query_analysis["reasoning"] = "Model determined the query requires specialist attention."
                         else:

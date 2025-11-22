@@ -73,16 +73,26 @@ class HybridRetrievalService:
         self._bm25_cache[key] = retr
         return retr
 
-    async def _dense_parallel(self, query: str, k: int) -> List[Tuple[Document, float]]:
+    async def _dense_parallel(self, query: str, k: int, is_public: bool = False) -> List[Tuple[Document, float]]:
         if not query.strip():
             return []
         vs = self.vector_store
         if vs is None:
             return []
+        # Create filters with is_public metadata filtering
         filters = {
-            "contrib": {"entry_type": {"$in": ["user_contribution"]}},
-            "docx": {"entry_type": {"$in": ["user_contribution_docx"]}},
-            "excel": {"entry_type": {"$in": ["user_contribution_excel"]}},
+            "contrib": {"$and": [
+                {"entry_type": {"$in": ["user_contribution"]}},
+                {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
+            ]},
+            "docx": {"$and": [
+                {"entry_type": {"$in": ["user_contribution_docx"]}},
+                {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
+            ]},
+            "excel": {"$and": [
+                {"entry_type": {"$in": ["user_contribution_excel"]}},
+                {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
+            ]},
         }
         async def run(f):
             return await asyncio.to_thread(vs.similarity_search_with_score, query, k=k, filter=f)
@@ -94,13 +104,23 @@ class HybridRetrievalService:
             combined.extend(r or [])
         return combined
 
-    def _bm25_parallel(self, query: str, k: int) -> List[Tuple[Document, float]]:
+    def _bm25_parallel(self, query: str, k: int, is_public: bool = False) -> List[Tuple[Document, float]]:
         if not query.strip():
             return []
+        # Create filters with is_public metadata filtering
         filters = {
-            "contrib": {"entry_type": {"$in": ["user_contribution"]}},
-            "docx": {"entry_type": {"$in": ["user_contribution_docx"]}},
-            "excel": {"entry_type": {"$in": ["user_contribution_excel"]}},
+            "contrib": {"$and": [
+                {"entry_type": {"$in": ["user_contribution"]}},
+                {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
+            ]},
+            "docx": {"$and": [
+                {"entry_type": {"$in": ["user_contribution_docx"]}},
+                {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
+            ]},
+            "excel": {"$and": [
+                {"entry_type": {"$in": ["user_contribution_excel"]}},
+                {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
+            ]},
         }
         combined: List[Tuple[Document, float]] = []
         for key, f in filters.items():
@@ -149,10 +169,10 @@ class HybridRetrievalService:
             res[key] = n
         return res
 
-    async def hybrid_retrieve(self, query: str) -> List[Document]:
+    async def hybrid_retrieve(self, query: str, is_public: bool = False) -> List[Document]:
         k = 15
-        dense_pairs = await self._dense_parallel(query, k)
-        bm25_pairs = self._bm25_parallel(query, k)
+        dense_pairs = await self._dense_parallel(query, k, is_public)
+        bm25_pairs = self._bm25_parallel(query, k, is_public)
         dense_norm = self._normalize_dense(dense_pairs)
         bm25_norm = self._normalize_bm25(bm25_pairs)
         keys = set(dense_norm.keys()) | set(bm25_norm.keys())
