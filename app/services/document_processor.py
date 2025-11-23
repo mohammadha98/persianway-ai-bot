@@ -1,6 +1,6 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import os
-import tempfile
+
 import logging
 import re
 import hashlib
@@ -14,7 +14,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.schema import Document
-
+from app.services.database import DatabaseService
 try:
     from docx import Document as DocxDocument
     from docx.table import Table as DocxTable
@@ -34,6 +34,41 @@ except ImportError:
 
 from app.core.config import settings
 
+class OpenRouterEmbeddings:
+    def __init__(self, api_key: str, base_url: str, model: str, referer: str = None, site_title: str = None):
+        from openai import OpenAI
+        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.model = model
+        self.extra_headers = {}
+        if referer:
+            self.extra_headers["HTTP-Referer"] = referer
+        if site_title:
+            self.extra_headers["X-Title"] = site_title
+
+    def embed_query(self, text: str):
+        resp = self.client.embeddings.create(
+            model=self.model,
+            input=text,
+            encoding_format="float",
+            extra_headers=self.extra_headers or None,
+        )
+        data = getattr(resp, "data", None)
+        if not data or not getattr(data[0], "embedding", None):
+            raise ValueError("No embedding data received")
+        return data[0].embedding
+
+    def embed_documents(self, texts: List[str]):
+        resp = self.client.embeddings.create(
+            model=self.model,
+            input=texts,
+            encoding_format="float",
+            extra_headers=self.extra_headers or None,
+        )
+        data = getattr(resp, "data", None)
+        if not data:
+            raise ValueError("No embedding data received")
+        return [item.embedding for item in data]
+
 
 class DocumentProcessor:
     """Service for processing PDF documents and creating vector embeddings.
@@ -45,42 +80,58 @@ class DocumentProcessor:
     def __init__(self):
         """Initialize the document processor."""
         self.docs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "docs")
-        self.persist_directory = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vectordb")
+        self.persist_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vectordb")
         
-        # Create persist directory if it doesn't exist
-        os.makedirs(self.persist_directory, exist_ok=True)
+        os.makedirs(self.persist_root, exist_ok=True)
         
-        # Initialize embeddings
-        # Use OpenAI API key for embeddings (OpenRouter doesn't support embeddings)
-        api_key = settings.OPENAI_API_KEY
-    
-        # Always use the fixed OpenAI embedding regardless of the model provider
-        # This ensures the knowledge base works with both OpenAI and OpenRouter
-        if not api_key or api_key == "":
-            logging.error("OpenAI API key is not configured. Please set OPENAI_API_KEY in your environment.")
-            logging.error("Vector embeddings will not be available. Knowledge base cannot function without embeddings.")
+        openrouter_key = settings.OPENROUTER_API_KEY
+        openai_key = settings.OPENAI_API_KEY
+        try:
+            if openrouter_key and openrouter_key != "":
+                provider = "openrouter"
+                model_name = "qwen/qwen3-embedding-4b"
+                self.embeddings = OpenRouterEmbeddings(
+                    api_key=openrouter_key,
+                    base_url=getattr(settings, "OPENROUTER_API_BASE", "https://openrouter.ai/api/v1"),
+                    model=model_name,
+                )
+                probe = self.embeddings.embed_query("probe")
+                dim = len(probe) if isinstance(probe, (list, tuple)) else 0
+                self.embeddings_available = True
+                # logging.info("OpenRouter embeddings initialized: qwen/qwen3-embedding-0.6b")
+                logging.info("OpenRouter embeddings initialized: qwen/qwen3-embedding-4b")
+            elif openai_key and openai_key != "":
+                provider = "openai"
+                model_name = settings.OPENAI_EMBEDDING_MODEL
+                self.embeddings = OpenAIEmbeddings(
+                    openai_api_key=openai_key,
+                    model=model_name,
+                )
+                probe = self.embeddings.embed_query("probe")
+                dim = len(probe) if isinstance(probe, (list, tuple)) else 0
+                self.embeddings_available = True
+                logging.info("OpenAI embeddings initialized")
+            else:
+                self.embeddings_available = False
+                self.embeddings = None
+                logging.error("Embeddings are not configured. Provide OPENROUTER_API_KEY or OPENAI_API_KEY.")
+                provider = "none"
+                model_name = "none"
+                dim = 0
+        except Exception as e:
+            logging.error(f"Error initializing embeddings: {str(e)}")
             self.embeddings_available = False
             self.embeddings = None
-        else:
-            try:
-                # We'll always try to use the OpenAI embeddings with the provided key
-                self.embeddings = OpenAIEmbeddings(
-                    openai_api_key=api_key,
-                    model=settings.OPENAI_EMBEDDING_MODEL
-                )
-                # Test the embeddings to make sure they work
-                self.embeddings.embed_query("Test query to verify embeddings")
-                self.embeddings_available = True
-                logging.info("OpenAI embeddings initialized successfully.")
-            except Exception as e:
-                # If there's an error with the embeddings, log it and disable embeddings
-                logging.error(f"Error initializing OpenAI embeddings: {str(e)}")
-                logging.error("Vector embeddings will not be available. Knowledge base cannot function without embeddings.")
-                logging.error("Please check your OpenAI API key and network connection.")
-                # Set a flag to indicate that embeddings are not available
-                self.embeddings_available = False
-                # Create a dummy embeddings object that won't be used
-                self.embeddings = None
+            provider = "error"
+            model_name = "error"
+            dim = 0
+
+        self.persist_directory = os.path.join(
+            self.persist_root,
+            f"{provider}-{model_name.replace('/', '_')}-{dim}"
+        )
+        os.makedirs(self.persist_directory, exist_ok=True)
+
         
         # Initialize text splitter for chunking documents
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -116,7 +167,7 @@ class DocumentProcessor:
         """Get or create the vector store."""
         # If embeddings are not available, return None
         if not hasattr(self, 'embeddings_available') or not self.embeddings_available:
-            logging.warning("Cannot access vector store: OpenAI embeddings are not available.")
+            logging.warning("Cannot access vector store: embeddings are not available.")
             return None
             
         if self._vector_store is None:
@@ -1239,6 +1290,121 @@ class DocumentProcessor:
         logging.info(f"Total pages: {stats['total_pages']}, Total tables: {stats['total_tables']}")
         logging.info(f"Processing time: {stats['processing_time']:.2f} seconds")
         logging.info(f"Statistics saved to: {stats_file}")
+        
+        return stats
+
+    async def sync_mongodb_to_vectordb(self, knowledge_base_service, batch_size: int = 10) -> Dict[str, Any]:
+        """
+        Sync user_contribution documents from MongoDB to vector database.
+        
+        This function retrieves documents with entry_type: "user_contribution" from MongoDB
+        and adds them to the vector database using the add_knowledge_contribution function.
+        
+        Args:
+            knowledge_base_service: An instance of KnowledgeBaseService
+            batch_size: Number of documents to process in each batch
+            
+        Returns:
+            Dictionary with sync statistics including processed_count, skipped_count, and error_count
+        """
+        stats = {
+            'processed_count': 0,
+            'skipped_count': 0,
+            'error_count': 0,
+            'start_time': datetime.now().isoformat(),
+            'processed_documents': [],
+            'failed_documents': []
+        }
+        
+        try:
+            # Initialize database service
+            db_service = DatabaseService()
+            await db_service.connect()
+            
+            
+            
+            # Retrieve user_contribution documents from MongoDB
+            collection = db_service.get_knowledgebase_collection()
+            
+            # Query for user_contribution documents with synced filter
+            query = {"entry_type": {"$in": ["user_contribution"]}, "synced": True}
+            cursor = collection.find(query)
+            documents = await cursor.to_list(length=None)
+            
+            logging.info(f"Found {len(documents)} user_contribution documents in MongoDB")
+            
+            # Process documents in batches
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i:i + batch_size]
+                
+                for doc in batch:
+                    try:
+                        # Extract document fields
+                        title = doc.get('title', '')
+                        content = doc.get('content', '')
+                        meta_tags = doc.get('meta_tags', [])
+                        source = doc.get('source')
+                        author_name = doc.get('author_name')
+                        additional_references = doc.get('additional_references')
+                        uploaded_file_path = doc.get('uploaded_file_path')
+                        is_public = doc.get("is_public", False)
+                        
+                        # Skip documents with missing required fields
+                        if not title or not content:
+                            logging.warning(f"Skipping document {doc.get('_id')}: missing title or content")
+                            stats['skipped_count'] += 1
+                            continue
+                        
+                        # Add to vector database using existing function
+                        result = await knowledge_base_service.add_knowledge_contribution(
+                            title=title,
+                            content=content,
+                            meta_tags=meta_tags,
+                            source=source,
+                            author_name=author_name,
+                            additional_references=additional_references,
+                            uploaded_file_path=uploaded_file_path,
+                            is_public=is_public
+                        )
+                        
+                        stats['processed_count'] += 1
+                        stats['processed_documents'].append({
+                            'document_id': str(doc.get('_id')),
+                            'title': title,
+                            'result': result
+                        })
+                        
+                        logging.info(f"Successfully processed document: {title}")
+                        
+                    except Exception as e:
+                        logging.error(f"Error processing document {doc.get('_id')}: {str(e)}")
+                        stats['error_count'] += 1
+                        stats['failed_documents'].append({
+                            'document_id': str(doc.get('_id')),
+                            'title': doc.get('title', 'Unknown'),
+                            'error': str(e)
+                        })
+                
+                # Small delay between batches to avoid overwhelming the system
+                import asyncio
+                await asyncio.sleep(0.1)
+            
+            # Disconnect from database
+            await db_service.disconnect()
+            
+            # Final statistics
+            stats['end_time'] = datetime.now().isoformat()
+            total_time = (datetime.fromisoformat(stats['end_time']) - 
+                         datetime.fromisoformat(stats['start_time'])).total_seconds()
+            stats['total_time_seconds'] = total_time
+            
+            logging.info(f"Sync completed: {stats['processed_count']} processed, "
+                       f"{stats['skipped_count']} skipped, {stats['error_count']} errors")
+            
+        except Exception as e:
+            logging.error(f"Failed to sync MongoDB to vector database: {str(e)}")
+            stats['error_count'] += 1
+            stats['error_message'] = str(e)
         
         return stats
 

@@ -1,11 +1,10 @@
-from logging import Logger
+
 from typing import Dict, List, Optional, Any
 import json
 import re
 from langchain_community.chat_models import ChatOpenAI
 import logging
 from loguru import logger
-from app.services.spell_corrector import get_spell_corrector
 
 async def get_llm(model_name: str = None, temperature: float = None, max_tokens: int = None, top_p: float = None):
     """Initializes and returns the appropriate language model client.
@@ -198,7 +197,7 @@ class ChatService:
             'سیاست', 'انتخابات', 'دولت', 'مجلس', 'رئیس جمهور', 'وزیر', 'حزب',
             'سیاستمدار', 'رای', 'کاندیدا', 'کابینه', 'پارلمان', 'قانون', 'قضاوت',
             'دادگاه', 'وکیل', 'قاضی', 'جرم', 'مجازات', 'زندان', 'پلیس','جنگ',
-            'سفیر', 'دیپلمات', 'سفارت', 'کنسولگری', 'نماینده', 'سازمان ملل',
+            'سفیر', 'دیپلمات', 'سفارت', 'کنسولگری','سازمان ملل',
             'ناتو', 'اتحادیه اروپا', 'سنا', 'کنگره', 'مذاکره', 'تحریم', 'معاهده',
             'استیضاح', 'فساد', 'رشوه', 'اختلاس', 'براندازی', 'کودتا', 'انقلاب',
             'تظاهرات', 'اعتصاب', 'حقوق بشر', 'سانسور',
@@ -522,7 +521,22 @@ Title:"""
     "   ✓ 'آب‌وهوای تهران چطوره؟' (weather)\n\n"
     
     "═══════════════════════════════\n\n"
-    
+
+    "4️⃣ GREETING (سلام و شروع مکالمه)\n"
+    "   Simple greetings or pleasantries indicating the user starts a conversation:\n"
+    "   Examples:\n"
+    "   ✓ 'سلام'\n"
+    "   ✓ 'درود'\n"
+    "   ✓ 'خسته نباشید'\n"
+    "   ✓ 'سلام وقت بخیر'\n"
+    "   ✓ 'hello'\n"
+    "   ✓ 'hi'\n"
+    "   ✓ 'hey'\n\n"
+    "5️⃣ FAREWELL (خداحافظی)\n"
+    "   Ending the conversation politely. Examples: 'خداحافظ', 'ممنون، روزتون بخیر'\n\n"
+    "6️⃣ SMALL_TALK (گفت‌وگوی کوتاه)\n"
+    "   Friendly small talk. Examples: 'حالت چطوره؟', 'روز بخیر'\n\n"
+  
     "🎯 DECISION FLOWCHART:\n"
     "═══════════════════════\n\n"
     
@@ -579,20 +593,22 @@ Title:"""
     
     "Respond with valid JSON only:\n"
     "{\n"
-    "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\",\n"
+    "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\" | \"GREETING\" | \"FAREWELL\" | \"SMALL_TALK\",\n"
     "  \"category\": \"company_info\" | \"mlm_business\" | \"agriculture\" | \"health\" | \"beauty\" | \"unrelated\",\n"
     "  \"confidence\": 0.0-1.0,\n"
     "  \"explanation\": \"brief reason in English\",\n"
     "  \"off_topic_message\": \"optional: redirect message in Persian if OFF_TOPIC\"\n"
+    "  \"greeting_message\": \"optional: greeting message and introduce yourself as Persianway AI Assistant in Persian if GREETING\"\n"
+    "  \"farewell_message\": \"optional: polite closing in Persian if FAREWELL\"\n"
+    "  \"small_talk_message\": \"optional: friendly short reply in Persian if SMALL_TALK\"\n"
     "}"
     )
 
 
         try:
             classifier_llm = llm or await get_llm(
-                model_name="mistralai/mistral-small-3.1-24b-instruct",
-                temperature=0.1,
-                top_p=0.1
+                model_name="openai/gpt-4o-mini",
+                temperature=0.0,
             )
         except Exception as e:
             logger.error(f"Failed to initialize intent detection LLM: {e}")
@@ -649,9 +665,13 @@ Title:"""
             explanation = payload.get("explanation", "No explanation provided")
             clarification_prompt = payload.get("clarification_prompt")
             off_topic_message = payload.get("off_topic_message")
+            greeting_message = payload.get("greeting_message")
+            farewell_message = payload.get("farewell_message")
+            small_talk_message = payload.get("small_talk_message")
+  
             
             # Validate intent
-            if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC"]:
+            if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC", "GREETING", "FAREWELL", "SMALL_TALK", "HELP_CAPABILITIES"]:
                 logger.warning(f"Invalid intent '{intent}', defaulting to PRIVATE")
                 intent = "PRIVATE"
             
@@ -669,7 +689,11 @@ Title:"""
                 "is_public": is_public,
                 "explanation": explanation,
                 "clarification_prompt": clarification_prompt,
-                "off_topic_message": off_topic_message
+                "off_topic_message": off_topic_message,
+                "greeting_message": greeting_message,
+                "farewell_message": farewell_message,
+                "small_talk_message": small_talk_message,
+            
             }
 
         # Fallback: try old format for backward compatibility
@@ -754,8 +778,8 @@ Title:"""
         try:
             # First, check if the topic is related to our domain
              # Check if the topic is related to the domain
-            is_domain_related, unrelated_keyword = self._is_topic_related_to_domain(message)
-            # is_domain_related = True
+            # is_domain_related, unrelated_keyword = self._is_topic_related_to_domain(message)
+            is_domain_related = True
             # is_domain_related=True
             if not is_domain_related:
                 # Unrelated topic - refer to human
@@ -792,6 +816,85 @@ Title:"""
                     conversation.memory.chat_memory.add_user_message(message)
                     conversation.memory.chat_memory.add_ai_message(answer)
                     
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                if intent_result["intent"] == "GREETING":
+                    answer =  intent_result.get("greeting_message") or (
+                        "درود! خوش آمدید به پرشین وی 🌷\n\n"
+                        "می‌تونید در این زمینه‌ها سوال بپرسید:\n\n"
+                        "🌱 کشاورزی: کاشت، داشت، کوددهی، آبیاری، کنترل آفات\n"
+                        "💊 سلامت: مکمل‌ها، تداخل‌ها، دوز مصرف، تغذیه\n"
+                        "💄 زیبایی: مراقبت از پوست، ترکیبات، روتین‌ها\n"
+                        "🏢 اطلاعات شرکت: ثبت‌نام، پورسانت، قوانین، سفارش و ارسال\n\n"
+                        "هر سوالی دارید بفرمایید؛ با کمال میل راهنمایی می‌کنم."
+                    )
+                    query_analysis["confidence_score"] = 0.5
+                    query_analysis["knowledge_source"] = "greeting"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "User initiated conversation with a greeting."
+                    response_parameters["temperature"] = 0.2
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                if intent_result["intent"] == "FAREWELL":
+                    answer = intent_result.get("farewell_message") or (
+                        "سپاس از همراهی شما 🌟\nاگر سوال دیگری دارید در هر زمان خوشحال می‌شوم کمک کنم. روزتون بخیر!"
+                    )
+                    query_analysis["confidence_score"] = 0.5
+                    query_analysis["knowledge_source"] = "farewell"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "User ended the conversation."
+                    response_parameters["temperature"] = 0.2
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                if intent_result["intent"] == "SMALL_TALK":
+                    answer = intent_result.get("small_talk_message") or (
+                        "روز شما هم بخیر 😊\nدر چه زمینه‌ای می‌تونم کمک کنم؟ کشاورزی، سلامت، زیبایی یا اطلاعات شرکت؟"
+                    )
+                    query_analysis["confidence_score"] = 0.5
+                    query_analysis["knowledge_source"] = "small_talk"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "User engaged in small talk."
+                    response_parameters["temperature"] = 0.2
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                if intent_result["intent"] == "HELP_CAPABILITIES":
+                    answer =  (
+                        "من دستیار هوشمند پرشین وی هستم 🤖\nمی‌تونم در این حوزه‌ها کمک کنم:\n\n"
+                        "🌱 کشاورزی: کوددهی، آبیاری، آفات، روش‌های کشت\n"
+                        "💊 سلامت: دوز مکمل‌ها، تداخل‌ها، تغذیه علمی\n"
+                        "💄 زیبایی: روتین‌ها، ترکیبات، درمان‌های پوستی\n"
+                        "🏢 اطلاعات شرکت: ثبت‌نام، پورسانت، قوانین، سفارش\n\n"
+                        "کافیه سوالتون رو همین‌جا بپرسید تا راهنمایی کنم."
+                    )
+                    query_analysis["confidence_score"] = 0.6
+                    query_analysis["knowledge_source"] = "help_capabilities"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "User asked for assistant capabilities."
+                    response_parameters["temperature"] = 0.2
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
                     return {
                         "query_analysis": query_analysis,
                         "response_parameters": response_parameters,
@@ -864,7 +967,7 @@ Title:"""
                         
                         # Check if the model indicated it needs human referral
                         if any(indicator in response for indicator in referral_indicators):
-                            answer = HUMAN_REFERRAL_MESSAGE
+                            answer = answer
                             query_analysis["requires_human_referral"] = True
                             query_analysis["reasoning"] = "Model determined the query requires specialist attention."
                         else:
