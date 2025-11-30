@@ -114,6 +114,7 @@ async def get_rag_settings(config_service: ConfigService = Depends(get_config_se
     """Get current RAG settings."""
     try:
         rag_settings = await config_service.get_rag_settings()
+
         return {
             "success": True,
             "message": "RAG settings retrieved successfully",
@@ -154,13 +155,16 @@ async def get_app_settings(config_service: ConfigService = Depends(get_config_se
 @router.put("/llm", response_model=Dict[str, Any])
 async def update_llm_settings(
     settings: Dict[str, Any],
-    config_service: ConfigService = Depends(get_config_service)
+    config_service: ConfigService = Depends(get_config_service),
+    kb_service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+    chat_service: ChatService = Depends(get_chat_service),
 ):
     """Update LLM settings only."""
     try:
         updates = {"llm_settings": settings}
         updated_config = await config_service.update_config(updates)
-        
+        await kb_service.refresh()
+        await chat_service.refresh()
         return {
             "success": True,
             "message": "LLM settings updated successfully",
@@ -174,13 +178,16 @@ async def update_llm_settings(
 @router.put("/rag", response_model=Dict[str, Any])
 async def update_rag_settings(
     settings: Dict[str, Any],
-    config_service: ConfigService = Depends(get_config_service)
+    config_service: ConfigService = Depends(get_config_service),
+    kb_service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+    chat_service: ChatService = Depends(get_chat_service),
 ):
     """Update RAG settings only."""
     try:
         updates = {"rag_settings": settings}
         updated_config = await config_service.update_config(updates)
-        
+        await kb_service.refresh()
+        await chat_service.refresh()
         return {
             "success": True,
             "message": "RAG settings updated successfully",
