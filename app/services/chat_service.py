@@ -97,6 +97,9 @@ async def get_llm(model_name: str = None, temperature: float = None, max_tokens:
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationChain
+from langchain.agents import initialize_agent, AgentType
+from langchain.chains.base import Chain
+from app.services.utility import search_persianway
 
 from app.core.config import settings
 from app.schemas.chat import ChatMessage
@@ -118,7 +121,7 @@ class ChatService:
     
     def __init__(self):
         """Initialize the chat service."""
-        self._sessions: Dict[str, ConversationChain] = {}
+        self._sessions: Dict[str, Chain] = {}
         self._memories: Dict[str, ConversationBufferMemory] = {}
         self.config_service = ConfigService()
         self.generalAnswer = False
@@ -127,14 +130,15 @@ class ChatService:
         
 
     
-    async def _get_or_create_session(self, user_id: str, model: str = None, parameters: dict = None) -> ConversationChain:
+    async def _get_or_create_session(self, user_id: str, model: str = None, parameters: dict = None) -> Chain:
+        logger.debug(f"[DEBUG] _get_or_create_session called with model: {model}")
         """Get an existing chat session or create a new one.
         
         Args:
             user_id: Unique identifier for the user session
             
         Returns:
-            A LangChain ConversationChain for the user
+            A LangChain Chain for the user
         """
         await self._ensure_latest_config()
         if user_id not in self._sessions:
@@ -143,23 +147,36 @@ class ChatService:
             rag_settings = await self.config_service.get_rag_settings()
             
             # Create a new memory for this user
-            memory = ConversationBufferMemory(return_messages=True)
+            # AgentExecutor expects 'chat_history' key for memory by default in some configurations,
+            # but OPENAI_FUNCTIONS agent handles it. We'll stick to defaults or 'chat_history'.
+            memory = ConversationBufferMemory(return_messages=True, memory_key="chat_history")
             self._memories[user_id] = memory
             
             # Create a new chat model with the configured settings
             params = parameters or {}
-            llm = await get_llm()
+            llm = await get_llm(model_name=model)
             
-            # Create a conversation chain with the memory
-            self._sessions[user_id] = ConversationChain(
-                llm=llm,
-                memory=memory,
-                verbose=False
-            )
-            
-            # Add system prompt to establish model behavior for general knowledge responses
+            # Add system prompt
             system_prompt = rag_settings.system_prompt
-            self._sessions[user_id].memory.chat_memory.add_message(SystemMessage(content=system_prompt))
+            
+            # Initialize agent with tools
+            tools = [search_persianway]
+            
+            # For STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION, we use 'prefix' to set the system prompt/persona
+            agent_kwargs = {
+                "prefix": system_prompt
+            }
+            
+            # Use initialize_agent with STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION as OPENAI_FUNCTIONS is deprecated/rejected by provider
+            self._sessions[user_id] = initialize_agent(
+                tools=tools,
+                llm=llm,
+                agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
+                verbose=True,
+                memory=memory,
+                agent_kwargs=agent_kwargs,
+                handle_parsing_errors=True
+            )
         
         return self._sessions[user_id]
 
@@ -288,6 +305,42 @@ class ChatService:
         # For all other queries, assume they are related to the domain
         return True, None
 
+
+    async def _get_search_decision(self, message: str, model_name: str = "gpt-4o-mini") -> Dict[str, Any]:
+        llm = await get_llm(model_name=model_name)
+        prompt = (
+            "You decide whether a web search on persianway.ir is needed for a user message.\n"
+            "Return ONLY a JSON object with keys search_needed and search_query.\n"
+            "search_needed must be true or false.\n"
+            "If search_needed is false, search_query must be an empty string.\n"
+            "If search_needed is true, search_query must be a concise Persian query about PersianWay products or services.\n"
+            f"User message: {message}"
+        )
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        raw = response.content.strip()
+        parsed = None
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            match = re.search(r"\{[\s\S]*\}", raw)
+            if match:
+                try:
+                    parsed = json.loads(match.group(0))
+                except Exception:
+                    parsed = None
+        if not isinstance(parsed, dict):
+            logger.warning(f"Search decision parsing failed. Raw response: {raw}")
+            return {"search_needed": False, "search_query": ""}
+        search_needed = parsed.get("search_needed", False)
+        if isinstance(search_needed, str):
+            search_needed = search_needed.strip().lower() in ["true", "1", "yes"]
+        search_query = parsed.get("search_query", "")
+        if search_query is None:
+            search_query = ""
+        search_query = str(search_query).strip()
+        if not search_needed or not search_query:
+            return {"search_needed": False, "search_query": ""}
+        return {"search_needed": True, "search_query": search_query}
 
 
     async def generate_conversation_title(self, message: str) -> str:
@@ -729,6 +782,7 @@ Title:"""
         }
 
     async def process_message(self, user_id: str, message: str, conversation_history: List = None, model: str = None, parameters: dict = None) -> Dict[str, Any]:
+        logger.debug(f"[DEBUG] process_message called with model: {model}")
         """Process a user message using a hybrid approach.
 
         This service implements a three-tier approach:
@@ -905,8 +959,15 @@ Title:"""
                 # Proceed with knowledge base query
                 is_public = intent_result["is_public"]
                 try:
+                     
+                    search_decision = await self._get_search_decision(message, model_name="gpt-4o-mini")
+                    logger.debug(f"Search decision: {search_decision}")
+                    search_result = None
+                    if search_decision["search_needed"]:
+                        search_result = search_persianway(search_decision["search_query"])
+                            
                     kb_service = get_knowledge_base_service()
-                    kb_result = await kb_service.query_knowledge_base(message, conversation_history, is_public)
+                    kb_result = await kb_service.query_knowledge_base(message, conversation_history, is_public,search_result)
                     kb_confidence = kb_result.get("confidence_score", 0) if kb_result else 0
                     logger.debug(f"[DEBUG] KB raw confidence: {kb_confidence:.3f}")
                 except RuntimeError as kb_error:
@@ -960,23 +1021,67 @@ Title:"""
                     # Low KB confidence - check if general answers are allowed
                     if self.generalAnswer:
                         # Domain-related but low confidence - try general knowledge as fallback
-                        conversation = await self._get_or_create_session(user_id, model, parameters)
+                        logger.info("Low KB confidence. Attempting Web Search Integration...")
                         
-                        # Get response using general knowledge. The conversation object already has the system prompt.
-                        response = conversation.predict(input=message)
-                        
-                        # Check if the model indicated it needs human referral
-                        if any(indicator in response for indicator in referral_indicators):
-                            answer = answer
-                            query_analysis["requires_human_referral"] = True
-                            query_analysis["reasoning"] = "Model determined the query requires specialist attention."
-                        else:
-                            answer = response
-                            query_analysis["confidence_score"] = 0.6  # Assign a default confidence for general knowledge
-                            query_analysis["knowledge_source"] = "general_knowledge"
-                            query_analysis["requires_human_referral"] = False
-                            query_analysis["reasoning"] = "Answer provided from general knowledge."
-                            response_parameters["temperature"] = 0.3  # Moderate temperature for general knowledge
+                        try:
+                            search_decision = await self._get_search_decision(message, model_name=model)
+                            logger.debug(f"Search decision: {search_decision}")
+                            if search_decision["search_needed"]:
+                                search_result = search_persianway(search_decision["search_query"])
+                                kb_result_search = await kb_service.query_knowledge_base(
+                                    message, 
+                                    conversation_history, 
+                                    is_public, 
+                                    external_context=search_result
+                                )
+                                
+                                response = kb_result_search["answer"]
+                                final_confidence = kb_result_search.get("confidence_score", 0.0)
+                                
+                                if any(indicator in response for indicator in referral_indicators):
+                                    answer = response
+                                    query_analysis["requires_human_referral"] = True
+                                    query_analysis["reasoning"] = "Web search did not yield sufficient information."
+                                else:
+                                    answer = response
+                                    query_analysis["confidence_score"] = max(0.6, final_confidence)
+                                    query_analysis["knowledge_source"] = "web_search_augmented"
+                                    query_analysis["requires_human_referral"] = False
+                                    query_analysis["reasoning"] = "Answer provided via Web Search integration with Knowledge Base."
+                                    response_parameters["temperature"] = 0.2
+                            else:
+                                conversation = await self._get_or_create_session(user_id, model, parameters)
+                                response = conversation.run(message)
+                                
+                                if any(indicator in response for indicator in referral_indicators):
+                                    answer = response
+                                    query_analysis["requires_human_referral"] = True
+                                    query_analysis["reasoning"] = "Model determined the query requires specialist attention."
+                                else:
+                                    answer = response
+                                    query_analysis["confidence_score"] = 0.6
+                                    query_analysis["knowledge_source"] = "general_knowledge"
+                                    query_analysis["requires_human_referral"] = False
+                                    query_analysis["reasoning"] = "Answer provided from general knowledge (fallback)."
+                                    response_parameters["temperature"] = 0.3
+                                
+                        except Exception as search_error:
+                            logger.error(f"Web search integration failed: {search_error}")
+                            # Fallback to original Agent logic if search integration fails
+                            conversation = await self._get_or_create_session(user_id, model, parameters)
+                            response = conversation.run(message)
+                            
+                            if any(indicator in response for indicator in referral_indicators):
+                                answer = response
+                                query_analysis["requires_human_referral"] = True
+                                query_analysis["reasoning"] = "Model determined the query requires specialist attention."
+                            else:
+                                answer = response
+                                query_analysis["confidence_score"] = 0.6
+                                query_analysis["knowledge_source"] = "general_knowledge"
+                                query_analysis["requires_human_referral"] = False
+                                query_analysis["reasoning"] = "Answer provided from general knowledge (fallback)."
+                                response_parameters["temperature"] = 0.3
                     else:
                         # General answers are disabled - refer to human
                         answer = HUMAN_REFERRAL_MESSAGE
@@ -1000,6 +1105,9 @@ Title:"""
             }
 
         except Exception as e:
+            logger.error(f"Error in process_message: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             error_msg = f"Error processing message: {str(e)}"
             # Fallback to human referral on any processing error
             query_analysis["requires_human_referral"] = True

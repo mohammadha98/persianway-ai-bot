@@ -13,6 +13,7 @@ from app.services.hybrid_retrieval import HybridRetrievalService
 from app.services.excel_processor import get_excel_qa_processor
 from app.services.config_service import ConfigService
 from app.services.context_condenser import batch_condense
+from app.services.utility import search_persianway
 from langchain_core.documents import Document
 # Set up logging for human referrals
 referral_logger = logging.getLogger("human_referral")
@@ -632,7 +633,7 @@ Return ONLY a JSON object in PERSIAN.
 
 
 
-    async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False) -> Dict[str, Any]:
+    async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False, external_context: str = None) -> Dict[str, Any]:
         """Query the knowledge base with a question using improved retrieval strategy.
         
         Improvements:
@@ -645,6 +646,7 @@ Return ONLY a JSON object in PERSIAN.
             query: The question to ask
             conversation_history: Previous conversation messages for context
             is_public: When True, restricts retrieval to documents tagged with public metadata
+            external_context: Optional string containing external information (e.g., web search results) to be included in the context
             
         Returns:
             A dictionary with the answer, confidence score, and source information
@@ -836,6 +838,21 @@ Return ONLY a JSON object in PERSIAN.
                 
             # Prepare documents and manual context
             docs = [doc for doc, score in docs_with_scores]
+            
+            # Incorporate external context (e.g., web search results)
+            if external_context:
+                logging.info("[KB Query] Incorporating external context into response generation")
+                external_doc = Document(
+                    page_content=f"External Information (Web Search):\n{external_context}",
+                    metadata={
+                        "source": "Web Search",
+                        "source_type": "external_web_search",
+                        "title": "Web Search Results",
+                        "is_public": True
+                    }
+                )
+                docs.append(external_doc)
+                
             normalized_docs = self._normalize_documents_for_context(docs)
             # summaries = await batch_condense(normalized_docs, rewritten_query)
             # summary_docs = []
