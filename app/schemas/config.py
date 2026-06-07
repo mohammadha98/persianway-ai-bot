@@ -99,6 +99,16 @@ class AppSettings(BaseModel):
     debug: bool = Field(default=False, description="Debug mode")
     allowed_hosts: List[str] = Field(default_factory=lambda: ["*"], description="Allowed hosts")
 
+class TavilySearchSettings(BaseModel):
+    tavily_api_key: Optional[str] = Field(default=None, description="Dynamic Tavily API key")
+    is_enabled: bool = Field(default=True, description="Enable/disable Tavily web search")
+    search_depth: str = Field(default="advanced", description="Search depth: basic or advanced")
+    max_results: int = Field(default=5, ge=1, le=20, description="Maximum number of results to return")
+    include_answer: bool = Field(default=True, description="Include AI-generated answer from Tavily")
+    include_domains: List[str] = Field(default_factory=list, description="Domains to restrict search to")
+    exclude_domains: List[str] = Field(default_factory=list, description="Domains to exclude from search")
+    snippet_length: int = Field(default=200, gt=0, description="Character limit for result snippet formatting")
+
 
 class DynamicConfig(BaseModel):
     """Schema for the complete dynamic configuration."""
@@ -107,6 +117,7 @@ class DynamicConfig(BaseModel):
     rag_settings: RAGSettings = Field(default_factory=RAGSettings, description="RAG configuration")
     database_settings: DatabaseSettings = Field(default_factory=DatabaseSettings, description="Database configuration")
     app_settings: AppSettings = Field(default_factory=AppSettings, description="Application configuration")
+    tavily_settings: TavilySearchSettings = Field(default_factory=TavilySearchSettings, description="Tavily web search settings")
     is_active: bool = Field(default=True, description="Whether this configuration is active")
     created_at: Optional[str] = Field(default=None, description="Creation timestamp")
     updated_at: Optional[str] = Field(default=None, description="Last update timestamp")
@@ -144,6 +155,7 @@ class ConfigUpdateRequest(BaseModel):
     rag_settings: Optional[RAGSettings] = Field(default=None, description="RAG settings to update")
     database_settings: Optional[DatabaseSettings] = Field(default=None, description="Database settings to update")
     app_settings: Optional[AppSettings] = Field(default=None, description="App settings to update")
+    tavily_settings: Optional[TavilySearchSettings] = Field(default=None, description="Tavily search settings to update")
 
 
 class ConfigResponse(BaseModel):

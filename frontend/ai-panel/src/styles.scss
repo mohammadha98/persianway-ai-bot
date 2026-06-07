@@ -3,10 +3,10 @@
 // Import Angular Material prebuilt theme
 @import '@angular/material/prebuilt-themes/indigo-pink.css';
 
-// Import modern Persian fonts
-@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100;200;300;400;500;600;700;800;900&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@100;200;300;400;500;600;700;800;900&display=swap');
-@import url('https://cdn.jsdelivr.net/gh/rastikerdar/shabnam-font@v5.0.1/dist/font-face.css');
+@import url("https://cdn.jsdelivr.net/npm/vazirmatn@33.0.3/Vazirmatn-font-face.css");
+@import url("https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-arabic/index.css");
+/* لینک شبنم که خودتان داشتید: */
+@import url("https://cdn.jsdelivr.net/gh/rastikerdar/shabnam-font@v5.0.1/dist/font-face.css");
 
 // Global styles
 * {

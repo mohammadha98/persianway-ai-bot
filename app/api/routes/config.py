@@ -56,6 +56,9 @@ async def update_configuration(
         if request.app_settings is not None:
             updates["app_settings"] = request.app_settings.dict(exclude_none=True)
         
+        if request.tavily_settings is not None:
+            updates["tavily_settings"] = request.tavily_settings.dict(exclude_none=True)
+        
         if not updates:
             return ConfigResponse(
                 success=False,
@@ -151,6 +154,19 @@ async def get_app_settings(config_service: ConfigService = Depends(get_config_se
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve application settings: {str(e)}")
 
+@router.get("/tavily", response_model=Dict[str, Any])
+async def get_tavily_settings(config_service: ConfigService = Depends(get_config_service)):
+    try:
+        config = await config_service.get_config()
+        tavily_settings = config.tavily_settings
+        return {
+            "success": True,
+            "message": "Tavily settings retrieved successfully",
+            "settings": tavily_settings.dict()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve Tavily settings: {str(e)}")
+
 
 @router.put("/llm", response_model=Dict[str, Any])
 async def update_llm_settings(
@@ -196,3 +212,23 @@ async def update_rag_settings(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update RAG settings: {str(e)}")
+
+@router.put("/tavily", response_model=Dict[str, Any])
+async def update_tavily_settings(
+    settings: Dict[str, Any],
+    config_service: ConfigService = Depends(get_config_service),
+    kb_service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+    chat_service: ChatService = Depends(get_chat_service),
+):
+    try:
+        updates = {"tavily_settings": settings}
+        updated_config = await config_service.update_config(updates)
+        await kb_service.refresh()
+        await chat_service.refresh()
+        return {
+            "success": True,
+            "message": "Tavily settings updated successfully",
+            "settings": updated_config.tavily_settings.dict()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update Tavily settings: {str(e)}")

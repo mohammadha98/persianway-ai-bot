@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorCollection
 
-from app.schemas.config import DynamicConfig, LLMSettings, RAGSettings, DatabaseSettings, AppSettings
+from app.schemas.config import DynamicConfig, LLMSettings, RAGSettings, DatabaseSettings, AppSettings, TavilySearchSettings
 from app.utils.validators import validate_rag_settings
 from app.core.config import settings as static_settings
 from app.services.database import get_database_service
@@ -96,6 +96,9 @@ class ConfigService:
                 debug=static_settings.DEBUG,
                 allowed_hosts=static_settings.ALLOWED_HOSTS
             ),
+            tavily_settings=TavilySearchSettings(
+                tavily_api_key=static_settings.TAVILY_API_KEY
+            ),
             is_active=True,
             created_at=datetime.utcnow().isoformat(),
             updated_at=datetime.utcnow().isoformat()
@@ -158,6 +161,11 @@ class ConfigService:
         )
         
         logger.info("Configuration saved to database")
+    
+    async def clear_cache(self):
+        """Invalidate cached configuration to force reload from database."""
+        self._cached_config = None
+        logger.info("Configuration cache cleared")
     
     async def reset_to_defaults(self) -> DynamicConfig:
         """Reset configuration to default values from static settings."""
