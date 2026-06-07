@@ -2,7 +2,7 @@
 from typing import Dict, List, Optional, Any
 import json
 import re
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 import logging
 from loguru import logger
 

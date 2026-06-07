@@ -18,7 +18,7 @@ joblib>=1.2.0
 langchain>=0.0.267
 openai>=0.27.8
 langchain-community>=0.0.267
-
+langchain-openai
 # RAG dependencies
 chromadb>=0.4.6
 tiktoken>=0.4.0
