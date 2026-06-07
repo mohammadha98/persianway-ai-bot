@@ -487,175 +487,129 @@ Title:"""
     
     "PersianWay is a Network Marketing company operating under Iranian MLM regulations.\n"
     "The company has THREE main product areas: Agriculture, Health, and Beauty.\n\n"
+
+    "🛍️ PRODUCT CATALOG CONTEXT (List of Key Items Sold):\n"
+    "════════════════════════════════════════════════════\n"
+    "The user may refer to these specific products. Treat them as COMPANY PRODUCTS, not general concepts:\n"
+    "• Drinks & Beverages: Kombucha (کامبوچا), Aloe Vera (آلوئه‌ورا), Energy Drinks, Herbal Teas\n"
+    "• Supplements: Gabri Golden (گابری گلدن), Ganoderma (گانودرما), Ginseng (جینسینگ)\n"
+    "• Health & Personal Care: Hand Creams, Shampoos, Body Splash, Masks\n"
+    "• Brands: Hapix, Celux, Frei Öl, Magical, Dream World, PersianWay\n"
+    "• Agriculture: Fertilizers (کود), Pesticides (سم), Growth promoters\n\n"
     
     "📋 CLASSIFICATION CATEGORIES:\n"
     "═══════════════════════════════\n\n"
     
-    "1️⃣ PUBLIC (اطلاعات عمومی شرکت)\n"
-    "   ALL questions about the company, its operations, and network marketing business:\n"
+    "1️⃣ PUBLIC (اطلاعات عمومی شرکت و محصولات)\n"
+    "   ALL questions about the company, business operations, AND product identification:\n"
     "   \n"
-    "   🏢 Company Information:\n"
-    "   • Company history, establishment, licenses\n"
-    "   • Mission, vision, values, brand information\n"
-    "   • Office locations, contact details, addresses\n"
-    "   • Organizational structure, management team\n"
-    "   • All brands (Hapix, Celux, Frei Öl, Magical, Dream World)\n"
+    "   🏢 Company & Product Identity:\n"
+    "   • 'What is [Product Name]?' (Product definitions)\n"
+    "   • Identifying specific products (Gabri, Kombucha, Aloe Vera, etc.)\n"
+    "   • Company history, licenses, office locations\n"
+    "   • All brands info (Hapix, Celux, etc.)\n"
     "   \n"
     "   💼 Network Marketing Business Operations:\n"
-    "   • Membership & Registration (ثبت‌نام، عضویت، جایگاه)\n"
-    "   • Commission & Compensation (پورسانت، درآمد، پاداش)\n"
-    "   • Violations & Penalties (تخلفات، مجازات، اخطار)\n"
-    "   • License & Permits (پروانه کسب، مجوز فعالیت)\n"
-    "   • Network Status (فعال/غیرفعال، تعلیق، نماد)\n"
-    "   • MLM Regulations (آیین‌نامه، قوانین، مقررات)\n"
-    "   • Distributor Rights (حقوق نمایندگان، قراردادها)\n"
-    "   • Returns & Refunds (مرجوعی، استرداد وجه)\n"
-    "   • Invoicing & Documentation (فاکتور، اسناد مالی)\n"
-    "   • Training & Events (آموزش، رویدادها، کلاس‌ها)\n"
-    "   • Downline Management (زیرمجموعه، گروه، تیم)\n"
-    "   • Product pricing, ordering, shipping\n"
-    "   • Company policies and procedures\n"
+    "   • Membership, Registration, Status\n"
+    "   • Commission, Compensation Plan, Income\n"
+    "   • Violations, Penalties, Yellow Symbol (نماد زرد)\n"
+    "   • Returns, Refunds, Orders, Shipping\n"
+    "   • Rules & Regulations\n"
     "   \n"
     "   Examples:\n"
     "   ✓ 'شرکت پرشین وی چیست؟'\n"
-    "   ✓ 'دفتر مرکزی کجاست؟'\n"
-    "   ✓ 'برندهای شما چیه؟'\n"
+    "   ✓ 'کامبوچا چیست؟' (Product Identity → PUBLIC)\n"
+    "   ✓ 'گابری گلدن چیه؟' (Product Identity → PUBLIC)\n"
+    "   ✓ 'نوشیدنی آلوئه ورا دارید؟' (Product Availability → PUBLIC)\n"
+    "   ✓ 'محصولات شما چیه؟'\n"
     "   ✓ 'چطور عضو بشم؟'\n"
     "   ✓ 'پورسانت چطور محاسبه میشه؟'\n"
-    "   ✓ 'تخلفات و مجازات‌ها چیه؟'\n"
-    "   ✓ 'شرایط غیرفعال شدن جایگاه؟'\n"
-    "   ✓ 'وضعیت نماد زرد یعنی چی؟'\n"
-    "   ✓ 'شرایط مرجوع کالا چیست؟'\n"
-    "   ✓ 'محصولات شما چیه؟' (general product inquiry)\n"
-    "   ✓ 'چطور سفارش ثبت کنم؟'\n\n"
+    "   ✓ 'شرایط مرجوع کالا چیست؟'\n\n"
     
-    "2️⃣ PRIVATE (سوالات تخصصی)\n"
-    "   ONLY specialized technical questions in these domains:\n"
+    "2️⃣ PRIVATE (سوالات تخصصی و مشاوره‌ای)\n"
+    "   ONLY specialized technical questions requiring EXPERT advice:\n"
     "   \n"
     "   🌾 Agriculture (کشاورزی):\n"
-    "   • Technical farming questions\n"
-    "   • Crop management, planting methods\n"
-    "   • Fertilizer types, pesticide usage\n"
-    "   • Soil management, irrigation techniques\n"
-    "   • Pest control, disease prevention\n"
-    "   • Agricultural equipment technical specs\n"
+    "   • Technical farming instructions\n"
+    "   • Dosage of fertilizers for specific crops\n"
+    "   • Treating plant diseases\n"
     "   \n"
     "   💊 Health & Wellness (سلامت):\n"
-    "   • Medical conditions and treatments\n"
-    "   • Supplement dosage and interactions\n"
-    "   • Nutrition science and dietary advice\n"
-    "   • Health concerns and diagnosis\n"
-    "   • Vitamins and minerals technical info\n"
+    "   • Medical advice, curing diseases\n"
+    "   • Specific dosage for medical conditions\n"
+    "   • Interaction with other drugs\n"
+    "   • 'How to use X for diabetes?'\n"
     "   \n"
-    "   💄 Beauty & Skincare (زیبایی و درمان پوست):\n"
-    "   • Skincare routines and techniques\n"
-    "   • Ingredient analysis and effects\n"
-    "   • Skin conditions and treatments\n"
-    "   • Cosmetic formulations\n"
-    "   • Beauty therapy methods\n"
+    "   💄 Beauty & Skincare (زیبایی):\n"
+    "   • Routine for specific skin types (oily, dry)\n"
+    "   • Treating acne, hair loss, skin diseases\n"
     "   \n"
     "   Examples:\n"
     "   ✓ 'بهترین کود برای گندم چیه؟' (agriculture)\n"
-    "   ✓ 'چطور خاک رو آماده کشت کنم؟' (agriculture)\n"
-    "   ✓ 'ویتامین D چه فایده‌ای داره؟' (health)\n"
-    "   ✓ 'برای پوست خشک چی بخورم؟' (health/beauty)\n"
-    "   ✓ 'روغن آرگان برای مو خوبه؟' (beauty)\n"
-    "   ✗ 'محصول هپیکس چنده؟' → PUBLIC (pricing)\n"
-    "   ✗ 'کجا محصولاتو بخرم؟' → PUBLIC (ordering)\n\n"
+    "   ✓ 'کامبوچا برای دیابت خوبه؟' (health advice → PRIVATE)\n"
+    "   ✓ 'گابری گلدن رو چند بار در روز بخورم؟' (dosage/usage → PRIVATE)\n"
+    "   ✓ 'برای پوست خشک چی پیشنهاد میدی؟' (beauty advice)\n"
+    "   ✓ 'روغن آرگان برای ریزش مو خوبه؟' (beauty)\n"
+    "   ✗ 'کامبوچا چیه؟' → PUBLIC (Definition)\n"
+    "   ✗ 'قیمت گابری چنده؟' → PUBLIC (Pricing)\n\n"
     
     "3️⃣ OFF_TOPIC (خارج از حوزه)\n"
-    "   Questions COMPLETELY unrelated to PersianWay or its domains:\n"
+    "   Questions COMPLETELY unrelated to PersianWay products or business.\n"
+    "   ⚠️ IMPORTANT: If a user asks about 'Kombucha', 'Aloe Vera', or 'Mushrooms', check if it relates to PersianWay products. If yes, it is NOT Off-Topic.\n"
     "   \n"
     "   Examples:\n"
-    "   ✓ 'بهترین تیم فوتبال؟' (sports)\n"
-    "   ✓ 'چطور برنامه‌نویسی یاد بگیرم؟' (programming)\n"
-    "   ✓ 'قیمت دلار امروز؟' (forex)\n"
-    "   ✓ 'فیلم خوب پیشنهاد بده' (entertainment)\n"
-    "   ✓ 'آب‌وهوای تهران چطوره؟' (weather)\n\n"
+    "   ✓ 'بهترین تیم فوتبال؟'\n"
+    "   ✓ 'قیمت دلار امروز؟'\n"
+    "   ✓ 'طرز تهیه قورمه سبزی؟'\n"
+    "   ✓ 'آب‌وهوای تهران؟'\n\n"
     
     "═══════════════════════════════\n\n"
 
     "4️⃣ GREETING (سلام و شروع مکالمه)\n"
-    "   Simple greetings or pleasantries indicating the user starts a conversation:\n"
-    "   Examples:\n"
-    "   ✓ 'سلام'\n"
-    "   ✓ 'درود'\n"
-    "   ✓ 'خسته نباشید'\n"
-    "   ✓ 'سلام وقت بخیر'\n"
-    "   ✓ 'hello'\n"
-    "   ✓ 'hi'\n"
-    "   ✓ 'hey'\n\n"
+    "   Examples: 'سلام', 'درود', 'خسته نباشید', 'وقت بخیر', 'Hi'\n\n"
     "5️⃣ FAREWELL (خداحافظی)\n"
-    "   Ending the conversation politely. Examples: 'خداحافظ', 'ممنون، روزتون بخیر'\n\n"
+    "   Examples: 'خداحافظ', 'ممنون', 'فعلا'\n\n"
     "6️⃣ SMALL_TALK (گفت‌وگوی کوتاه)\n"
-    "   Friendly small talk. Examples: 'حالت چطوره؟', 'روز بخیر'\n\n"
+    "   Examples: 'چطوری؟', 'چه خبر؟', 'شما رباتی؟'\n\n"
   
     "🎯 DECISION FLOWCHART:\n"
     "═══════════════════════\n\n"
     
-    "Step 1: Is it about PersianWay company, MLM business, operations, products (general), or ordering?\n"
-    "        → YES: PUBLIC\n"
-    "        → NO: Go to Step 2\n\n"
+    "Step 1: Is the input about a SPECIFIC PRODUCT NAME found in PersianWay's catalog (e.g., Kombucha, Gabri, Aloe Vera)?\n"
+    "        → If asking 'What is it?' or 'Price/Order': PUBLIC\n"
+    "        → If asking 'How to use for [Disease]?' or 'Medical benefits': PRIVATE\n\n"
     
-    "Step 2: Is it a SPECIALIZED TECHNICAL question about agriculture, health, or beauty?\n"
-    "        (NOT about product availability/pricing, but about technical usage/science)\n"
-    "        → YES: PRIVATE\n"
-    "        → NO: Go to Step 3\n\n"
+    "Step 2: Is it about Company Info, MLM Business, or General Operations?\n"
+    "        → YES: PUBLIC\n\n"
     
-    "Step 3: Is it COMPLETELY unrelated to PersianWay's business domains?\n"
-    "        → YES: OFF_TOPIC\n"
-    "        → UNSURE: PUBLIC (default to PUBLIC when uncertain)\n\n"
+    "Step 3: Is it a SPECIALIZED TECHNICAL question (Agriculture/Health/Beauty usage)?\n"
+    "        → YES: PRIVATE\n\n"
+    
+    "Step 4: Is it unrelated to everything above?\n"
+    "        → YES: OFF_TOPIC\n\n"
     
     "═══════════════════════════════\n\n"
     
     "⚠️ CRITICAL RULES:\n"
-    "════════════════════\n\n"
-    
-    "✅ Always PUBLIC:\n"
-    "• Company info, history, locations, brands\n"
-    "• ALL MLM business operations (membership, commissions, violations, status, regulations)\n"
-    "• Product inquiries (pricing, availability, ordering, shipping)\n"
-    "• General questions about what products do (not specialized medical/technical advice)\n"
-    "• Returns, refunds, invoicing, training, events\n\n"
-    
-    "✅ Always PRIVATE:\n"
-    "• Technical agricultural advice (farming techniques, fertilizer types, pest control)\n"
-    "• Medical/health advice (supplement interactions, dosage, conditions)\n"
-    "• Specialized beauty/skincare advice (ingredient analysis, skin treatments)\n\n"
-    
-    "✅ Always OFF_TOPIC:\n"
-    "• Sports, entertainment, politics, general knowledge\n"
-    "• Anything not related to PersianWay's business or product domains\n\n"
-    
-    "═══════════════════════════════\n\n"
-    
-    "📝 EXAMPLES - Common Edge Cases:\n"
-    "════════════════════════════════\n\n"
-    
-    "Q: 'محصول هپیکس چیه؟' → PUBLIC (product inquiry)\n"
-    "Q: 'هپیکس چند کپسول بخورم؟' → PRIVATE (dosage = medical advice)\n"
-    "Q: 'قیمت سلوکس چنده؟' → PUBLIC (pricing)\n"
-    "Q: 'سلوکس برای پوست چرب خوبه؟' → PRIVATE (skincare advice)\n"
-    "Q: 'برندهای دیگه چیا هستن؟' → PUBLIC (company/brand info)\n"
-    "Q: 'کود اوره چطور استفاده کنم؟' → PRIVATE (technical agriculture)\n"
-    "Q: 'پورسانت کی واریز میشه؟' → PUBLIC (MLM business)\n"
-    "Q: 'تخلفات چه مجازاتی داره؟' → PUBLIC (MLM regulations)\n"
-    "Q: 'وضعیت نماد زرد یعنی چی؟' → PUBLIC (MLM status)\n\n"
+    "• 'What is Kombucha?' = PUBLIC (Product Info)\n"
+    "• 'Does Kombucha cure cancer?' = PRIVATE (Health Advice)\n"
+    "• 'What is Gabri Golden?' = PUBLIC (Product Info)\n"
+    "• 'How to farm wheat?' = PRIVATE (Agriculture)\n"
+    "• 'Price of dollar?' = OFF_TOPIC\n\n"
     
     f"Conversation History:\n{history_block}\n\n"
     
     "Respond with valid JSON only:\n"
     "{\n"
     "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\" | \"GREETING\" | \"FAREWELL\" | \"SMALL_TALK\",\n"
-    "  \"category\": \"company_info\" | \"mlm_business\" | \"agriculture\" | \"health\" | \"beauty\" | \"unrelated\",\n"
+    "  \"category\": \"company_info\" | \"mlm_business\" | \"product_info\" | \"agriculture\" | \"health\" | \"beauty\" | \"unrelated\",\n"
     "  \"confidence\": 0.0-1.0,\n"
     "  \"explanation\": \"brief reason in English\",\n"
     "  \"off_topic_message\": \"optional: redirect message in Persian if OFF_TOPIC\"\n"
-    "  \"greeting_message\": \"optional: greeting message and introduce yourself as Persianway AI Assistant in Persian if GREETING\"\n"
-    "  \"farewell_message\": \"optional: polite closing in Persian if FAREWELL\"\n"
-    "  \"small_talk_message\": \"optional: friendly short reply in Persian if SMALL_TALK\"\n"
-    "}"
-    )
+    "  \"greeting_message\": \"optional: greeting in Persian if GREETING\"\n"
+    "  \"farewell_message\": \"optional: farewell in Persian if FAREWELL\"\n"
+    "  \"small_talk_message\": \"optional: small talk reply in Persian if SMALL_TALK\"\n"
+    "}")
 
 
         try:
@@ -964,7 +918,7 @@ Title:"""
                     logger.debug(f"Search decision: {search_decision}")
                     search_result = None
                     if search_decision["search_needed"]:
-                        search_result = search_persianway(search_decision["search_query"])
+                        search_result = await search_persianway.ainvoke({"query": search_decision["search_query"]})
                             
                     kb_service = get_knowledge_base_service()
                     kb_result = await kb_service.query_knowledge_base(message, conversation_history, is_public,search_result)
@@ -1027,7 +981,7 @@ Title:"""
                             search_decision = await self._get_search_decision(message, model_name=model)
                             logger.debug(f"Search decision: {search_decision}")
                             if search_decision["search_needed"]:
-                                search_result = search_persianway(search_decision["search_query"])
+                                search_result = await search_persianway.ainvoke({"query": search_decision["search_query"]})
                                 kb_result_search = await kb_service.query_knowledge_base(
                                     message, 
                                     conversation_history, 
@@ -1051,14 +1005,15 @@ Title:"""
                                     response_parameters["temperature"] = 0.2
                             else:
                                 conversation = await self._get_or_create_session(user_id, model, parameters)
-                                response = conversation.run(message)
-                                
-                                if any(indicator in response for indicator in referral_indicators):
-                                    answer = response
+                                response = await conversation.ainvoke(message)
+                                response_content = response['output'] if isinstance(response, dict) else response
+
+                                if any(indicator in response_content for indicator in referral_indicators):
+                                    answer = response_content
                                     query_analysis["requires_human_referral"] = True
                                     query_analysis["reasoning"] = "Model determined the query requires specialist attention."
                                 else:
-                                    answer = response
+                                    answer = response_content
                                     query_analysis["confidence_score"] = 0.6
                                     query_analysis["knowledge_source"] = "general_knowledge"
                                     query_analysis["requires_human_referral"] = False
@@ -1069,14 +1024,15 @@ Title:"""
                             logger.error(f"Web search integration failed: {search_error}")
                             # Fallback to original Agent logic if search integration fails
                             conversation = await self._get_or_create_session(user_id, model, parameters)
-                            response = conversation.run(message)
+                            response = await conversation.ainvoke(message)
+                            response_content = response['output'] if isinstance(response, dict) else response
                             
-                            if any(indicator in response for indicator in referral_indicators):
-                                answer = response
+                            if any(indicator in response_content for indicator in referral_indicators):
+                                answer = response_content
                                 query_analysis["requires_human_referral"] = True
                                 query_analysis["reasoning"] = "Model determined the query requires specialist attention."
                             else:
-                                answer = response
+                                answer = response_content
                                 query_analysis["confidence_score"] = 0.6
                                 query_analysis["knowledge_source"] = "general_knowledge"
                                 query_analysis["requires_human_referral"] = False
