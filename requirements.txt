@@ -15,10 +15,11 @@ pandas>=2.0.0
 joblib>=1.2.0
 
 # Chat dependencies
-langchain>=0.0.267
-openai>=0.27.8
-langchain-community>=0.0.267
-langchain-openai
+langchain>=0.3.0,<0.4.0
+langchain-openai>=0.2.0,<0.3.0
+langchain-community>=0.3.0,<0.4.0
+langchain-core>=0.3.0,<0.4.0
+openai>=1.0.0
 # RAG dependencies
 chromadb>=0.4.6
 tiktoken>=0.4.0

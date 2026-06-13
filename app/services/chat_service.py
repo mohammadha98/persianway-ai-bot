@@ -1,5 +1,6 @@
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from langchain.chains.base import Chain
 import json
 import re
 from langchain_openai import ChatOpenAI
@@ -96,9 +97,7 @@ async def get_llm(model_name: str = None, temperature: float = None, max_tokens:
         raise ValueError("Either OPENAI_API_KEY or OPENROUTER_API_KEY must be set")
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationChain
 from langchain.agents import initialize_agent, AgentType
-from langchain.chains.base import Chain
 from app.services.utility import search_persianway
 
 from app.core.config import settings
@@ -121,7 +120,7 @@ class ChatService:
     
     def __init__(self):
         """Initialize the chat service."""
-        self._sessions: Dict[str, Chain] = {}
+        self._sessions: Dict[str, Any] = {}
         self._memories: Dict[str, ConversationBufferMemory] = {}
         self.config_service = ConfigService()
         self.generalAnswer = False
@@ -130,7 +129,7 @@ class ChatService:
         
 
     
-    async def _get_or_create_session(self, user_id: str, model: str = None, parameters: dict = None) -> Chain:
+    async def _get_or_create_session(self, user_id: str, model: str = None, parameters: dict = None) -> Any:
         logger.debug(f"[DEBUG] _get_or_create_session called with model: {model}")
         """Get an existing chat session or create a new one.
         
