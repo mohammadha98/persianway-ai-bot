@@ -36,9 +36,9 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/login/login.component').then(m => m.LoginComponent)
   },
   {
-path:'users',
-canActivate: [AuthGuard],
-loadComponent: () => import('./pages/users/users.component').then(m => m.UsersComponent)
+    path: 'users',
+    canActivate: [AuthGuard],
+    loadComponent: () => import('./pages/users/users.component').then(m => m.UsersComponent)
   },
   {
     path: 'knowledge',
@@ -49,6 +49,11 @@ loadComponent: () => import('./pages/users/users.component').then(m => m.UsersCo
     path: 'conversation-search',
     canActivate: [AuthGuard],
     loadComponent: () => import('./pages/conversation-search/conversation-search.component').then(m => m.ConversationSearchComponent)
+  },
+  {
+    path: 'tools',
+    canActivate: [AuthGuard],
+    loadComponent: () => import('./pages/tools/tools.component').then(m => m.ToolsComponent)
   },
   {
     path: '**',

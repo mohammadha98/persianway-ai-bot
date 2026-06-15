@@ -9,7 +9,7 @@ from app.api.routes.upload import router as upload_router
 from app.api.routes.users import router as users_router
 from app.api.routes.spell_check import router as spell_check_router
 from app.api.routes.ui import router as ui_routes
-
+from app.api.routes.knowledge_contribution import router as knowledge_contribution_router
 # Main API router
 router = APIRouter(prefix="/api")
 
@@ -22,6 +22,7 @@ router.include_router(config_router)
 router.include_router(upload_router)
 router.include_router(users_router)
 router.include_router(spell_check_router)
+router.include_router(knowledge_contribution_router)
 
 # UI router (separate from API router)
 ui_router = APIRouter()

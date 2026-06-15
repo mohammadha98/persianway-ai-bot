@@ -1,11 +1,11 @@
-from logging import Logger
-from typing import Dict, List, Optional, Any
+
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from langchain.chains.base import Chain
 import json
 import re
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 import logging
 from loguru import logger
-from app.services.spell_corrector import get_spell_corrector
 
 async def get_llm(model_name: str = None, temperature: float = None, max_tokens: int = None, top_p: float = None):
     """Initializes and returns the appropriate language model client.
@@ -97,7 +97,8 @@ async def get_llm(model_name: str = None, temperature: float = None, max_tokens:
         raise ValueError("Either OPENAI_API_KEY or OPENROUTER_API_KEY must be set")
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationChain
+from langchain.agents import initialize_agent, AgentType
+from app.services.utility import search_persianway
 
 from app.core.config import settings
 from app.schemas.chat import ChatMessage
@@ -119,7 +120,7 @@ class ChatService:
     
     def __init__(self):
         """Initialize the chat service."""
-        self._sessions: Dict[str, ConversationChain] = {}
+        self._sessions: Dict[str, Any] = {}
         self._memories: Dict[str, ConversationBufferMemory] = {}
         self.config_service = ConfigService()
         self.generalAnswer = False
@@ -128,14 +129,15 @@ class ChatService:
         
 
     
-    async def _get_or_create_session(self, user_id: str, model: str = None, parameters: dict = None) -> ConversationChain:
+    async def _get_or_create_session(self, user_id: str, model: str = None, parameters: dict = None) -> Any:
+        logger.debug(f"[DEBUG] _get_or_create_session called with model: {model}")
         """Get an existing chat session or create a new one.
         
         Args:
             user_id: Unique identifier for the user session
             
         Returns:
-            A LangChain ConversationChain for the user
+            A LangChain Chain for the user
         """
         await self._ensure_latest_config()
         if user_id not in self._sessions:
@@ -144,23 +146,36 @@ class ChatService:
             rag_settings = await self.config_service.get_rag_settings()
             
             # Create a new memory for this user
-            memory = ConversationBufferMemory(return_messages=True)
+            # AgentExecutor expects 'chat_history' key for memory by default in some configurations,
+            # but OPENAI_FUNCTIONS agent handles it. We'll stick to defaults or 'chat_history'.
+            memory = ConversationBufferMemory(return_messages=True, memory_key="chat_history")
             self._memories[user_id] = memory
             
             # Create a new chat model with the configured settings
             params = parameters or {}
-            llm = await get_llm()
+            llm = await get_llm(model_name=model)
             
-            # Create a conversation chain with the memory
-            self._sessions[user_id] = ConversationChain(
-                llm=llm,
-                memory=memory,
-                verbose=False
-            )
-            
-            # Add system prompt to establish model behavior for general knowledge responses
+            # Add system prompt
             system_prompt = rag_settings.system_prompt
-            self._sessions[user_id].memory.chat_memory.add_message(SystemMessage(content=system_prompt))
+            
+            # Initialize agent with tools
+            tools = [search_persianway]
+            
+            # For STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION, we use 'prefix' to set the system prompt/persona
+            agent_kwargs = {
+                "prefix": system_prompt
+            }
+            
+            # Use initialize_agent with STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION as OPENAI_FUNCTIONS is deprecated/rejected by provider
+            self._sessions[user_id] = initialize_agent(
+                tools=tools,
+                llm=llm,
+                agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
+                verbose=True,
+                memory=memory,
+                agent_kwargs=agent_kwargs,
+                handle_parsing_errors=True
+            )
         
         return self._sessions[user_id]
 
@@ -198,7 +213,7 @@ class ChatService:
             'سیاست', 'انتخابات', 'دولت', 'مجلس', 'رئیس جمهور', 'وزیر', 'حزب',
             'سیاستمدار', 'رای', 'کاندیدا', 'کابینه', 'پارلمان', 'قانون', 'قضاوت',
             'دادگاه', 'وکیل', 'قاضی', 'جرم', 'مجازات', 'زندان', 'پلیس','جنگ',
-            'سفیر', 'دیپلمات', 'سفارت', 'کنسولگری', 'نماینده', 'سازمان ملل',
+            'سفیر', 'دیپلمات', 'سفارت', 'کنسولگری','سازمان ملل',
             'ناتو', 'اتحادیه اروپا', 'سنا', 'کنگره', 'مذاکره', 'تحریم', 'معاهده',
             'استیضاح', 'فساد', 'رشوه', 'اختلاس', 'براندازی', 'کودتا', 'انقلاب',
             'تظاهرات', 'اعتصاب', 'حقوق بشر', 'سانسور',
@@ -289,6 +304,42 @@ class ChatService:
         # For all other queries, assume they are related to the domain
         return True, None
 
+
+    async def _get_search_decision(self, message: str, model_name: str = "gpt-4o-mini") -> Dict[str, Any]:
+        llm = await get_llm(model_name=model_name)
+        prompt = (
+            "You decide whether a web search on persianway.ir is needed for a user message.\n"
+            "Return ONLY a JSON object with keys search_needed and search_query.\n"
+            "search_needed must be true or false.\n"
+            "If search_needed is false, search_query must be an empty string.\n"
+            "If search_needed is true, search_query must be a concise Persian query about PersianWay products or services.\n"
+            f"User message: {message}"
+        )
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        raw = response.content.strip()
+        parsed = None
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            match = re.search(r"\{[\s\S]*\}", raw)
+            if match:
+                try:
+                    parsed = json.loads(match.group(0))
+                except Exception:
+                    parsed = None
+        if not isinstance(parsed, dict):
+            logger.warning(f"Search decision parsing failed. Raw response: {raw}")
+            return {"search_needed": False, "search_query": ""}
+        search_needed = parsed.get("search_needed", False)
+        if isinstance(search_needed, str):
+            search_needed = search_needed.strip().lower() in ["true", "1", "yes"]
+        search_query = parsed.get("search_query", "")
+        if search_query is None:
+            search_query = ""
+        search_query = str(search_query).strip()
+        if not search_needed or not search_query:
+            return {"search_needed": False, "search_query": ""}
+        return {"search_needed": True, "search_query": search_query}
 
 
     async def generate_conversation_title(self, message: str) -> str:
@@ -435,164 +486,135 @@ Title:"""
     
     "PersianWay is a Network Marketing company operating under Iranian MLM regulations.\n"
     "The company has THREE main product areas: Agriculture, Health, and Beauty.\n\n"
+
+    "🛍️ PRODUCT CATALOG CONTEXT (List of Key Items Sold):\n"
+    "════════════════════════════════════════════════════\n"
+    "The user may refer to these specific products. Treat them as COMPANY PRODUCTS, not general concepts:\n"
+    "• Drinks & Beverages: Kombucha (کامبوچا), Aloe Vera (آلوئه‌ورا), Energy Drinks, Herbal Teas\n"
+    "• Supplements: Gabri Golden (گابری گلدن), Ganoderma (گانودرما), Ginseng (جینسینگ)\n"
+    "• Health & Personal Care: Hand Creams, Shampoos, Body Splash, Masks\n"
+    "• Brands: Hapix, Celux, Frei Öl, Magical, Dream World, PersianWay\n"
+    "• Agriculture: Fertilizers (کود), Pesticides (سم), Growth promoters\n\n"
     
     "📋 CLASSIFICATION CATEGORIES:\n"
     "═══════════════════════════════\n\n"
     
-    "1️⃣ PUBLIC (اطلاعات عمومی شرکت)\n"
-    "   ALL questions about the company, its operations, and network marketing business:\n"
+    "1️⃣ PUBLIC (اطلاعات عمومی شرکت و محصولات)\n"
+    "   ALL questions about the company, business operations, AND product identification:\n"
     "   \n"
-    "   🏢 Company Information:\n"
-    "   • Company history, establishment, licenses\n"
-    "   • Mission, vision, values, brand information\n"
-    "   • Office locations, contact details, addresses\n"
-    "   • Organizational structure, management team\n"
-    "   • All brands (Hapix, Celux, Frei Öl, Magical, Dream World)\n"
+    "   🏢 Company & Product Identity:\n"
+    "   • 'What is [Product Name]?' (Product definitions)\n"
+    "   • Identifying specific products (Gabri, Kombucha, Aloe Vera, etc.)\n"
+    "   • Company history, licenses, office locations\n"
+    "   • All brands info (Hapix, Celux, etc.)\n"
     "   \n"
     "   💼 Network Marketing Business Operations:\n"
-    "   • Membership & Registration (ثبت‌نام، عضویت، جایگاه)\n"
-    "   • Commission & Compensation (پورسانت، درآمد، پاداش)\n"
-    "   • Violations & Penalties (تخلفات، مجازات، اخطار)\n"
-    "   • License & Permits (پروانه کسب، مجوز فعالیت)\n"
-    "   • Network Status (فعال/غیرفعال، تعلیق، نماد)\n"
-    "   • MLM Regulations (آیین‌نامه، قوانین، مقررات)\n"
-    "   • Distributor Rights (حقوق نمایندگان، قراردادها)\n"
-    "   • Returns & Refunds (مرجوعی، استرداد وجه)\n"
-    "   • Invoicing & Documentation (فاکتور، اسناد مالی)\n"
-    "   • Training & Events (آموزش، رویدادها، کلاس‌ها)\n"
-    "   • Downline Management (زیرمجموعه، گروه، تیم)\n"
-    "   • Product pricing, ordering, shipping\n"
-    "   • Company policies and procedures\n"
+    "   • Membership, Registration, Status\n"
+    "   • Commission, Compensation Plan, Income\n"
+    "   • Violations, Penalties, Yellow Symbol (نماد زرد)\n"
+    "   • Returns, Refunds, Orders, Shipping\n"
+    "   • Rules & Regulations\n"
     "   \n"
     "   Examples:\n"
     "   ✓ 'شرکت پرشین وی چیست؟'\n"
-    "   ✓ 'دفتر مرکزی کجاست؟'\n"
-    "   ✓ 'برندهای شما چیه؟'\n"
+    "   ✓ 'کامبوچا چیست؟' (Product Identity → PUBLIC)\n"
+    "   ✓ 'گابری گلدن چیه؟' (Product Identity → PUBLIC)\n"
+    "   ✓ 'نوشیدنی آلوئه ورا دارید؟' (Product Availability → PUBLIC)\n"
+    "   ✓ 'محصولات شما چیه؟'\n"
     "   ✓ 'چطور عضو بشم؟'\n"
     "   ✓ 'پورسانت چطور محاسبه میشه؟'\n"
-    "   ✓ 'تخلفات و مجازات‌ها چیه؟'\n"
-    "   ✓ 'شرایط غیرفعال شدن جایگاه؟'\n"
-    "   ✓ 'وضعیت نماد زرد یعنی چی؟'\n"
-    "   ✓ 'شرایط مرجوع کالا چیست؟'\n"
-    "   ✓ 'محصولات شما چیه؟' (general product inquiry)\n"
-    "   ✓ 'چطور سفارش ثبت کنم؟'\n\n"
+    "   ✓ 'شرایط مرجوع کالا چیست؟'\n\n"
     
-    "2️⃣ PRIVATE (سوالات تخصصی)\n"
-    "   ONLY specialized technical questions in these domains:\n"
+    "2️⃣ PRIVATE (سوالات تخصصی و مشاوره‌ای)\n"
+    "   ONLY specialized technical questions requiring EXPERT advice:\n"
     "   \n"
     "   🌾 Agriculture (کشاورزی):\n"
-    "   • Technical farming questions\n"
-    "   • Crop management, planting methods\n"
-    "   • Fertilizer types, pesticide usage\n"
-    "   • Soil management, irrigation techniques\n"
-    "   • Pest control, disease prevention\n"
-    "   • Agricultural equipment technical specs\n"
+    "   • Technical farming instructions\n"
+    "   • Dosage of fertilizers for specific crops\n"
+    "   • Treating plant diseases\n"
     "   \n"
     "   💊 Health & Wellness (سلامت):\n"
-    "   • Medical conditions and treatments\n"
-    "   • Supplement dosage and interactions\n"
-    "   • Nutrition science and dietary advice\n"
-    "   • Health concerns and diagnosis\n"
-    "   • Vitamins and minerals technical info\n"
+    "   • Medical advice, curing diseases\n"
+    "   • Specific dosage for medical conditions\n"
+    "   • Interaction with other drugs\n"
+    "   • 'How to use X for diabetes?'\n"
     "   \n"
-    "   💄 Beauty & Skincare (زیبایی و درمان پوست):\n"
-    "   • Skincare routines and techniques\n"
-    "   • Ingredient analysis and effects\n"
-    "   • Skin conditions and treatments\n"
-    "   • Cosmetic formulations\n"
-    "   • Beauty therapy methods\n"
+    "   💄 Beauty & Skincare (زیبایی):\n"
+    "   • Routine for specific skin types (oily, dry)\n"
+    "   • Treating acne, hair loss, skin diseases\n"
     "   \n"
     "   Examples:\n"
     "   ✓ 'بهترین کود برای گندم چیه؟' (agriculture)\n"
-    "   ✓ 'چطور خاک رو آماده کشت کنم؟' (agriculture)\n"
-    "   ✓ 'ویتامین D چه فایده‌ای داره؟' (health)\n"
-    "   ✓ 'برای پوست خشک چی بخورم؟' (health/beauty)\n"
-    "   ✓ 'روغن آرگان برای مو خوبه؟' (beauty)\n"
-    "   ✗ 'محصول هپیکس چنده؟' → PUBLIC (pricing)\n"
-    "   ✗ 'کجا محصولاتو بخرم؟' → PUBLIC (ordering)\n\n"
+    "   ✓ 'کامبوچا برای دیابت خوبه؟' (health advice → PRIVATE)\n"
+    "   ✓ 'گابری گلدن رو چند بار در روز بخورم؟' (dosage/usage → PRIVATE)\n"
+    "   ✓ 'برای پوست خشک چی پیشنهاد میدی؟' (beauty advice)\n"
+    "   ✓ 'روغن آرگان برای ریزش مو خوبه؟' (beauty)\n"
+    "   ✗ 'کامبوچا چیه؟' → PUBLIC (Definition)\n"
+    "   ✗ 'قیمت گابری چنده؟' → PUBLIC (Pricing)\n\n"
     
     "3️⃣ OFF_TOPIC (خارج از حوزه)\n"
-    "   Questions COMPLETELY unrelated to PersianWay or its domains:\n"
+    "   Questions COMPLETELY unrelated to PersianWay products or business.\n"
+    "   ⚠️ IMPORTANT: If a user asks about 'Kombucha', 'Aloe Vera', or 'Mushrooms', check if it relates to PersianWay products. If yes, it is NOT Off-Topic.\n"
     "   \n"
     "   Examples:\n"
-    "   ✓ 'بهترین تیم فوتبال؟' (sports)\n"
-    "   ✓ 'چطور برنامه‌نویسی یاد بگیرم؟' (programming)\n"
-    "   ✓ 'قیمت دلار امروز؟' (forex)\n"
-    "   ✓ 'فیلم خوب پیشنهاد بده' (entertainment)\n"
-    "   ✓ 'آب‌وهوای تهران چطوره؟' (weather)\n\n"
+    "   ✓ 'بهترین تیم فوتبال؟'\n"
+    "   ✓ 'قیمت دلار امروز؟'\n"
+    "   ✓ 'طرز تهیه قورمه سبزی؟'\n"
+    "   ✓ 'آب‌وهوای تهران؟'\n\n"
     
     "═══════════════════════════════\n\n"
-    
+
+    "4️⃣ GREETING (سلام و شروع مکالمه)\n"
+    "   Examples: 'سلام', 'درود', 'خسته نباشید', 'وقت بخیر', 'Hi'\n\n"
+    "5️⃣ FAREWELL (خداحافظی)\n"
+    "   Examples: 'خداحافظ', 'ممنون', 'فعلا'\n\n"
+    "6️⃣ SMALL_TALK (گفت‌وگوی کوتاه)\n"
+    "   Examples: 'چطوری؟', 'چه خبر؟', 'شما رباتی؟'\n\n"
+  
     "🎯 DECISION FLOWCHART:\n"
     "═══════════════════════\n\n"
     
-    "Step 1: Is it about PersianWay company, MLM business, operations, products (general), or ordering?\n"
-    "        → YES: PUBLIC\n"
-    "        → NO: Go to Step 2\n\n"
+    "Step 1: Is the input about a SPECIFIC PRODUCT NAME found in PersianWay's catalog (e.g., Kombucha, Gabri, Aloe Vera)?\n"
+    "        → If asking 'What is it?' or 'Price/Order': PUBLIC\n"
+    "        → If asking 'How to use for [Disease]?' or 'Medical benefits': PRIVATE\n\n"
     
-    "Step 2: Is it a SPECIALIZED TECHNICAL question about agriculture, health, or beauty?\n"
-    "        (NOT about product availability/pricing, but about technical usage/science)\n"
-    "        → YES: PRIVATE\n"
-    "        → NO: Go to Step 3\n\n"
+    "Step 2: Is it about Company Info, MLM Business, or General Operations?\n"
+    "        → YES: PUBLIC\n\n"
     
-    "Step 3: Is it COMPLETELY unrelated to PersianWay's business domains?\n"
-    "        → YES: OFF_TOPIC\n"
-    "        → UNSURE: PUBLIC (default to PUBLIC when uncertain)\n\n"
+    "Step 3: Is it a SPECIALIZED TECHNICAL question (Agriculture/Health/Beauty usage)?\n"
+    "        → YES: PRIVATE\n\n"
+    
+    "Step 4: Is it unrelated to everything above?\n"
+    "        → YES: OFF_TOPIC\n\n"
     
     "═══════════════════════════════\n\n"
     
     "⚠️ CRITICAL RULES:\n"
-    "════════════════════\n\n"
-    
-    "✅ Always PUBLIC:\n"
-    "• Company info, history, locations, brands\n"
-    "• ALL MLM business operations (membership, commissions, violations, status, regulations)\n"
-    "• Product inquiries (pricing, availability, ordering, shipping)\n"
-    "• General questions about what products do (not specialized medical/technical advice)\n"
-    "• Returns, refunds, invoicing, training, events\n\n"
-    
-    "✅ Always PRIVATE:\n"
-    "• Technical agricultural advice (farming techniques, fertilizer types, pest control)\n"
-    "• Medical/health advice (supplement interactions, dosage, conditions)\n"
-    "• Specialized beauty/skincare advice (ingredient analysis, skin treatments)\n\n"
-    
-    "✅ Always OFF_TOPIC:\n"
-    "• Sports, entertainment, politics, general knowledge\n"
-    "• Anything not related to PersianWay's business or product domains\n\n"
-    
-    "═══════════════════════════════\n\n"
-    
-    "📝 EXAMPLES - Common Edge Cases:\n"
-    "════════════════════════════════\n\n"
-    
-    "Q: 'محصول هپیکس چیه؟' → PUBLIC (product inquiry)\n"
-    "Q: 'هپیکس چند کپسول بخورم؟' → PRIVATE (dosage = medical advice)\n"
-    "Q: 'قیمت سلوکس چنده؟' → PUBLIC (pricing)\n"
-    "Q: 'سلوکس برای پوست چرب خوبه؟' → PRIVATE (skincare advice)\n"
-    "Q: 'برندهای دیگه چیا هستن؟' → PUBLIC (company/brand info)\n"
-    "Q: 'کود اوره چطور استفاده کنم؟' → PRIVATE (technical agriculture)\n"
-    "Q: 'پورسانت کی واریز میشه؟' → PUBLIC (MLM business)\n"
-    "Q: 'تخلفات چه مجازاتی داره؟' → PUBLIC (MLM regulations)\n"
-    "Q: 'وضعیت نماد زرد یعنی چی؟' → PUBLIC (MLM status)\n\n"
+    "• 'What is Kombucha?' = PUBLIC (Product Info)\n"
+    "• 'Does Kombucha cure cancer?' = PRIVATE (Health Advice)\n"
+    "• 'What is Gabri Golden?' = PUBLIC (Product Info)\n"
+    "• 'How to farm wheat?' = PRIVATE (Agriculture)\n"
+    "• 'Price of dollar?' = OFF_TOPIC\n\n"
     
     f"Conversation History:\n{history_block}\n\n"
     
     "Respond with valid JSON only:\n"
     "{\n"
-    "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\",\n"
-    "  \"category\": \"company_info\" | \"mlm_business\" | \"agriculture\" | \"health\" | \"beauty\" | \"unrelated\",\n"
+    "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\" | \"GREETING\" | \"FAREWELL\" | \"SMALL_TALK\",\n"
+    "  \"category\": \"company_info\" | \"mlm_business\" | \"product_info\" | \"agriculture\" | \"health\" | \"beauty\" | \"unrelated\",\n"
     "  \"confidence\": 0.0-1.0,\n"
     "  \"explanation\": \"brief reason in English\",\n"
     "  \"off_topic_message\": \"optional: redirect message in Persian if OFF_TOPIC\"\n"
-    "}"
-    )
+    "  \"greeting_message\": \"optional: greeting in Persian if GREETING\"\n"
+    "  \"farewell_message\": \"optional: farewell in Persian if FAREWELL\"\n"
+    "  \"small_talk_message\": \"optional: small talk reply in Persian if SMALL_TALK\"\n"
+    "}")
 
 
         try:
             classifier_llm = llm or await get_llm(
-                model_name="mistralai/mistral-small-3.1-24b-instruct",
-                temperature=0.1,
-                top_p=0.1
+                model_name="openai/gpt-4o-mini",
+                temperature=0.0,
             )
         except Exception as e:
             logger.error(f"Failed to initialize intent detection LLM: {e}")
@@ -649,9 +671,13 @@ Title:"""
             explanation = payload.get("explanation", "No explanation provided")
             clarification_prompt = payload.get("clarification_prompt")
             off_topic_message = payload.get("off_topic_message")
+            greeting_message = payload.get("greeting_message")
+            farewell_message = payload.get("farewell_message")
+            small_talk_message = payload.get("small_talk_message")
+  
             
             # Validate intent
-            if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC"]:
+            if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC", "GREETING", "FAREWELL", "SMALL_TALK", "HELP_CAPABILITIES"]:
                 logger.warning(f"Invalid intent '{intent}', defaulting to PRIVATE")
                 intent = "PRIVATE"
             
@@ -669,7 +695,11 @@ Title:"""
                 "is_public": is_public,
                 "explanation": explanation,
                 "clarification_prompt": clarification_prompt,
-                "off_topic_message": off_topic_message
+                "off_topic_message": off_topic_message,
+                "greeting_message": greeting_message,
+                "farewell_message": farewell_message,
+                "small_talk_message": small_talk_message,
+            
             }
 
         # Fallback: try old format for backward compatibility
@@ -705,6 +735,7 @@ Title:"""
         }
 
     async def process_message(self, user_id: str, message: str, conversation_history: List = None, model: str = None, parameters: dict = None) -> Dict[str, Any]:
+        logger.debug(f"[DEBUG] process_message called with model: {model}")
         """Process a user message using a hybrid approach.
 
         This service implements a three-tier approach:
@@ -754,8 +785,8 @@ Title:"""
         try:
             # First, check if the topic is related to our domain
              # Check if the topic is related to the domain
-            is_domain_related, unrelated_keyword = self._is_topic_related_to_domain(message)
-            # is_domain_related = True
+            # is_domain_related, unrelated_keyword = self._is_topic_related_to_domain(message)
+            is_domain_related = True
             # is_domain_related=True
             if not is_domain_related:
                 # Unrelated topic - refer to human
@@ -797,13 +828,99 @@ Title:"""
                         "response_parameters": response_parameters,
                         "answer": answer
                     }
+                if intent_result["intent"] == "GREETING":
+                    answer =  intent_result.get("greeting_message") or (
+                        "درود! خوش آمدید به پرشین وی 🌷\n\n"
+                        "می‌تونید در این زمینه‌ها سوال بپرسید:\n\n"
+                        "🌱 کشاورزی: کاشت، داشت، کوددهی، آبیاری، کنترل آفات\n"
+                        "💊 سلامت: مکمل‌ها، تداخل‌ها، دوز مصرف، تغذیه\n"
+                        "💄 زیبایی: مراقبت از پوست، ترکیبات، روتین‌ها\n"
+                        "🏢 اطلاعات شرکت: ثبت‌نام، پورسانت، قوانین، سفارش و ارسال\n\n"
+                        "هر سوالی دارید بفرمایید؛ با کمال میل راهنمایی می‌کنم."
+                    )
+                    query_analysis["confidence_score"] = 0.5
+                    query_analysis["knowledge_source"] = "greeting"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "User initiated conversation with a greeting."
+                    response_parameters["temperature"] = 0.2
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                if intent_result["intent"] == "FAREWELL":
+                    answer = intent_result.get("farewell_message") or (
+                        "سپاس از همراهی شما 🌟\nاگر سوال دیگری دارید در هر زمان خوشحال می‌شوم کمک کنم. روزتون بخیر!"
+                    )
+                    query_analysis["confidence_score"] = 0.5
+                    query_analysis["knowledge_source"] = "farewell"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "User ended the conversation."
+                    response_parameters["temperature"] = 0.2
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                if intent_result["intent"] == "SMALL_TALK":
+                    answer = intent_result.get("small_talk_message") or (
+                        "روز شما هم بخیر 😊\nدر چه زمینه‌ای می‌تونم کمک کنم؟ کشاورزی، سلامت، زیبایی یا اطلاعات شرکت؟"
+                    )
+                    query_analysis["confidence_score"] = 0.5
+                    query_analysis["knowledge_source"] = "small_talk"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "User engaged in small talk."
+                    response_parameters["temperature"] = 0.2
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
+                if intent_result["intent"] == "HELP_CAPABILITIES":
+                    answer =  (
+                        "من دستیار هوشمند پرشین وی هستم 🤖\nمی‌تونم در این حوزه‌ها کمک کنم:\n\n"
+                        "🌱 کشاورزی: کوددهی، آبیاری، آفات، روش‌های کشت\n"
+                        "💊 سلامت: دوز مکمل‌ها، تداخل‌ها، تغذیه علمی\n"
+                        "💄 زیبایی: روتین‌ها، ترکیبات، درمان‌های پوستی\n"
+                        "🏢 اطلاعات شرکت: ثبت‌نام، پورسانت، قوانین، سفارش\n\n"
+                        "کافیه سوالتون رو همین‌جا بپرسید تا راهنمایی کنم."
+                    )
+                    query_analysis["confidence_score"] = 0.6
+                    query_analysis["knowledge_source"] = "help_capabilities"
+                    query_analysis["requires_human_referral"] = False
+                    query_analysis["reasoning"] = "User asked for assistant capabilities."
+                    response_parameters["temperature"] = 0.2
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    conversation.memory.chat_memory.add_user_message(message)
+                    conversation.memory.chat_memory.add_ai_message(answer)
+                    return {
+                        "query_analysis": query_analysis,
+                        "response_parameters": response_parameters,
+                        "answer": answer
+                    }
                 
            
                 # Proceed with knowledge base query
                 is_public = intent_result["is_public"]
                 try:
+                     
+                    # search_decision = await self._get_search_decision(message, model_name="gpt-4o-mini")
+                    # logger.debug(f"Search decision: {search_decision}")
+                    search_result = None
+                    if is_public:
+                        search_result = await search_persianway.ainvoke({"query": message})
+                            
                     kb_service = get_knowledge_base_service()
-                    kb_result = await kb_service.query_knowledge_base(message, conversation_history, is_public)
+                    kb_result = await kb_service.query_knowledge_base(message, conversation_history, is_public,search_result)
                     kb_confidence = kb_result.get("confidence_score", 0) if kb_result else 0
                     logger.debug(f"[DEBUG] KB raw confidence: {kb_confidence:.3f}")
                 except RuntimeError as kb_error:
@@ -857,23 +974,69 @@ Title:"""
                     # Low KB confidence - check if general answers are allowed
                     if self.generalAnswer:
                         # Domain-related but low confidence - try general knowledge as fallback
-                        conversation = await self._get_or_create_session(user_id, model, parameters)
+                        logger.info("Low KB confidence. Attempting Web Search Integration...")
                         
-                        # Get response using general knowledge. The conversation object already has the system prompt.
-                        response = conversation.predict(input=message)
-                        
-                        # Check if the model indicated it needs human referral
-                        if any(indicator in response for indicator in referral_indicators):
-                            answer = HUMAN_REFERRAL_MESSAGE
-                            query_analysis["requires_human_referral"] = True
-                            query_analysis["reasoning"] = "Model determined the query requires specialist attention."
-                        else:
-                            answer = response
-                            query_analysis["confidence_score"] = 0.6  # Assign a default confidence for general knowledge
-                            query_analysis["knowledge_source"] = "general_knowledge"
-                            query_analysis["requires_human_referral"] = False
-                            query_analysis["reasoning"] = "Answer provided from general knowledge."
-                            response_parameters["temperature"] = 0.3  # Moderate temperature for general knowledge
+                        try:
+                            search_decision = await self._get_search_decision(message, model_name=model)
+                            logger.debug(f"Search decision: {search_decision}")
+                            if search_decision["search_needed"]:
+                                search_result = await search_persianway.ainvoke({"query": search_decision["search_query"]})
+                                kb_result_search = await kb_service.query_knowledge_base(
+                                    message, 
+                                    conversation_history, 
+                                    is_public, 
+                                    external_context=search_result
+                                )
+                                
+                                response = kb_result_search["answer"]
+                                final_confidence = kb_result_search.get("confidence_score", 0.0)
+                                
+                                if any(indicator in response for indicator in referral_indicators):
+                                    answer = response
+                                    query_analysis["requires_human_referral"] = True
+                                    query_analysis["reasoning"] = "Web search did not yield sufficient information."
+                                else:
+                                    answer = response
+                                    query_analysis["confidence_score"] = max(0.6, final_confidence)
+                                    query_analysis["knowledge_source"] = "web_search_augmented"
+                                    query_analysis["requires_human_referral"] = False
+                                    query_analysis["reasoning"] = "Answer provided via Web Search integration with Knowledge Base."
+                                    response_parameters["temperature"] = 0.2
+                            else:
+                                conversation = await self._get_or_create_session(user_id, model, parameters)
+                                response = await conversation.ainvoke(message)
+                                response_content = response['output'] if isinstance(response, dict) else response
+
+                                if any(indicator in response_content for indicator in referral_indicators):
+                                    answer = response_content
+                                    query_analysis["requires_human_referral"] = True
+                                    query_analysis["reasoning"] = "Model determined the query requires specialist attention."
+                                else:
+                                    answer = response_content
+                                    query_analysis["confidence_score"] = 0.6
+                                    query_analysis["knowledge_source"] = "general_knowledge"
+                                    query_analysis["requires_human_referral"] = False
+                                    query_analysis["reasoning"] = "Answer provided from general knowledge (fallback)."
+                                    response_parameters["temperature"] = 0.3
+                                
+                        except Exception as search_error:
+                            logger.error(f"Web search integration failed: {search_error}")
+                            # Fallback to original Agent logic if search integration fails
+                            conversation = await self._get_or_create_session(user_id, model, parameters)
+                            response = await conversation.ainvoke(message)
+                            response_content = response['output'] if isinstance(response, dict) else response
+                            
+                            if any(indicator in response_content for indicator in referral_indicators):
+                                answer = response_content
+                                query_analysis["requires_human_referral"] = True
+                                query_analysis["reasoning"] = "Model determined the query requires specialist attention."
+                            else:
+                                answer = response_content
+                                query_analysis["confidence_score"] = 0.6
+                                query_analysis["knowledge_source"] = "general_knowledge"
+                                query_analysis["requires_human_referral"] = False
+                                query_analysis["reasoning"] = "Answer provided from general knowledge (fallback)."
+                                response_parameters["temperature"] = 0.3
                     else:
                         # General answers are disabled - refer to human
                         answer = HUMAN_REFERRAL_MESSAGE
@@ -897,6 +1060,9 @@ Title:"""
             }
 
         except Exception as e:
+            logger.error(f"Error in process_message: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             error_msg = f"Error processing message: {str(e)}"
             # Fallback to human referral on any processing error
             query_analysis["requires_human_referral"] = True

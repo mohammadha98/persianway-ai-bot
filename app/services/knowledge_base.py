@@ -9,9 +9,12 @@ from app.services.chat_service import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from app.services.document_processor import get_document_processor
+from app.services.hybrid_retrieval import HybridRetrievalService
 from app.services.excel_processor import get_excel_qa_processor
 from app.services.config_service import ConfigService
-
+from app.services.context_condenser import batch_condense
+from app.services.utility import search_persianway
+from langchain_core.documents import Document
 # Set up logging for human referrals
 referral_logger = logging.getLogger("human_referral")
 file_handler = logging.FileHandler("human_referrals.log", encoding="utf-8")
@@ -83,64 +86,43 @@ class KnowledgeBaseService:
     
     def _normalize_documents_for_context(
         self,
-        docs: List[Any],
-        max_total_tokens: int = 3000,
-        max_chars_per_doc: int = 1200
+        docs: List[Any]
     ) -> List[Any]:
         from langchain_core.documents import Document
         if not docs:
             return []
-        CHARS_PER_TOKEN = 4
-        max_total_chars = max_total_tokens * CHARS_PER_TOKEN
-        chars_per_doc = min(max_total_chars // len(docs), max_chars_per_doc)
-        logging.info(
-            f"[Context Normalization] Processing {len(docs)} docs, "
-            f"max_total_tokens={max_total_tokens}, "
-            f"max_chars_per_doc={chars_per_doc}"
-        )
+        def _normalize_whitespace(text: str) -> str:
+            lines = (text or "").splitlines()
+            return "\n".join([" ".join(line.split()) for line in lines]).strip()
+        logging.info(f"[Context Normalization] Processing {len(docs)} docs (no length limits)")
         normalized_docs = []
-        total_chars = 0
         total_original_chars = 0
-        essential_metadata_keys = {"source", "page", "source_type", "hash_id", "is_public"}
+        total_chars = 0
         for idx, doc in enumerate(docs):
-            original_size = len(doc.page_content) + len(str(doc.metadata))
+            original_size = len(getattr(doc, 'page_content', '') or '') + len(str(getattr(doc, 'metadata', {})))
             total_original_chars += original_size
-            clean_metadata = {k: v for k, v in doc.metadata.items() if k in essential_metadata_keys}
-            clean_content = doc.page_content.strip()
-            if len(clean_content) > chars_per_doc:
-                truncated = clean_content[:chars_per_doc]
-                last_period = truncated.rfind('.')
-                last_newline = truncated.rfind('\n')
-                cut_point = max(last_period, last_newline)
-                if cut_point > chars_per_doc * 0.8:
-                    clean_content = truncated[:cut_point + 1] + "..."
-                else:
-                    clean_content = truncated + "..."
-                logging.debug(
-                    f"[Context Normalization] Doc {idx+1} truncated: "
-                    f"{len(doc.page_content)} → {len(clean_content)} chars"
-                )
-            doc_size = len(clean_content)
-            if total_chars + doc_size > max_total_chars:
-                logging.warning(
-                    f"[Context Normalization] Reached total char limit at doc {idx+1}. "
-                    f"Stopping with {len(normalized_docs)} docs."
-                )
-                break
-            normalized_doc = Document(
-                page_content=clean_content,
-                metadata=clean_metadata
-            )
-            normalized_docs.append(normalized_doc)
-            total_chars += doc_size
+            clean_metadata = dict(doc.metadata) if isinstance(doc.metadata, dict) else {}
+            base_content = _normalize_whitespace((doc.page_content or "").strip())
+            if isinstance(clean_metadata, dict) and clean_metadata.get("source_type") == "qa_contribution":
+                t = clean_metadata.get("title")
+                q = clean_metadata.get("question")
+                a = clean_metadata.get("answer")
+                parts = []
+                if t:
+                    parts.append(f"Title: {t}")
+                if q:
+                    parts.append(f"Q: {q}")
+                if a:
+                    parts.append(f"A: {a}")
+                if parts:
+                    base_content = (base_content + "\n\n" + "\n".join(parts)).strip()
+            clean_content = base_content
+            total_chars += len(clean_content)
+            normalized_docs.append(Document(page_content=clean_content, metadata=clean_metadata))
         if total_original_chars > 0:
             reduction_pct = ((total_original_chars - total_chars) / total_original_chars * 100)
-            estimated_tokens = total_chars // CHARS_PER_TOKEN
             logging.info(
-                f"[Context Normalization] Complete: "
-                f"{len(normalized_docs)}/{len(docs)} docs, "
-                f"{total_chars} chars (~{estimated_tokens} tokens), "
-                f"reduction={reduction_pct:.1f}%"
+                f"[Context Normalization] Complete: {len(normalized_docs)}/{len(docs)} docs, total_chars={total_chars}, reduction={reduction_pct:.1f}%"
             )
         return normalized_docs
     
@@ -462,6 +444,7 @@ class KnowledgeBaseService:
         1. If conversation history exists, rewrites the query to be self-contained
         2. Expands the query (original or rewritten) into multiple variations
         3. Returns all queries for comprehensive search
+
         
         Args:
             query: The original query string
@@ -478,16 +461,14 @@ class KnowledgeBaseService:
         try:
             import json
             
-            llm = await get_llm(model_name="gpt-4o-mini", temperature=0.0, max_tokens=800)
+            llm = await get_llm(model_name="qwen/qwen3-32b", temperature=0.1, max_tokens=800)
             
             rewritten_query = query
             
-            # Step 1: Rewrite query with conversation context if history exists
+            # Build recent context from conversation history if available
+            recent_context = ""
             if conversation_history:
-                # Take only the most recent messages
                 recent_history = conversation_history[-max_history:] if len(conversation_history) > max_history else conversation_history
-                
-                # Truncate very long messages to avoid token limit
                 truncated_history = []
                 for msg in recent_history:
                     content = msg.get('content', '')
@@ -497,51 +478,59 @@ class KnowledgeBaseService:
                         'role': msg['role'],
                         'content': content
                     })
-                
-                # Build context window
                 recent_context = "\n".join(
                     [f"{msg['role'].capitalize()}: {msg['content']}" for msg in truncated_history]
                 )
-                
-                # Create prompt for contextual rewriting and expansion
-                prompt = f"""با توجه به گفتگوی زیر، دو کار انجام بده:
-1. پرسش جدید را بازنویسی کن تا بدون نیاز به متن‌های قبلی قابل جست‌وجو باشد
-2. سه نسخه جایگزین از پرسش بازنویسی‌شده ایجاد کن با کلمات مختلف و مترادف‌ها
 
----
-گفتگو:
-{recent_context}
+            prompt = f"""<|im_start|>system
+You are a Query Expander And Rewriter for "Persian Way" (شرکت پرشین وی) RAG System.
+Your task is to convert the user's input into a **SHORT, PRECISE** query.
 
-پرسش جدید کاربر:
+**🚨 STRICT CONSTRAINTS:**
+1.  **MAX LENGTH:** Output MUST be less than 25 words.
+2.  **NO FLUFF:** No "comprehensive info", "history", "services".
+3.  **IDENTITY:** "Persian Way" is an company. DO NOT associate with VPN.
+4.  **FORMAT:** Return ONLY JSON.
+
+**⚠️ LOGIC FOR "LAST/FINAL":**
+*   **CASE A (Growth End):** "Last stage" -> Inject "Harvest" (برداشت).
+*   **CASE B (Step End):** "End of step 3" -> Focus on step 3 actions.
+*   **CASE C (Price/Qty):** "Last price" -> Just "Price".
+
+**⚠️ LOGIC FOR SEQUENTIAL QUERIES (AVOID LOOPS):**
+If the user asks for "More", "Next", "The rest" (بقیه، بعدی، دیگه چی):
+1.  **Check History:** See what was just discussed (e.g., Cotton Stages 1 & 2).
+2.  **Target NEW Info:** The query MUST target the *next* steps explicitly.
+    *   User: "دیگه چه مراحلی داره؟" (Context: Covered Stage 1-2)
+    *   ❌ Bad Rewrite: "مراحل کوددهی پنبه" (This fetches stage 1 again!)
+    *   ✅ Good Rewrite: "مراحل سوم تا هشتم کوددهی پنبه" (Targeting specific missing parts)
+
+
+**FEW-SHOT EXAMPLES:**
+- User: در مورد پرشین وی بگو
+  Output: {{ "rewritten_query": "معرفی شرکت پرشین وی و خدمات" }}
+
+- User: مرحله بعد چیه؟ (Context: Cotton Stage 1)
+  Output: {{ "rewritten_query": "مرحله دوم کوددهی پنبه" }}
+
+- User: مرحله آخرش کی هست؟ (Context: Pistachio)
+  Output: {{ "rewritten_query": "مرحله نهایی کوددهی پسته زمان برداشت" }}
+<|im_end|>
+<|im_start|>user
+**Chat History:**
+{recent_context if recent_context else "No history provided."}
+
+**User's Query:**
 {query}
----
-فقط یک JSON برگردان با این فرمت:
-{{
-    "rewritten_query": "پرسش بازنویسی‌شده",
-    "expanded_queries": [
-        "نسخه جایگزین اول",
-        "نسخه جایگزین دوم",
-        "نسخه جایگزین سوم"
-    ]
-}}
-"""
-            else:
-                # No conversation history - just expand the original query
-                prompt = f"""برای پرسش زیر، سه نسخه جایگزین ایجاد کن که همان منظور را با کلمات و عبارات متفاوت بیان کنند.
-روی گسترش مفاهیم، اضافه کردن مترادف‌ها و در نظر گرفتن اصطلاحات فارسی و انگلیسی تمرکز کن.
 
-پرسش: {query}
-
-فقط یک JSON برگردان با این فرمت:
+**OUTPUT FORMAT:**
+Return ONLY a JSON object in PERSIAN.
 {{
-    "rewritten_query": "{query}",
-    "expanded_queries": [
-        "نسخه جایگزین اول",
-        "نسخه جایگزین دوم",
-        "نسخه جایگزین سوم"
-    ]
+    "rewritten_query": "رشته جستجوی دقیق"
 }}
-"""
+<|im_end|>
+<|im_start|>assistant
+ """
             
             # Call llm for both rewriting and expansion
             response = await llm.ainvoke([
@@ -555,7 +544,7 @@ class KnowledgeBaseService:
                 if not isinstance(result, dict):
                     raise ValueError("Invalid JSON type")
                 rewritten_query = result.get("rewritten_query", query)
-                expanded_queries = result.get("expanded_queries", [])
+                expanded_queries = []
                 if not isinstance(expanded_queries, list):
                     expanded_queries = []
                 expanded_queries = [eq.strip() for eq in expanded_queries if isinstance(eq, str) and eq and eq.strip()]
@@ -570,9 +559,6 @@ class KnowledgeBaseService:
             # Combine all queries for search (rewritten + expanded)
             # Remove duplicates while preserving order
             all_queries = [rewritten_query]
-            for eq in expanded_queries:
-                if eq and eq not in all_queries:
-                    all_queries.append(eq)
             
             logging.info(f"[Query Expansion] Original: '{query[:50]}...'")
             if rewritten_query != query:
@@ -647,7 +633,7 @@ class KnowledgeBaseService:
 
 
 
-    async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False) -> Dict[str, Any]:
+    async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False, external_context: str = None) -> Dict[str, Any]:
         """Query the knowledge base with a question using improved retrieval strategy.
         
         Improvements:
@@ -660,6 +646,7 @@ class KnowledgeBaseService:
             query: The question to ask
             conversation_history: Previous conversation messages for context
             is_public: When True, restricts retrieval to documents tagged with public metadata
+            external_context: Optional string containing external information (e.g., web search results) to be included in the context
             
         Returns:
             A dictionary with the answer, confidence score, and source information
@@ -693,11 +680,9 @@ class KnowledgeBaseService:
                 conversation_history=filtered_history if filtered_history else None
             )
             
-            # Get all queries for search
-            all_queries = query_expansion_result["all_queries"]
             rewritten_query = query_expansion_result["rewritten_query"]
-            logging.info(f"[KB Query] All queries: {all_queries}")
             logging.debug(f"[KB Query] Original query: {query}")
+            logging.info(f"[KB Query] Using rewritten query: '{rewritten_query[:100]}...'")
             # Log the query transformation
             if rewritten_query != query:
                 logging.info(f"[KB Query] Query rewritten with context: '{query[:50]}...' -> '{rewritten_query[:50]}...'")
@@ -712,13 +697,8 @@ class KnowledgeBaseService:
 
             rag_settings = await self.config_service.get_rag_settings()
             
-            # ===== Retrieval: Weighted Multi-Query Similarity Search =====
-            logging.info(f"[KB Query] Performing weighted multi-query similarity search with {len(all_queries)} queries")
+            logging.info(f"[KB Query] Performing hybrid retrieval (dense + BM25)")
             
-            # Prepare base search kwargs
-            base_search_kwargs = {}
-            if is_public:
-                base_search_kwargs["filter"] = {"is_public": True}
 
             def _validate_is_public(doc) -> bool:
                 doc_is_public = doc.metadata.get("is_public", False)
@@ -729,59 +709,40 @@ class KnowledgeBaseService:
                     return result
                 return True
             
-            # Calculate weights for original vs expanded queries
-            num_expanded = max(len(all_queries) - 1, 0)
-            
-            # Weighted search across all queries
-            weighted_docs_with_scores = []
-            for idx, search_query in enumerate(all_queries):
-                if not search_query.strip():
-                    continue
-
-                # Assign weight: original/rewritten query gets higher weight
-                # First query is the rewritten one (most important)
-                if idx == 0:
-                    weight = rag_settings.original_query_weight
-                    query_type = "rewritten"
-                else:
-                    weight = rag_settings.expanded_query_weight
-                    query_type = f"expanded_{idx}"
-
-                logging.debug(f"[Weighted Search] Query weight={weight:.3f} type={query_type}: '{search_query[:50]}...'")
-
+            search_query = rewritten_query.strip()
+            if not search_query:
+                logging.warning("[KB Query] Empty rewritten query")
+                docs_with_scores = []
+                initial_count = 0
+            else:
                 try:
-                    docs_with_scores = vector_store.similarity_search_with_score(
-                        search_query,
-                        k=rag_settings.top_k_results,
-                        **base_search_kwargs
-                    )
-                    docs_with_scores = [(doc, score) for doc, score in docs_with_scores if _validate_is_public(doc)]
-
-                    for doc, score in docs_with_scores:
-                        # Lower score is better (L2 distance), divide by weight to favor higher-weight queries
-                        adjusted_score = score / max(weight, 1e-6)
-                        weighted_docs_with_scores.append((doc, adjusted_score, search_query, query_type))
-                    logging.debug(f"[KB Query] Found {len(docs_with_scores)} docs via similarity for {query_type} query")
+                    hrs = HybridRetrievalService(self.document_processor)
+                    hybrid_docs = await hrs.hybrid_retrieve(search_query,is_public)
+                    hybrid_docs = [doc for doc in hybrid_docs if _validate_is_public(doc)]
+                    docs_with_scores = []
+                    for doc in hybrid_docs:
+                        hs = float(doc.metadata.get("hybrid_score", 0.0) or 0.0)
+                        pseudo_distance = 1.0 - max(0.0, min(1.0, hs))
+                        docs_with_scores.append((doc, pseudo_distance))
+                    initial_count = len(docs_with_scores)
+                    logging.debug(f"[KB Query] Hybrid retrieval produced {len(docs_with_scores)} docs")
                 except Exception as e:
-                    logging.error(f"[KB Query] Similarity search failed for query '{search_query[:50]}...': {str(e)}")
-                    continue
+                    logging.error(f"[KB Query] Hybrid retrieval failed for query '{search_query[:50]}...': {str(e)}")
+                    docs_with_scores = []
+                    initial_count = 0
             
-            # Validate public flag before threshold filtering
-            weighted_docs_with_scores = [
-                (doc, s, q, t) for doc, s, q, t in weighted_docs_with_scores if _validate_is_public(doc)
-            ]
-            logging.info(f"[Filter] After validation: {len(weighted_docs_with_scores)} docs")
+            logging.info(f"[Filter] After validation: {len(docs_with_scores)} docs")
 
             # ===== IMPROVEMENT 2: Similarity Threshold Filtering =====
             # Filter out documents with scores above threshold (higher score = less similar in L2 distance)
             filtered_docs = [
-                (doc, score, query, qtype)
-                for doc, score, query, qtype in weighted_docs_with_scores
+                (doc, score, search_query, "single")
+                for doc, score in docs_with_scores
                 if score <= rag_settings.similarity_threshold
             ]
 
             if filtered_docs:
-                removed_count = len(weighted_docs_with_scores) - len(filtered_docs)
+                removed_count = len(docs_with_scores) - len(filtered_docs)
                 if removed_count > 0:
                     logging.info(
                         f"[KB Query] Filtered out {removed_count} documents below similarity threshold ({rag_settings.similarity_threshold})"
@@ -791,7 +752,7 @@ class KnowledgeBaseService:
                 logging.warning(
                     f"[KB Query] All documents below threshold, keeping top {rag_settings.top_k_results} anyway"
                 )
-                filtered_docs = weighted_docs_with_scores
+                filtered_docs = [(doc, score, search_query, "single") for doc, score in docs_with_scores]
 
             # ===== NEW: Embedding-based Re-ranking (before deduplication) =====
             if self.reranker is not None and filtered_docs:
@@ -799,19 +760,7 @@ class KnowledgeBaseService:
                 docs_to_rerank = [doc for doc, _, _, _ in filtered_docs]
                 original_scores = [score for _, score, _, _ in filtered_docs]
 
-                best_expanded = ""
-                if len(all_queries) > 1:
-                    expanded_queries_info = []
-                    for q in all_queries[1:]:
-                        query_docs = [(doc, s) for doc, s, sq, _ in filtered_docs if sq == q]
-                        if query_docs:
-                            avg_score = sum(s for _, s in query_docs) / len(query_docs)
-                            expanded_queries_info.append((q, avg_score, len(query_docs)))
-                    if expanded_queries_info:
-                        expanded_queries_info.sort(key=lambda x: x[1])
-                        best_expanded = expanded_queries_info[0][0]
-
-                combined_query = f"{rewritten_query} {best_expanded}".strip()
+                combined_query = rewritten_query
                 reranked_results = self.reranker.rerank(
                     query=combined_query,
                     documents=docs_to_rerank,
@@ -865,7 +814,7 @@ class KnowledgeBaseService:
             # Take top K results
             docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
             
-            logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {len(weighted_docs_with_scores)} initial candidates)")
+            logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {initial_count} initial candidates)")
             if docs_with_scores:
                 logging.debug(f"[KB Query] Score range: {docs_with_scores[0][1]:.4f} (best) to {docs_with_scores[-1][1]:.4f} (worst)")
             
@@ -889,8 +838,29 @@ class KnowledgeBaseService:
                 
             # Prepare documents and manual context
             docs = [doc for doc, score in docs_with_scores]
+            
+            # Incorporate external context (e.g., web search results)
+            if external_context:
+                logging.info("[KB Query] Incorporating external context into response generation")
+                external_doc = Document(
+                    page_content=f"External Information (Web Search):\n{external_context}",
+                    metadata={
+                        "source": "Web Search",
+                        "source_type": "external_web_search",
+                        "title": "Web Search Results",
+                        "is_public": True
+                    }
+                )
+                docs.append(external_doc)
+                
             normalized_docs = self._normalize_documents_for_context(docs)
-     
+            # summaries = await batch_condense(normalized_docs, rewritten_query)
+            # summary_docs = []
+            # for summary in summaries:
+            #         summary_docs.append(Document(
+            #         page_content=summary.get("summary", ""),
+            #         metadata={"source_id": summary.get("source_id", "unknown")}
+            # ))
             result = doc_chain.invoke({"input": rewritten_query, "context": normalized_docs})
             answer = result if isinstance(result, str) else result.get("answer") or result.get("result")
             if answer is None:
@@ -935,7 +905,11 @@ class KnowledgeBaseService:
                         "source": doc.metadata.get("source", "Unknown"),
                         "page": doc.metadata.get("page", 1),
                         "source_type": doc.metadata.get("source_type", "unknown"),
-                        "is_public": doc.metadata.get("is_public", False)
+                        "is_public": doc.metadata.get("is_public", False),
+                        "title": doc.metadata.get("title"),
+                        "question": doc.metadata.get("question"),
+                        "answer": doc.metadata.get("answer"),
+                        "meta_tags": doc.metadata.get("meta_tags")
                     })
             
             # Prepare response

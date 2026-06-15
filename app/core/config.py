@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     OPENROUTER_API_BASE: str = "https://openrouter.ai/api/v1"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     
+    # Search Configuration
+    TAVILY_API_KEY: Optional[str] = None
+    
     # RAG Configuration
     KNOWLEDGE_BASE_CONFIDENCE_THRESHOLD: float = 0.5
     QA_MATCH_THRESHOLD: float = 0.8
