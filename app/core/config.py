@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     OPENROUTER_API_BASE: str = "https://openrouter.ai/api/v1"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     
+    # Storage Configuration
+    STORAGE_ROOT: str = ""  # empty = use project root; set e.g. /knowledgebase on host
+    
     # Search Configuration
     TAVILY_API_KEY: Optional[str] = None
     

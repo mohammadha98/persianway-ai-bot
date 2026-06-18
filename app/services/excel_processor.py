@@ -20,8 +20,10 @@ class ExcelQAProcessor:
         # Get the document processor to access embeddings and vector store
         self.document_processor = get_document_processor()
         
-        # Set up the Excel directory path
-        self.excel_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "docs")
+        # Set up the Excel directory path using STORAGE_ROOT
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        _storage_root = settings.STORAGE_ROOT.strip() if settings.STORAGE_ROOT else _project_root
+        self.excel_dir = os.path.join(_storage_root, "docs")
         
     def validate_excel_structure(self, df: pd.DataFrame) -> bool:
         """Validate that the Excel file has the expected structure.

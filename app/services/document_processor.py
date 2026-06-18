@@ -79,9 +79,13 @@ class DocumentProcessor:
     
     def __init__(self):
         """Initialize the document processor."""
-        self.docs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "docs")
-        self.persist_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vectordb")
-        
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        _storage_root = settings.STORAGE_ROOT.strip() if settings.STORAGE_ROOT else _project_root
+
+        self.docs_dir = os.path.join(_storage_root, "docs")
+        self.persist_root = os.path.join(_storage_root, "vectordb")
+
+        os.makedirs(self.docs_dir, exist_ok=True)
         os.makedirs(self.persist_root, exist_ok=True)
         
         openrouter_key = settings.OPENROUTER_API_KEY
