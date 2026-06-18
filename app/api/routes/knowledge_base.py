@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Form, Body, UploadFile, File
 from typing import Dict, Any, List, Optional
 from enum import Enum
+import os
 import uuid
 from datetime import datetime
 from app.services.database import get_database_service
+from app.core.config import settings
 
 from app.schemas.knowledge_base import (
     KnowledgeBaseQuery, 
