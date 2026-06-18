@@ -201,7 +201,7 @@ async def contribute_knowledge(
         # More advanced sanitation (e.g., HTML stripping) could be added here if content allows HTML
         cleaned_title = title.strip()
         cleaned_content = content.strip()
-        cleaned_source = source.strip()
+        cleaned_source = source.strip() if source else None
         
         if not cleaned_title or not cleaned_content:
             return KnowledgeContributionResponse(success=False, message="Title, content, and source cannot be empty.")
