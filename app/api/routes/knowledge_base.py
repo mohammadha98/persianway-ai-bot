@@ -222,12 +222,12 @@ async def contribute_knowledge(
                 )
             
             # Save the uploaded file to the docs directory
-            import os
-            from app.core.config import settings
             import shutil
             
-            # Create docs directory if it doesn't exist
-            docs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "docs")
+            # Resolve storage root from SETTINGS or project root
+            _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            _storage_root = settings.STORAGE_ROOT.strip() if settings.STORAGE_ROOT else _project_root
+            docs_dir = os.path.join(_storage_root, "docs")
             os.makedirs(docs_dir, exist_ok=True)
             
             # Generate a unique filename to avoid conflicts
