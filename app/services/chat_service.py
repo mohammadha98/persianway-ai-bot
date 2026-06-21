@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from langchain.chains.base import Chain
 import json
 import re
+import time
 from langchain_openai import ChatOpenAI
 import logging
 from loguru import logger
@@ -736,6 +737,11 @@ Title:"""
 
     async def process_message(self, user_id: str, message: str, conversation_history: List = None, model: str = None, parameters: dict = None) -> Dict[str, Any]:
         logger.debug(f"[DEBUG] process_message called with model: {model}")
+        
+        # === PERF: Timing Instrumentation ===
+        t_pipeline_start = time.perf_counter()
+        timings = {}
+        
         """Process a user message using a hybrid approach.
 
         This service implements a three-tier approach:
@@ -783,6 +789,8 @@ Title:"""
     
 
         try:
+            # === PERF: Topic Check ===
+            t0 = time.perf_counter()
             # First, check if the topic is related to our domain
              # Check if the topic is related to the domain
             # is_domain_related, unrelated_keyword = self._is_topic_related_to_domain(message)
@@ -798,7 +806,12 @@ Title:"""
             else:
                 await self._ensure_latest_config()
                 # Domain-related topic - first check intent
+                
+                # === PERF: Intent Detection ===
+                t0 = time.perf_counter()
                 intent_result = await self.detect_query_intent(message, conversation_history)
+                timings['intent_detection'] = time.perf_counter() - t0
+                logger.info(f"[PERF] step=intent_detection elapsed={timings['intent_detection']:.3f}s")
                 
                 # Handle off-topic questions
                 if intent_result["intent"] == "OFF_TOPIC":
@@ -910,17 +923,14 @@ Title:"""
                 
            
                 # Proceed with knowledge base query
+                # Web search decision and execution is now handled inside query_knowledge_base
                 is_public = intent_result["is_public"]
+                
+                # === PERF: Knowledge Base Query ===
+                t0 = time.perf_counter()
                 try:
-                     
-                    # search_decision = await self._get_search_decision(message, model_name="gpt-4o-mini")
-                    # logger.debug(f"Search decision: {search_decision}")
-                    search_result = None
-                    if is_public:
-                        search_result = await search_persianway.ainvoke({"query": message})
-                            
                     kb_service = get_knowledge_base_service()
-                    kb_result = await kb_service.query_knowledge_base(message, conversation_history, is_public,search_result)
+                    kb_result = await kb_service.query_knowledge_base(message, conversation_history, is_public)
                     kb_confidence = kb_result.get("confidence_score", 0) if kb_result else 0
                     logger.debug(f"[DEBUG] KB raw confidence: {kb_confidence:.3f}")
                 except RuntimeError as kb_error:
@@ -977,55 +987,11 @@ Title:"""
                         logger.info("Low KB confidence. Attempting Web Search Integration...")
                         
                         try:
-                            search_decision = await self._get_search_decision(message, model_name=model)
-                            logger.debug(f"Search decision: {search_decision}")
-                            if search_decision["search_needed"]:
-                                search_result = await search_persianway.ainvoke({"query": search_decision["search_query"]})
-                                kb_result_search = await kb_service.query_knowledge_base(
-                                    message, 
-                                    conversation_history, 
-                                    is_public, 
-                                    external_context=search_result
-                                )
-                                
-                                response = kb_result_search["answer"]
-                                final_confidence = kb_result_search.get("confidence_score", 0.0)
-                                
-                                if any(indicator in response for indicator in referral_indicators):
-                                    answer = response
-                                    query_analysis["requires_human_referral"] = True
-                                    query_analysis["reasoning"] = "Web search did not yield sufficient information."
-                                else:
-                                    answer = response
-                                    query_analysis["confidence_score"] = max(0.6, final_confidence)
-                                    query_analysis["knowledge_source"] = "web_search_augmented"
-                                    query_analysis["requires_human_referral"] = False
-                                    query_analysis["reasoning"] = "Answer provided via Web Search integration with Knowledge Base."
-                                    response_parameters["temperature"] = 0.2
-                            else:
-                                conversation = await self._get_or_create_session(user_id, model, parameters)
-                                response = await conversation.ainvoke(message)
-                                response_content = response['output'] if isinstance(response, dict) else response
-
-                                if any(indicator in response_content for indicator in referral_indicators):
-                                    answer = response_content
-                                    query_analysis["requires_human_referral"] = True
-                                    query_analysis["reasoning"] = "Model determined the query requires specialist attention."
-                                else:
-                                    answer = response_content
-                                    query_analysis["confidence_score"] = 0.6
-                                    query_analysis["knowledge_source"] = "general_knowledge"
-                                    query_analysis["requires_human_referral"] = False
-                                    query_analysis["reasoning"] = "Answer provided from general knowledge (fallback)."
-                                    response_parameters["temperature"] = 0.3
-                                
-                        except Exception as search_error:
-                            logger.error(f"Web search integration failed: {search_error}")
-                            # Fallback to original Agent logic if search integration fails
+                            # Use general conversation chain for low confidence cases
                             conversation = await self._get_or_create_session(user_id, model, parameters)
                             response = await conversation.ainvoke(message)
                             response_content = response['output'] if isinstance(response, dict) else response
-                            
+
                             if any(indicator in response_content for indicator in referral_indicators):
                                 answer = response_content
                                 query_analysis["requires_human_referral"] = True
@@ -1037,6 +1003,13 @@ Title:"""
                                 query_analysis["requires_human_referral"] = False
                                 query_analysis["reasoning"] = "Answer provided from general knowledge (fallback)."
                                 response_parameters["temperature"] = 0.3
+                                
+                        except Exception as general_error:
+                            logger.error(f"General knowledge processing failed: {general_error}")
+                            # Fallback to human referral
+                            answer = HUMAN_REFERRAL_MESSAGE
+                            query_analysis["requires_human_referral"] = True
+                            query_analysis["reasoning"] = f"General knowledge processing failed: {str(general_error)}"
                     else:
                         # General answers are disabled - refer to human
                         answer = HUMAN_REFERRAL_MESSAGE
@@ -1053,6 +1026,14 @@ Title:"""
 
             # Construct the final response dictionary
             logger.debug(f"[DEBUG] Final confidence: {query_analysis['confidence_score']:.3f}")
+            
+            # === PERF: KB Query Timing ===
+            timings['retrieval'] = time.perf_counter() - t0
+            
+            # === PERF: Total Pipeline Timing ===
+            timings['total_pipeline'] = time.perf_counter() - t_pipeline_start
+            logger.info(f"[PERF] Pipeline timings: {timings}")
+            
             return {
                 "query_analysis": query_analysis,
                 "response_parameters": response_parameters,

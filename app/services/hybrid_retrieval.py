@@ -120,11 +120,24 @@ class HybridRetrievalService:
         return retr
 
     async def _dense_parallel(self, query: str, k: int, is_public: bool = False) -> List[Tuple[Document, float]]:
+        """Dense vector search across 3 branches (contrib/docx/excel) with timing instrumentation.
+        
+        PERF: Each branch calls vs.similarity_search_with_score(query, ...) which internally
+        calls embeddings.embed_query(query). This means 3 branches = 3 embedding API calls
+        for the SAME query. This is the bottleneck.
+        
+        Expected: 3 API calls × ~0.8s = ~2.4s (or ~0.8s if parallelized by OpenRouter)
+        Ideal: 1 API call + 2 local vector searches = ~0.8s
+        """
         if not query.strip():
             return []
         vs = self.vector_store
         if vs is None:
             return []
+        
+        # === PERF: Dense Search Breakdown ===
+        t0 = time.perf_counter()
+        
         # Create filters with is_public metadata filtering
         filters = {
             "contrib": {"$and": [
@@ -140,14 +153,36 @@ class HybridRetrievalService:
                 {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
             ]},
         }
-        async def run(f):
-            return await asyncio.to_thread(vs.similarity_search_with_score, query, k=k, filter=f)
-        results = await asyncio.gather(*[run(f) for f in filters.values()], return_exceptions=True)
+        
+        async def run_with_timing(filter_name: str, f: Dict) -> Tuple[str, List[Tuple[Document, float]]]:
+            """Run one branch with individual timing."""
+            branch_t0 = time.perf_counter()
+            results = await asyncio.to_thread(vs.similarity_search_with_score, query, k=k, filter=f)
+            branch_elapsed = time.perf_counter() - branch_t0
+            logger.info(f"[DENSE_BRANCH] branch={filter_name} elapsed={branch_elapsed:.3f}s docs={len(results or [])}")
+            return (filter_name, results or [])
+        
+        # Create named tasks for better tracking
+        tasks = [run_with_timing(name, filt) for name, filt in filters.items()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        dense_elapsed = time.perf_counter() - t0
+        logger.info(f"[PERF_DENSE] step=dense_parallel total elapsed={dense_elapsed:.3f}s branches=3")
+        
         combined: List[Tuple[Document, float]] = []
-        for r in results:
-            if isinstance(r, Exception):
+        branch_results = {}
+        for result in results:
+            if isinstance(result, Exception):
                 continue
-            combined.extend(r or [])
+            name, docs = result
+            branch_results[name] = docs
+            combined.extend(docs)
+        
+        logger.info(
+            f"[DENSE_BREAKDOWN] contrib={len(branch_results.get('contrib', []))} docs, "
+            f"docx={len(branch_results.get('docx', []))} docs, "
+            f"excel={len(branch_results.get('excel', []))} docs"
+        )
         return combined
 
     def _bm25_parallel_old(self, query: str, k: int, is_public: bool = False) -> List[Tuple[Document, float]]:
@@ -313,14 +348,25 @@ class HybridRetrievalService:
             return [doc for doc, _ in doc_score_pairs[:top_k]]
 
     async def hybrid_retrieve(self, query: str, is_public: bool = False) -> List[Document]:
+        """Hybrid retrieval combining dense vector search and BM25 keyword search.
+        
+        PERF: This method includes detailed timing instrumentation for performance analysis.
+        """
         k = 15
         prefilter_k = 20
         overall_start = time.perf_counter()
+        
+        # === PERF: Detailed Timing Tracking ===
+        timings = {}
 
+        # === Branch 1: Dense Vector Search (all 3 branches in parallel) ===
         dense_start = time.perf_counter()
         dense_pairs = await self._dense_parallel(query, k, is_public)
         dense_elapsed = time.perf_counter() - dense_start
+        timings['dense'] = dense_elapsed
+        logger.info(f"[PERF_HYBRID] step=dense_search elapsed={dense_elapsed:.3f}s docs={len(dense_pairs)}")
 
+        # === Branch 2-3: BM25 Search (3 branches in parallel) ===
         bm25_start = time.perf_counter()
         try:
             bm25_pairs = await self._bm25_parallel_async(query, k, is_public)
@@ -328,7 +374,11 @@ class HybridRetrievalService:
             logger.warning(f"[HYBRID] Async BM25 failed, falling back to sync: {e}")
             bm25_pairs = self._bm25_parallel_old(query, k, is_public)
         bm25_elapsed = time.perf_counter() - bm25_start
+        timings['bm25'] = bm25_elapsed
+        logger.info(f"[PERF_HYBRID] step=bm25_search elapsed={bm25_elapsed:.3f}s docs={len(bm25_pairs)}")
 
+        # === Merge & Normalize ===
+        merge_start = time.perf_counter()
         dense_norm = self._normalize_dense(dense_pairs)
         bm25_norm = self._normalize_bm25(bm25_pairs)
 
@@ -352,11 +402,18 @@ class HybridRetrievalService:
             doc = doc_map.get(doc_id)
             if doc is not None:
                 top_doc_pairs.append((doc, score))
+        merge_elapsed = time.perf_counter() - merge_start
+        timings['merge'] = merge_elapsed
+        logger.info(f"[PERF_HYBRID] step=merge_normalize elapsed={merge_elapsed:.3f}s combined_docs={len(top_doc_pairs)}")
 
+        # === Reranking ===
         rerank_start = time.perf_counter()
         reranked_docs = await self._rerank_async(query, top_doc_pairs, top_k=k)
         rerank_elapsed = time.perf_counter() - rerank_start
+        timings['reranking'] = rerank_elapsed
+        logger.info(f"[PERF_HYBRID] step=reranking elapsed={rerank_elapsed:.3f}s")
 
+        # === Sort & Format Output ===
         reranked_by_key = {self._make_doc_key(d): idx for idx, d in enumerate(reranked_docs)}
 
         out: List[Document] = []
@@ -374,8 +431,9 @@ class HybridRetrievalService:
             out.append(Document(page_content=doc.page_content, metadata=meta))
 
         out.sort(key=lambda d: d.metadata.get("rerank_position", 999999))
-        total_elapsed = time.perf_counter() - overall_start
+        
+        timings['total_hybrid'] = time.perf_counter() - overall_start
         logger.info(
-            f"[HYBRID] timings dense={dense_elapsed:.3f}s bm25={bm25_elapsed:.3f}s rerank={rerank_elapsed:.3f}s total={total_elapsed:.3f}s"
+            f"[PERF_HYBRID] HYBRID_TIMING: {timings}"
         )
         return out[:k]
