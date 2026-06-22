@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 import os
-
+import chromadb
 import logging
 import re
 import hashlib
@@ -11,9 +11,6 @@ import pymupdf  # PyMuPDF for PDF processing
 import pandas as pd
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import chromadb
-from chromadb.config import Settings as ChromaSettings
-
 try:
     from langchain_chroma import Chroma
 except ImportError:
@@ -21,6 +18,7 @@ except ImportError:
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.schema import Document
 from app.services.database import DatabaseService
+from chromadb.config import Settings as ChromaSettings
 
 try:
     from docx import Document as DocxDocument
@@ -90,7 +88,8 @@ class DocumentProcessor:
         """Initialize the document processor."""
         _project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         _storage_root = settings.STORAGE_ROOT.strip() if settings.STORAGE_ROOT else _project_root
-
+        self.chroma_client = None
+        self._vector_store = None
         self.docs_dir = os.path.join(_storage_root, "docs")
         self.persist_root = os.path.join(_storage_root, "vectordb")
         self.chroma_client = None
@@ -185,7 +184,6 @@ class DocumentProcessor:
             return None
             
         if self._vector_store is None:
-            # PersistentClient singleton
             if self.chroma_client is None:
                 self.chroma_client = chromadb.PersistentClient(
                     path=self.persist_directory,
@@ -193,16 +191,15 @@ class DocumentProcessor:
                 )
                 logging.info(f"[PID {os.getpid()}] Chroma PersistentClient initialized at: {self.persist_directory}")
             
-            # get_or_create_collection — NEVER overwrites existing data
+            # تغییر ۳: get_or_create_collection — NEVER overwrites existing data
             collection_name = "knowledge_base"
             self.chroma_client.get_or_create_collection(name=collection_name)
             
-            # Now create LangChain wrapper with the existing client
+            # حالا LangChain wrapper رو با client موجود بساز
             self._vector_store = Chroma(
                 client=self.chroma_client,
                 collection_name=collection_name,
-                embedding_function=self.embeddings,
-                settings=ChromaSettings(anonymized_telemetry=False)
+                embedding_function=self.embeddings
             )
             logging.info(f"[PID {os.getpid()}] Vector store loaded. "
                         f"Collection exists: {collection_name} "
