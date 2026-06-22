@@ -370,8 +370,8 @@ class KnowledgeBaseService:
                     vector_store.add_documents(batch)
                     logging.info(f"Processed batch {i//batch_size + 1}/{(len(file_docs) + batch_size - 1)//batch_size} with {len(batch)} documents from uploaded file")
             
-            # Persist changes to vector store
-            vector_store.persist() # Ensure data is saved
+            # # Persist changes to vector store
+            # vector_store.persist() # Ensure data is saved
 
             # After adding new documents, the QA chain should be reset to reflect the changes.
             self._qa_chain = None
@@ -1044,8 +1044,8 @@ Return ONLY a JSON object in PERSIAN.
                         # Delete documents by metadata <mcreference link="https://github.com/langchain-ai/langchain/discussions/1690" index="5">5</mcreference>
                         collection.delete(where={"hash_id": hash_id})
                         
-                        # Persist changes to vector store
-                        vector_store.persist()
+                        # # Persist changes to vector store
+                        # vector_store.persist()
                         
                         # Reset QA chain to reflect changes
                         self._qa_chain = None
@@ -1079,8 +1079,8 @@ Return ONLY a JSON object in PERSIAN.
                             removed_count = len(ids_to_delete)
                             vector_removal_success = True
                             
-                            # Persist changes and reset QA chain
-                            vector_store.persist()
+                            # # Persist changes and reset QA chain
+                            # vector_store.persist()
                             self._qa_chain = None
                             
                             logging.info(f"Successfully removed {removed_count} documents using alternative method with hash_id: {hash_id}")
