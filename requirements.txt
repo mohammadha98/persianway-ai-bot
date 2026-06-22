@@ -12,8 +12,10 @@ aiofiles>=23.1.0
 # ML dependencies
 scikit-learn>=1.2.2
 numpy>=1.24.3
+scipy>=1.12.0        # required for NumPy 2.x compatibility
 pandas>=2.0.0
 joblib>=1.2.0
+
 
 # Chat dependencies (all pinned to compatible 0.3.x family)
 langchain>=0.3.0,<0.4.0
