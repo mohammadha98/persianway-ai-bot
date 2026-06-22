@@ -18,6 +18,8 @@ except ImportError:
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.schema import Document
 from app.services.database import DatabaseService
+from chromadb.config import Settings as ChromaSettings
+
 try:
     from docx import Document as DocxDocument
     from docx.table import Table as DocxTable
@@ -185,14 +187,14 @@ class DocumentProcessor:
                 self._vector_store = Chroma(
                     persist_directory=self.persist_directory,
                     embedding_function=self.embeddings,
-                    anonymized_telemetry=False
+                    client_settings=ChromaSettings(anonymized_telemetry=False)
                 )
             else:
                 # Create new vector store
                 self._vector_store = Chroma(
                     persist_directory=self.persist_directory,
                     embedding_function=self.embeddings,
-                    anonymized_telemetry=False
+                    client_settings=ChromaSettings(anonymized_telemetry=False)
                 )
         
         return self._vector_store
