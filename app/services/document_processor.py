@@ -19,6 +19,7 @@ try:
 except ImportError:
     from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import OpenAIEmbeddings
+from langchain.schema import Document
 from app.services.database import DatabaseService
 
 try:
