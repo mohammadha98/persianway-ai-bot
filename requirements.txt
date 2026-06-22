@@ -7,33 +7,36 @@ python-dotenv>=1.0.0
 python-multipart>=0.0.5
 loguru>=0.7.0
 jinja2>=3.1.2
-aiofiles>=23.1.0  # For async file operations with static files
+aiofiles>=23.1.0
+
 # ML dependencies
 scikit-learn>=1.2.2
 numpy>=1.24.3
 pandas>=2.0.0
 joblib>=1.2.0
 
-# Chat dependencies
+# Chat dependencies (all pinned to compatible 0.3.x family)
 langchain>=0.3.0,<0.4.0
-langchain-openai>=0.2.0,<0.3.0
+langchain-openai>=0.3.0,<0.4.0
 langchain-community>=0.3.0,<0.4.0
 langchain-core>=0.3.0,<0.4.0
+langchain-text-splitters>=0.3.0,<0.4.0
+# langchain-chroma is intentionally omitted due to platform build constraints
+# (chroma-hnswlib wheel issues on some Python/Windows combinations).
+# Code falls back to langchain_community.vectorstores.Chroma when unavailable.
 openai>=1.0.0
+
 # RAG dependencies
-chromadb>=0.4.6
+chromadb>=0.4.6,<0.5.0          # ← pinned to avoid chroma-hnswlib build failure
 tiktoken>=0.4.0
 pypdf>=3.0.0
-pymupdf>=1.23.0  # PyMuPDF for advanced PDF processing
-python-docx>=0.8.11  # For Word document processing
-openpyxl>=3.1.0  # Required for Excel file processing
-tabulate>=0.9.0  # For table markdown formatting
-arabic-reshaper>=3.0.0  # For Persian text reshaping
-python-bidi>=0.4.2  # For bidirectional text support
+pymupdf>=1.23.0
+python-docx>=0.8.11
+openpyxl>=3.1.0
+tabulate>=0.9.0
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
 rank_bm25
-# Optional: Deep learning
-# tensorflow>=2.12.0
-# torch>=2.0.0
 
 # MongoDB dependencies
 motor>=3.3.0

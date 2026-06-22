@@ -120,12 +120,30 @@ class HybridRetrievalService:
         return retr
 
     async def _dense_parallel(self, query: str, k: int, is_public: bool = False) -> List[Tuple[Document, float]]:
-        if not query.strip():
+        """Dense vector search across 3 branches with SINGLE shared embedding.
+        
+        BEFORE FIX:
+        - 3 branches × embed_query() = 3 API calls (~5.4s cold)
+        
+        AFTER FIX:
+        - 1 embed_query() + 3 vector searches = 1 API call (~1.3s cold)
+        """
+        if not query.strip() or not self.vector_store:
             return []
+
         vs = self.vector_store
-        if vs is None:
+
+        # ===== FIX: Create embedding ONCE (not 3x) =====
+        t_embed_start = time.perf_counter()
+        try:
+            query_embedding = await asyncio.to_thread(vs.embeddings.embed_query, query)
+            embed_elapsed = time.perf_counter() - t_embed_start
+            logger.info(f"[EMBED_SHARED] query={query[:50]}... elapsed={embed_elapsed:.3f}s dims={len(query_embedding) if query_embedding else 0}")
+        except Exception as e:
+            logger.error(f"[EMBED_SHARED] FAILED: {e}")
             return []
-        # Create filters with is_public metadata filtering
+
+        # Define filters for 3 branches (same logic as before)
         filters = {
             "contrib": {"$and": [
                 {"entry_type": {"$in": ["user_contribution"]}},
@@ -140,14 +158,53 @@ class HybridRetrievalService:
                 {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
             ]},
         }
-        async def run(f):
-            return await asyncio.to_thread(vs.similarity_search_with_score, query, k=k, filter=f)
-        results = await asyncio.gather(*[run(f) for f in filters.values()], return_exceptions=True)
+
+        # ===== FIX: Use asimilarity_search_by_vector (no additional embedding) =====
+        async def search_branch(filter_name: str, filter_dict: Dict) -> Tuple[str, List[Tuple[Document, float]]]:
+            """Search one branch using pre-computed embedding."""
+            branch_t0 = time.perf_counter()
+            try:
+                # ✅ asimilarity_search_by_vector is ALREADY async - no need for asyncio.to_thread
+                results = await vs.asimilarity_search_by_vector(
+                    query_embedding,
+                    k=k,
+                    filter=filter_dict
+                )
+                elapsed = time.perf_counter() - branch_t0
+                # Convert to (Document, float) format - assign score=1.0 for now
+                scored_results = [(doc, 1.0) for doc in results]
+                logger.info(f"[DENSE_BRANCH] branch={filter_name} elapsed={elapsed:.3f}s docs={len(results)}")
+                return (filter_name, scored_results)
+            except Exception as e:
+                elapsed = time.perf_counter() - branch_t0
+                logger.error(f"[DENSE_BRANCH] branch={filter_name} failed after {elapsed:.3f}s: {e}")
+                return (filter_name, [])
+
+        # Execute 3 branches in parallel (only vector search, no additional embedding)
+        tasks = [search_branch(name, filt) for name, filt in filters.items()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Combine results
         combined: List[Tuple[Document, float]] = []
-        for r in results:
-            if isinstance(r, Exception):
+        branch_results: Dict[str, List[Tuple[Document, float]]] = {}
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"[DENSE_PARALLEL] Exception: {result}")
                 continue
-            combined.extend(r or [])
+            name, docs = result
+            branch_results[name] = docs
+            combined.extend(docs)
+
+        total_elapsed = time.perf_counter() - t_embed_start
+        logger.info(
+            f"[DENSE_TOTAL] elapsed={total_elapsed:.3f}s embed={embed_elapsed:.3f}s "
+            f"branches={len(branch_results)} docs={len(combined)}"
+        )
+        logger.info(
+            f"[DENSE_BREAKDOWN] contrib={len(branch_results.get('contrib', []))} docs, "
+            f"docx={len(branch_results.get('docx', []))} docs, "
+            f"excel={len(branch_results.get('excel', []))} docs"
+        )
         return combined
 
     def _bm25_parallel_old(self, query: str, k: int, is_public: bool = False) -> List[Tuple[Document, float]]:
@@ -313,14 +370,25 @@ class HybridRetrievalService:
             return [doc for doc, _ in doc_score_pairs[:top_k]]
 
     async def hybrid_retrieve(self, query: str, is_public: bool = False) -> List[Document]:
+        """Hybrid retrieval combining dense vector search and BM25 keyword search.
+        
+        PERF: This method includes detailed timing instrumentation for performance analysis.
+        """
         k = 15
         prefilter_k = 20
         overall_start = time.perf_counter()
+        
+        # === PERF: Detailed Timing Tracking ===
+        timings = {}
 
+        # === Branch 1: Dense Vector Search (all 3 branches in parallel) ===
         dense_start = time.perf_counter()
         dense_pairs = await self._dense_parallel(query, k, is_public)
         dense_elapsed = time.perf_counter() - dense_start
+        timings['dense'] = dense_elapsed
+        logger.info(f"[PERF_HYBRID] step=dense_search elapsed={dense_elapsed:.3f}s docs={len(dense_pairs)}")
 
+        # === Branch 2-3: BM25 Search (3 branches in parallel) ===
         bm25_start = time.perf_counter()
         try:
             bm25_pairs = await self._bm25_parallel_async(query, k, is_public)
@@ -328,7 +396,11 @@ class HybridRetrievalService:
             logger.warning(f"[HYBRID] Async BM25 failed, falling back to sync: {e}")
             bm25_pairs = self._bm25_parallel_old(query, k, is_public)
         bm25_elapsed = time.perf_counter() - bm25_start
+        timings['bm25'] = bm25_elapsed
+        logger.info(f"[PERF_HYBRID] step=bm25_search elapsed={bm25_elapsed:.3f}s docs={len(bm25_pairs)}")
 
+        # === Merge & Normalize ===
+        merge_start = time.perf_counter()
         dense_norm = self._normalize_dense(dense_pairs)
         bm25_norm = self._normalize_bm25(bm25_pairs)
 
@@ -352,11 +424,18 @@ class HybridRetrievalService:
             doc = doc_map.get(doc_id)
             if doc is not None:
                 top_doc_pairs.append((doc, score))
+        merge_elapsed = time.perf_counter() - merge_start
+        timings['merge'] = merge_elapsed
+        logger.info(f"[PERF_HYBRID] step=merge_normalize elapsed={merge_elapsed:.3f}s combined_docs={len(top_doc_pairs)}")
 
+        # === Reranking ===
         rerank_start = time.perf_counter()
         reranked_docs = await self._rerank_async(query, top_doc_pairs, top_k=k)
         rerank_elapsed = time.perf_counter() - rerank_start
+        timings['reranking'] = rerank_elapsed
+        logger.info(f"[PERF_HYBRID] step=reranking elapsed={rerank_elapsed:.3f}s")
 
+        # === Sort & Format Output ===
         reranked_by_key = {self._make_doc_key(d): idx for idx, d in enumerate(reranked_docs)}
 
         out: List[Document] = []
@@ -374,8 +453,9 @@ class HybridRetrievalService:
             out.append(Document(page_content=doc.page_content, metadata=meta))
 
         out.sort(key=lambda d: d.metadata.get("rerank_position", 999999))
-        total_elapsed = time.perf_counter() - overall_start
+        
+        timings['total_hybrid'] = time.perf_counter() - overall_start
         logger.info(
-            f"[HYBRID] timings dense={dense_elapsed:.3f}s bm25={bm25_elapsed:.3f}s rerank={rerank_elapsed:.3f}s total={total_elapsed:.3f}s"
+            f"[PERF_HYBRID] HYBRID_TIMING: {timings}"
         )
         return out[:k]

@@ -2,7 +2,10 @@ from typing import List, Dict, Any, Optional, Tuple
 import os
 import pandas as pd
 from langchain.schema import Document
-from langchain.vectorstores import Chroma
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    from langchain_community.vectorstores import Chroma
 
 from app.core.config import settings
 from app.services.document_processor import get_document_processor

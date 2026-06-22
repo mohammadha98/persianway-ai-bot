@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 import uuid
 import logging
 import os
+import time
 from datetime import datetime
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from app.services.reranker import EmbeddingReranker
@@ -636,6 +637,8 @@ Return ONLY a JSON object in PERSIAN.
     async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False, external_context: str = None) -> Dict[str, Any]:
         """Query the knowledge base with a question using improved retrieval strategy.
         
+        PERF: This method includes detailed timing instrumentation for performance analysis.
+        
         Improvements:
         - Weighted multi-query search (original query gets higher weight)
         - Similarity threshold filtering
@@ -651,9 +654,16 @@ Return ONLY a JSON object in PERSIAN.
         Returns:
             A dictionary with the answer, confidence score, and source information
         """
+        # === PERF: Timing Instrumentation ===
+        t_kb_start = time.perf_counter()
+        kb_timings = {}
+        
         try:
             # Log the incoming query for debugging
             logging.info(f"[KB Query] Original query: '{query[:100]}...', is_public={is_public}")
+            
+            # === PERF: Expand Query Timing ===
+            t0 = time.perf_counter()
             
             # Extract conversation history
             extracted_history = self._extract_conversation_history(conversation_history)
@@ -679,6 +689,8 @@ Return ONLY a JSON object in PERSIAN.
                 query=query,
                 conversation_history=filtered_history if filtered_history else None
             )
+            kb_timings['expand_query'] = time.perf_counter() - t0
+            logging.info(f"[PERF_KB] step=expand_query elapsed={kb_timings['expand_query']:.3f}s")
             
             rewritten_query = query_expansion_result["rewritten_query"]
             logging.debug(f"[KB Query] Original query: {query}")
@@ -686,6 +698,41 @@ Return ONLY a JSON object in PERSIAN.
             # Log the query transformation
             if rewritten_query != query:
                 logging.info(f"[KB Query] Query rewritten with context: '{query[:50]}...' -> '{rewritten_query[:50]}...'")
+            
+            # ===== PersianWay Web Search Integration =====
+            # Search PersianWay for relevant information and merge with vector search results
+            persianway_docs_for_rerank = []
+            web_search_content = ""
+            
+            if is_public:
+                try:
+                    search_result = await search_persianway.ainvoke({"query": rewritten_query})
+                    web_search_content = search_result
+                    
+                    # Parse the web search result and create a Document for reranking
+                    if search_result and "Error executing search" not in search_result and "Error searching web" not in search_result:
+                        # Create a pseudo-document from web search results to pass to reranker
+                        web_search_doc = Document(
+                            page_content=search_result,
+                            metadata={
+                                "source": "PersianWay Web Search",
+                                "source_type": "web_search",
+                                "title": "PersianWay Domain Search Results",
+                                "is_public": True,
+                                "hybrid_score": 0.8,  # Give a moderate score for reranking
+                                "page": 1
+                            }
+                        )
+                        persianway_docs_for_rerank.append((web_search_doc, 0.2, rewritten_query, "web_search"))
+                        logging.info(f"[KB Query] Added PersianWay web search result for reranking")
+                    else:
+                        logging.warning(f"[KB Query] PersianWay web search returned error or empty result")
+                except Exception as e:
+                    logging.error(f"[KB Query] Error calling PersianWay web search: {str(e)}")
+
+
+            # === PERF: Hybrid Retrieval Timing ===
+            t0 = time.perf_counter()
             
             # First, check if we have an exact or semantically similar match in our QA database
             vector_store = self.document_processor.get_vector_store()
@@ -731,6 +778,8 @@ Return ONLY a JSON object in PERSIAN.
                     docs_with_scores = []
                     initial_count = 0
             
+            kb_timings['hybrid_retrieval'] = time.perf_counter() - t0
+            logging.info(f"[PERF_KB] step=hybrid_retrieval elapsed={kb_timings['hybrid_retrieval']:.3f}s docs_found={initial_count}")
             logging.info(f"[Filter] After validation: {len(docs_with_scores)} docs")
 
             # ===== IMPROVEMENT 2: Similarity Threshold Filtering =====
@@ -740,6 +789,11 @@ Return ONLY a JSON object in PERSIAN.
                 for doc, score in docs_with_scores
                 if score <= rag_settings.similarity_threshold
             ]
+            
+            # ===== Merge PersianWay web search docs with filtered_docs =====
+            if persianway_docs_for_rerank:
+                filtered_docs = filtered_docs + persianway_docs_for_rerank
+                logging.info(f"[KB Query] Merged {len(persianway_docs_for_rerank)} web search docs with {len(filtered_docs) - len(persianway_docs_for_rerank)} vector docs = {len(filtered_docs)} total for reranker")
 
             if filtered_docs:
                 removed_count = len(docs_with_scores) - len(filtered_docs)
@@ -754,30 +808,13 @@ Return ONLY a JSON object in PERSIAN.
                 )
                 filtered_docs = [(doc, score, search_query, "single") for doc, score in docs_with_scores]
 
-            # ===== NEW: Embedding-based Re-ranking (before deduplication) =====
-            if self.reranker is not None and filtered_docs:
-                logging.info(f"[RERANKER] Starting with {len(filtered_docs)} docs")
-                docs_to_rerank = [doc for doc, _, _, _ in filtered_docs]
-                original_scores = [score for _, score, _, _ in filtered_docs]
-
-                combined_query = rewritten_query
-                reranked_results = self.reranker.rerank(
-                    query=combined_query,
-                    documents=docs_to_rerank,
-                    original_scores=original_scores,
-                    top_k=rag_settings.top_k_results,
-                    alpha=rag_settings.reranker_alpha,
-                )
-
-                if reranked_results:
-                    logging.info(
-                        f"[RERANKER] Before L2={filtered_docs[0][1]:.3f}, After Combined={reranked_results[0][1]:.3f}"
-                    )
-                    filtered_docs = [
-                        (doc, meta.get('combined_score', score), combined_query, 'reranked')
-                        for (doc, score, meta) in reranked_results
-                        if _validate_is_public(doc)
-                    ]
+            # === FIX: Duplicate Reranking Removed ===
+            # NOTE: hybrid_retrieve() already returns reranked documents with
+            # metadata["rerank_position"] set. Running reranker again here was
+            # redundant and added ~2.5s latency per query.
+            # See PIPELINE_PERFORMANCE_REPORT.md for full analysis.
+            kb_timings['reranking'] = 0.0  # Already done in hybrid_retrieve()
+            logging.info(f"[PERF_KB] step=reranking elapsed=0.000s (SKIPPED - already done in hybrid_retrieve)")
             
             # ===== IMPROVEMENT 3: Deduplication with Source Tracking =====
             def _get_doc_hash(doc) -> str:
@@ -814,9 +851,15 @@ Return ONLY a JSON object in PERSIAN.
             # Take top K results
             docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
             
+            kb_timings['deduplication'] = time.perf_counter() - t0
+            logging.info(f"[PERF_KB] step=deduplication elapsed={kb_timings['deduplication']:.3f}s")
+            
             logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {initial_count} initial candidates)")
             if docs_with_scores:
                 logging.debug(f"[KB Query] Score range: {docs_with_scores[0][1]:.4f} (best) to {docs_with_scores[-1][1]:.4f} (worst)")
+            
+            # === PERF: Document Chain & Response Generation Timing ===
+            t0 = time.perf_counter()
             
             # Get document chain (no internal retrieval)
             doc_chain = await self._get_document_chain()
@@ -866,6 +909,9 @@ Return ONLY a JSON object in PERSIAN.
             if answer is None:
                 raise KeyError("answer")
             source_docs = normalized_docs
+            
+            kb_timings['response_generation'] = time.perf_counter() - t0
+            logging.info(f"[PERF_KB] step=response_generation elapsed={kb_timings['response_generation']:.3f}s")
             
             # ===== IMPROVEMENT 4: Multi-factor Confidence Calculation =====
             # Calculate confidence based on multiple factors:
@@ -932,6 +978,10 @@ Return ONLY a JSON object in PERSIAN.
                 "retrieval_method": "similarity_search"
             }
          
+            # === PERF: KB Total Timing ===
+            kb_timings['total_kb_query'] = time.perf_counter() - t_kb_start
+            logging.info(f"[PERF_KB] KB_TIMING: {kb_timings}")
+            
             return response
             
         except Exception as e:
