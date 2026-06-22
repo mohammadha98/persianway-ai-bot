@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     
     # Storage Configuration
-    STORAGE_ROOT: str = ""  # empty = use project root; set e.g. /knowledgebase on host
+    STORAGE_ROOT: str = "/knowledgebase"  # empty = use project root; set e.g. /knowledgebase on host
     
     # Search Configuration
     TAVILY_API_KEY: Optional[str] = None
