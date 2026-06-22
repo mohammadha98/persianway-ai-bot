@@ -15,7 +15,7 @@ numpy>=1.24.3
 pandas>=2.0.0
 joblib>=1.2.0
 
-# Chat dependencies (pinned to a single compatible 0.3.x family)
+# Chat dependencies (all pinned to compatible 0.3.x family)
 langchain>=0.3.0,<0.4.0
 langchain-openai>=0.3.0,<0.4.0
 langchain-community>=0.3.0,<0.4.0
@@ -25,8 +25,9 @@ langchain-text-splitters>=0.3.0,<0.4.0
 # (chroma-hnswlib wheel issues on some Python/Windows combinations).
 # Code falls back to langchain_community.vectorstores.Chroma when unavailable.
 openai>=1.0.0
+
 # RAG dependencies
-chromadb>=0.4.6
+chromadb>=0.4.6,<0.5.0          # ← pinned to avoid chroma-hnswlib build failure
 tiktoken>=0.4.0
 pypdf>=3.0.0
 pymupdf>=1.23.0
