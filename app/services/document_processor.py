@@ -34,6 +34,7 @@ except ImportError:
 
 from app.core.config import settings
 
+
 class OpenRouterEmbeddings:
     def __init__(self, api_key: str, base_url: str, model: str, referer: str = None, site_title: str = None):
         from openai import OpenAI
@@ -176,13 +177,15 @@ class DocumentProcessor:
                 # Load existing vector store
                 self._vector_store = Chroma(
                     persist_directory=self.persist_directory,
-                    embedding_function=self.embeddings
+                    embedding_function=self.embeddings,
+                    anonymized_telemetry=False
                 )
             else:
                 # Create new vector store
                 self._vector_store = Chroma(
                     persist_directory=self.persist_directory,
-                    embedding_function=self.embeddings
+                    embedding_function=self.embeddings,
+                    anonymized_telemetry=False
                 )
         
         return self._vector_store
