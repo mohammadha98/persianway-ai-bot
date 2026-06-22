@@ -3,11 +3,41 @@ from typing import List, Tuple, Dict, Any, Optional
 
 import numpy as np
 
+# =====================================================================
+# NumPy 2.x backwards compatibility shim
+# Many libraries (chromadb, older scikit-learn, hnswlib, etc.) still
+# reference legacy aliases that were removed in NumPy 2.0. This patch
+# restores them so those libraries don't crash at runtime.
+# =====================================================================
+_COMPAT_ALIASES = {
+    'float_': np.float64,
+    'int_': np.int64,
+    'unicode_': np.str_,
+    'str_': np.str_,
+    'bool_': np.bool_,
+    'complex_': np.complex128,
+    'longlong': np.longlong,
+    'intp': np.intp,
+    'uint': np.uint64,
+}
+
+for _alias_name, _alias_target in _COMPAT_ALIASES.items():
+    if not hasattr(np, _alias_name):
+        setattr(np, _alias_name, _alias_target)
+
+# Also patch np.core.multiarray.scalar if needed (some libs go deep)
+try:
+    from numpy.core.multiarray import scalar as _np_scalar  # noqa: F401
+except ImportError:
+    pass
+# =====================================================================
+
 try:
     from sklearn.metrics.pairwise import cosine_similarity as sk_cosine_similarity
     _HAS_SKLEARN = True
 except Exception:
     _HAS_SKLEARN = False
+
 
 
 class EmbeddingReranker:
