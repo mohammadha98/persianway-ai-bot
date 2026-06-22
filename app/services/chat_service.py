@@ -1,6 +1,5 @@
 
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
-from langchain.chains.base import Chain
 import json
 import re
 import time
@@ -96,9 +95,8 @@ async def get_llm(model_name: str = None, temperature: float = None, max_tokens:
         )
     else:
         raise ValueError("Either OPENAI_API_KEY or OPENROUTER_API_KEY must be set")
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain.memory import ConversationBufferMemory
-from langchain.agents import initialize_agent, AgentType
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, AIMessageChunk, HumanMessageChunk
+from langchain_core.runnables import Runnable
 from app.services.utility import search_persianway
 
 from app.core.config import settings
@@ -121,16 +119,16 @@ class ChatService:
     
     def __init__(self):
         """Initialize the chat service."""
-        self._sessions: Dict[str, Any] = {}
-        self._memories: Dict[str, ConversationBufferMemory] = {}
+        self._sessions: Dict[str, Runnable] = {}
+        self._message_history: Dict[str, List[Any]] = {}
         self.config_service = ConfigService()
         self.generalAnswer = False
         self._config_updated_at: Optional[str] = None
         # Note: API key validation is now done dynamically in get_llm function
-        
+
 
     
-    async def _get_or_create_session(self, user_id: str, model: str = None, parameters: dict = None) -> Any:
+    async def _get_or_create_session(self, user_id: str, model: str = None, parameters: dict = None) -> Runnable:
         logger.debug(f"[DEBUG] _get_or_create_session called with model: {model}")
         """Get an existing chat session or create a new one.
         
@@ -146,11 +144,8 @@ class ChatService:
             await self.config_service._load_config()
             rag_settings = await self.config_service.get_rag_settings()
             
-            # Create a new memory for this user
-            # AgentExecutor expects 'chat_history' key for memory by default in some configurations,
-            # but OPENAI_FUNCTIONS agent handles it. We'll stick to defaults or 'chat_history'.
-            memory = ConversationBufferMemory(return_messages=True, memory_key="chat_history")
-            self._memories[user_id] = memory
+            # Initialize empty message history for this user (replaces ConversationBufferMemory)
+            self._message_history[user_id] = []
             
             # Create a new chat model with the configured settings
             params = parameters or {}
@@ -159,24 +154,17 @@ class ChatService:
             # Add system prompt
             system_prompt = rag_settings.system_prompt
             
-            # Initialize agent with tools
-            tools = [search_persianway]
+            # Create a simple LLM chain with system prompt
+            from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
             
-            # For STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION, we use 'prefix' to set the system prompt/persona
-            agent_kwargs = {
-                "prefix": system_prompt
-            }
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                MessagesPlaceholder(variable_name="history"),
+                ("human", "{input}"),
+            ])
             
-            # Use initialize_agent with STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION as OPENAI_FUNCTIONS is deprecated/rejected by provider
-            self._sessions[user_id] = initialize_agent(
-                tools=tools,
-                llm=llm,
-                agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
-                verbose=True,
-                memory=memory,
-                agent_kwargs=agent_kwargs,
-                handle_parsing_errors=True
-            )
+            # Build runnable pipeline (modern LangChain style)
+            self._sessions[user_id] = prompt | llm
         
         return self._sessions[user_id]
 
@@ -186,15 +174,21 @@ class ChatService:
         ts = cfg.updated_at or cfg.created_at
         if ts != self._config_updated_at:
             self._sessions.clear()
-            self._memories.clear()
+            self._message_history.clear()
             self._config_updated_at = ts
 
     async def refresh(self) -> None:
         await self.config_service._load_config()
         cfg = await self.config_service.get_config()
         self._sessions.clear()
-        self._memories.clear()
+        self._message_history.clear()
         self._config_updated_at = cfg.updated_at or cfg.created_at
+
+    def _append_history(self, user_id: str, user_message: str, ai_message: str) -> None:
+        if user_id not in self._message_history:
+            self._message_history[user_id] = []
+        self._message_history[user_id].append(HumanMessage(content=user_message))
+        self._message_history[user_id].append(AIMessage(content=ai_message))
     
     def _is_topic_related_to_domain(self, query: str) -> bool:
         """Check if the query is related to the knowledge base domain.
@@ -832,9 +826,8 @@ Title:"""
                     query_analysis["reasoning"] = f"Query is off-topic: {intent_result['explanation']}"
                     
                     # Add to conversation memory
-                    conversation = await self._get_or_create_session(user_id, model, parameters)
-                    conversation.memory.chat_memory.add_user_message(message)
-                    conversation.memory.chat_memory.add_ai_message(answer)
+                    await self._get_or_create_session(user_id, model, parameters)
+                    self._append_history(user_id, message, answer)
                     
                     return {
                         "query_analysis": query_analysis,
@@ -856,9 +849,8 @@ Title:"""
                     query_analysis["requires_human_referral"] = False
                     query_analysis["reasoning"] = "User initiated conversation with a greeting."
                     response_parameters["temperature"] = 0.2
-                    conversation = await self._get_or_create_session(user_id, model, parameters)
-                    conversation.memory.chat_memory.add_user_message(message)
-                    conversation.memory.chat_memory.add_ai_message(answer)
+                    await self._get_or_create_session(user_id, model, parameters)
+                    self._append_history(user_id, message, answer)
                     return {
                         "query_analysis": query_analysis,
                         "response_parameters": response_parameters,
@@ -873,9 +865,8 @@ Title:"""
                     query_analysis["requires_human_referral"] = False
                     query_analysis["reasoning"] = "User ended the conversation."
                     response_parameters["temperature"] = 0.2
-                    conversation = await self._get_or_create_session(user_id, model, parameters)
-                    conversation.memory.chat_memory.add_user_message(message)
-                    conversation.memory.chat_memory.add_ai_message(answer)
+                    await self._get_or_create_session(user_id, model, parameters)
+                    self._append_history(user_id, message, answer)
                     return {
                         "query_analysis": query_analysis,
                         "response_parameters": response_parameters,
@@ -890,9 +881,8 @@ Title:"""
                     query_analysis["requires_human_referral"] = False
                     query_analysis["reasoning"] = "User engaged in small talk."
                     response_parameters["temperature"] = 0.2
-                    conversation = await self._get_or_create_session(user_id, model, parameters)
-                    conversation.memory.chat_memory.add_user_message(message)
-                    conversation.memory.chat_memory.add_ai_message(answer)
+                    await self._get_or_create_session(user_id, model, parameters)
+                    self._append_history(user_id, message, answer)
                     return {
                         "query_analysis": query_analysis,
                         "response_parameters": response_parameters,
@@ -912,9 +902,8 @@ Title:"""
                     query_analysis["requires_human_referral"] = False
                     query_analysis["reasoning"] = "User asked for assistant capabilities."
                     response_parameters["temperature"] = 0.2
-                    conversation = await self._get_or_create_session(user_id, model, parameters)
-                    conversation.memory.chat_memory.add_user_message(message)
-                    conversation.memory.chat_memory.add_ai_message(answer)
+                    await self._get_or_create_session(user_id, model, parameters)
+                    self._append_history(user_id, message, answer)
                     return {
                         "query_analysis": query_analysis,
                         "response_parameters": response_parameters,
@@ -989,8 +978,9 @@ Title:"""
                         try:
                             # Use general conversation chain for low confidence cases
                             conversation = await self._get_or_create_session(user_id, model, parameters)
-                            response = await conversation.ainvoke(message)
-                            response_content = response['output'] if isinstance(response, dict) else response
+                            history = self._message_history.get(user_id, [])
+                            response = await conversation.ainvoke({"input": message, "history": history})
+                            response_content = getattr(response, "content", str(response))
 
                             if any(indicator in response_content for indicator in referral_indicators):
                                 answer = response_content
@@ -1020,9 +1010,10 @@ Title:"""
             # The `conversation.predict` call above already adds the user message and the AI response to the memory
             # for the general_knowledge case. We need to manually add it for other cases.
             if query_analysis["knowledge_source"] != "general_knowledge":
-                conversation = await self._get_or_create_session(user_id, model, parameters)
-                conversation.memory.chat_memory.add_user_message(message)
-                conversation.memory.chat_memory.add_ai_message(answer)
+                await self._get_or_create_session(user_id, model, parameters)
+                self._append_history(user_id, message, answer)
+            else:
+                self._append_history(user_id, message, answer)
 
             # Construct the final response dictionary
             logger.debug(f"[DEBUG] Final confidence: {query_analysis['confidence_score']:.3f}")
@@ -1067,15 +1058,15 @@ Title:"""
         Returns:
             A list of ChatMessage objects or None if no history exists
         """
-        if user_id not in self._memories:
+        if user_id not in self._message_history:
             return None
-        
-        memory = self._memories[user_id]
+
+        memory = self._message_history[user_id]
         history = []
         
         # Convert LangChain memory to our ChatMessage schema
         # Filter out SystemMessage to avoid including system prompts in conversation history
-        for message in memory.chat_memory.messages:
+        for message in memory:
             if isinstance(message, HumanMessage):
                 history.append(ChatMessage(role="user", content=message.content))
             elif isinstance(message, AIMessage):

@@ -120,25 +120,30 @@ class HybridRetrievalService:
         return retr
 
     async def _dense_parallel(self, query: str, k: int, is_public: bool = False) -> List[Tuple[Document, float]]:
-        """Dense vector search across 3 branches (contrib/docx/excel) with timing instrumentation.
+        """Dense vector search across 3 branches with SINGLE shared embedding.
         
-        PERF: Each branch calls vs.similarity_search_with_score(query, ...) which internally
-        calls embeddings.embed_query(query). This means 3 branches = 3 embedding API calls
-        for the SAME query. This is the bottleneck.
+        BEFORE FIX:
+        - 3 branches × embed_query() = 3 API calls (~5.4s cold)
         
-        Expected: 3 API calls × ~0.8s = ~2.4s (or ~0.8s if parallelized by OpenRouter)
-        Ideal: 1 API call + 2 local vector searches = ~0.8s
+        AFTER FIX:
+        - 1 embed_query() + 3 vector searches = 1 API call (~1.3s cold)
         """
-        if not query.strip():
+        if not query.strip() or not self.vector_store:
             return []
+
         vs = self.vector_store
-        if vs is None:
+
+        # ===== FIX: Create embedding ONCE (not 3x) =====
+        t_embed_start = time.perf_counter()
+        try:
+            query_embedding = await asyncio.to_thread(vs.embeddings.embed_query, query)
+            embed_elapsed = time.perf_counter() - t_embed_start
+            logger.info(f"[EMBED_SHARED] query={query[:50]}... elapsed={embed_elapsed:.3f}s dims={len(query_embedding) if query_embedding else 0}")
+        except Exception as e:
+            logger.error(f"[EMBED_SHARED] FAILED: {e}")
             return []
-        
-        # === PERF: Dense Search Breakdown ===
-        t0 = time.perf_counter()
-        
-        # Create filters with is_public metadata filtering
+
+        # Define filters for 3 branches (same logic as before)
         filters = {
             "contrib": {"$and": [
                 {"entry_type": {"$in": ["user_contribution"]}},
@@ -153,31 +158,48 @@ class HybridRetrievalService:
                 {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
             ]},
         }
-        
-        async def run_with_timing(filter_name: str, f: Dict) -> Tuple[str, List[Tuple[Document, float]]]:
-            """Run one branch with individual timing."""
+
+        # ===== FIX: Use asimilarity_search_by_vector (no additional embedding) =====
+        async def search_branch(filter_name: str, filter_dict: Dict) -> Tuple[str, List[Tuple[Document, float]]]:
+            """Search one branch using pre-computed embedding."""
             branch_t0 = time.perf_counter()
-            results = await asyncio.to_thread(vs.similarity_search_with_score, query, k=k, filter=f)
-            branch_elapsed = time.perf_counter() - branch_t0
-            logger.info(f"[DENSE_BRANCH] branch={filter_name} elapsed={branch_elapsed:.3f}s docs={len(results or [])}")
-            return (filter_name, results or [])
-        
-        # Create named tasks for better tracking
-        tasks = [run_with_timing(name, filt) for name, filt in filters.items()]
+            try:
+                # ✅ asimilarity_search_by_vector is ALREADY async - no need for asyncio.to_thread
+                results = await vs.asimilarity_search_by_vector(
+                    query_embedding,
+                    k=k,
+                    filter=filter_dict
+                )
+                elapsed = time.perf_counter() - branch_t0
+                # Convert to (Document, float) format - assign score=1.0 for now
+                scored_results = [(doc, 1.0) for doc in results]
+                logger.info(f"[DENSE_BRANCH] branch={filter_name} elapsed={elapsed:.3f}s docs={len(results)}")
+                return (filter_name, scored_results)
+            except Exception as e:
+                elapsed = time.perf_counter() - branch_t0
+                logger.error(f"[DENSE_BRANCH] branch={filter_name} failed after {elapsed:.3f}s: {e}")
+                return (filter_name, [])
+
+        # Execute 3 branches in parallel (only vector search, no additional embedding)
+        tasks = [search_branch(name, filt) for name, filt in filters.items()]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        dense_elapsed = time.perf_counter() - t0
-        logger.info(f"[PERF_DENSE] step=dense_parallel total elapsed={dense_elapsed:.3f}s branches=3")
-        
+
+        # Combine results
         combined: List[Tuple[Document, float]] = []
-        branch_results = {}
+        branch_results: Dict[str, List[Tuple[Document, float]]] = {}
         for result in results:
             if isinstance(result, Exception):
+                logger.error(f"[DENSE_PARALLEL] Exception: {result}")
                 continue
             name, docs = result
             branch_results[name] = docs
             combined.extend(docs)
-        
+
+        total_elapsed = time.perf_counter() - t_embed_start
+        logger.info(
+            f"[DENSE_TOTAL] elapsed={total_elapsed:.3f}s embed={embed_elapsed:.3f}s "
+            f"branches={len(branch_results)} docs={len(combined)}"
+        )
         logger.info(
             f"[DENSE_BREAKDOWN] contrib={len(branch_results.get('contrib', []))} docs, "
             f"docx={len(branch_results.get('docx', []))} docs, "

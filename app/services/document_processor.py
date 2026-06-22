@@ -9,10 +9,13 @@ from datetime import datetime
 from pathlib import Path
 import pymupdf  # PyMuPDF for PDF processing
 import pandas as pd
-from langchain.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import Chroma
-from langchain.embeddings import OpenAIEmbeddings
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.schema import Document
 from app.services.database import DatabaseService
 try:

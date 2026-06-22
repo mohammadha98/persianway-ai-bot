@@ -46,41 +46,10 @@ class ConversationDocument(BaseModel):
     total_messages: int = Field(default=0, description="Total number of messages in the conversation")
     is_active: bool = Field(default=True, description="Whether the conversation is still active")
     
-    class Config:
-        allow_population_by_field_name = True
-        arbitrary_types_allowed = True
-        json_encoders = {ObjectId: str}
-        json_schema_extra = {
-            "example": {
-                "user_id": "user123",
-                "user_email": "user@example.com",
-                "title": "Tomato Cultivation Questions",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": "What is the best pH for tomato cultivation?",
-                        "timestamp": "2024-01-15T10:30:00Z"
-                    },
-                    {
-                        "role": "assistant",
-                        "content": "The optimal pH for tomato cultivation is between 6.0 and 6.8.",
-                        "timestamp": "2024-01-15T10:30:01Z",
-                        "confidence_score": 0.95,
-                        "knowledge_source": "knowledge_base",
-                        "requires_human_referral": False,
-                        "reasoning": "High confidence answer found in knowledge base",
-                        "model_used": "gpt-3.5-turbo",
-                        "temperature": 0.1,
-                        "max_tokens": 500,
-                        "sources_used": ["agriculture_handbook.pdf", "soil_science_guide.pdf"]
-                    }
-                ],
-                "created_at": "2024-01-15T10:30:00Z",
-                "updated_at": "2024-01-15T10:30:01Z",
-                "total_messages": 2,
-                "is_active": True
-            }
-        }
+    model_config = {
+        "validate_by_name": True,
+        "arbitrary_types_allowed": True,
+    }
 
 
 class ConversationSearchRequest(BaseModel):
