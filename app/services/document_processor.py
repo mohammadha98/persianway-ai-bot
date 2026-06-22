@@ -201,7 +201,8 @@ class DocumentProcessor:
             self._vector_store = Chroma(
                 client=self.chroma_client,
                 collection_name=collection_name,
-                embedding_function=self.embeddings
+                embedding_function=self.embeddings,
+                settings=ChromaSettings(anonymized_telemetry=False)
             )
             logging.info(f"[PID {os.getpid()}] Vector store loaded. "
                         f"Collection exists: {collection_name} "
