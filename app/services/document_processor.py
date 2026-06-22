@@ -11,14 +11,15 @@ import pymupdf  # PyMuPDF for PDF processing
 import pandas as pd
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+import chromadb
+from chromadb.config import Settings as ChromaSettings
+
 try:
     from langchain_chroma import Chroma
 except ImportError:
     from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import OpenAIEmbeddings
-from langchain.schema import Document
 from app.services.database import DatabaseService
-from chromadb.config import Settings as ChromaSettings
 
 try:
     from docx import Document as DocxDocument
@@ -46,6 +47,7 @@ class OpenRouterEmbeddings:
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.model = model
         self.extra_headers = {}
+        
         if referer:
             self.extra_headers["HTTP-Referer"] = referer
         if site_title:
@@ -90,7 +92,8 @@ class DocumentProcessor:
 
         self.docs_dir = os.path.join(_storage_root, "docs")
         self.persist_root = os.path.join(_storage_root, "vectordb")
-
+        self.chroma_client = None
+        self._vector_store = None
         os.makedirs(self.docs_dir, exist_ok=True)
         os.makedirs(self.persist_root, exist_ok=True)
         
@@ -181,21 +184,27 @@ class DocumentProcessor:
             return None
             
         if self._vector_store is None:
-            # Check if vector store exists
-            if os.path.exists(self.persist_directory) and len(os.listdir(self.persist_directory)) > 0:
-                # Load existing vector store
-                self._vector_store = Chroma(
-                    persist_directory=self.persist_directory,
-                    embedding_function=self.embeddings,
-                    client_settings=ChromaSettings(anonymized_telemetry=False)
+            # PersistentClient singleton
+            if self.chroma_client is None:
+                self.chroma_client = chromadb.PersistentClient(
+                    path=self.persist_directory,
+                    settings=ChromaSettings(anonymized_telemetry=False)
                 )
-            else:
-                # Create new vector store
-                self._vector_store = Chroma(
-                    persist_directory=self.persist_directory,
-                    embedding_function=self.embeddings,
-                    client_settings=ChromaSettings(anonymized_telemetry=False)
-                )
+                logging.info(f"[PID {os.getpid()}] Chroma PersistentClient initialized at: {self.persist_directory}")
+            
+            # get_or_create_collection — NEVER overwrites existing data
+            collection_name = "knowledge_base"
+            self.chroma_client.get_or_create_collection(name=collection_name)
+            
+            # Now create LangChain wrapper with the existing client
+            self._vector_store = Chroma(
+                client=self.chroma_client,
+                collection_name=collection_name,
+                embedding_function=self.embeddings
+            )
+            logging.info(f"[PID {os.getpid()}] Vector store loaded. "
+                        f"Collection exists: {collection_name} "
+                        f"Dir contents: {os.listdir(self.persist_directory)}")
         
         return self._vector_store
     
