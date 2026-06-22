@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Form, Body, UploadFile, File
 from typing import Dict, Any, List, Optional
 from enum import Enum
+import os
 import uuid
 from datetime import datetime
 from app.services.database import get_database_service
+from app.core.config import settings
 
 from app.schemas.knowledge_base import (
     KnowledgeBaseQuery, 
@@ -201,7 +203,7 @@ async def contribute_knowledge(
         # More advanced sanitation (e.g., HTML stripping) could be added here if content allows HTML
         cleaned_title = title.strip()
         cleaned_content = content.strip()
-        cleaned_source = source.strip()
+        cleaned_source = source.strip() if source else None
         
         if not cleaned_title or not cleaned_content:
             return KnowledgeContributionResponse(success=False, message="Title, content, and source cannot be empty.")
@@ -222,12 +224,12 @@ async def contribute_knowledge(
                 )
             
             # Save the uploaded file to the docs directory
-            import os
-            from app.core.config import settings
             import shutil
             
-            # Create docs directory if it doesn't exist
-            docs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "docs")
+            # Resolve storage root from SETTINGS or project root
+            _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            _storage_root = settings.STORAGE_ROOT.strip() if settings.STORAGE_ROOT else _project_root
+            docs_dir = os.path.join(_storage_root, "docs")
             os.makedirs(docs_dir, exist_ok=True)
             
             # Generate a unique filename to avoid conflicts

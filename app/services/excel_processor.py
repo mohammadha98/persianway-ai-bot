@@ -2,7 +2,10 @@ from typing import List, Dict, Any, Optional, Tuple
 import os
 import pandas as pd
 from langchain.schema import Document
-from langchain.vectorstores import Chroma
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    from langchain_community.vectorstores import Chroma
 
 from app.core.config import settings
 from app.services.document_processor import get_document_processor
@@ -20,8 +23,10 @@ class ExcelQAProcessor:
         # Get the document processor to access embeddings and vector store
         self.document_processor = get_document_processor()
         
-        # Set up the Excel directory path
-        self.excel_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "docs")
+        # Set up the Excel directory path using STORAGE_ROOT
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        _storage_root = settings.STORAGE_ROOT.strip() if settings.STORAGE_ROOT else _project_root
+        self.excel_dir = os.path.join(_storage_root, "docs")
         
     def validate_excel_structure(self, df: pd.DataFrame) -> bool:
         """Validate that the Excel file has the expected structure.
