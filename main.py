@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from contextlib import asynccontextmanager
 import os
-
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 from app.api.routes import router as api_router, ui_router
 from app.core.config import settings
 from app.core.templates import configure_templates
