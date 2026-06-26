@@ -3,9 +3,8 @@ venv/
 env/
 *.venv/
 
-
-vectordb/
-/vectordb/
+/vectordb
+/docs
 # Python
 __pycache__/
 *.py[cod]
