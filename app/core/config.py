@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     
     # Storage Configuration
     STORAGE_ROOT: str = ""  # empty = use project root; set e.g. /knowledgebase on host
+    USE_REMOTE_CHROMADB: bool = False  # Set to True on host to use remote ChromaDB
+    CHROMADB_HOST: str = "localhost"
+    CHROMADB_PORT: int = 8000
+    CHROMADB_SSL: bool = False
     
     # Search Configuration
     TAVILY_API_KEY: Optional[str] = None

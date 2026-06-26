@@ -19,6 +19,36 @@
       </div>
       
       <div class="expandable-content" [class.expanded]="isExpanded">
+        <!-- Processing Status Section -->
+        <mat-card *ngIf="isProcessing || currentTaskStatus" class="status-card">
+          <mat-card-header>
+            <div mat-card-avatar class="status-icon">
+              <mat-icon [ngSwitch]="currentTaskStatus?.status">
+                <span *ngSwitchCase="'PENDING'">schedule</span>
+                <span *ngSwitchCase="'PROCESSING'">hourglass_empty</span>
+                <span *ngSwitchCase="'COMPLETED'">check_circle</span>
+                <span *ngSwitchCase="'FAILED'">error</span>
+                <span *ngSwitchDefault>info</span>
+              </mat-icon>
+            </div>
+            <mat-card-title>وضعیت پردازش</mat-card-title>
+            <mat-card-subtitle>{{ currentTaskStatus ? getStatusText(currentTaskStatus.status) : 'در حال آماده‌سازی...' }}</mat-card-subtitle>
+          </mat-card-header>
+          
+          <mat-card-content *ngIf="currentTaskStatus">
+            <div class="status-details">
+              <p>شناسه وظیفه: {{ currentTaskStatus.task_id }}</p>
+              <mat-progress-bar 
+                *ngIf="currentTaskStatus.status === 'PROCESSING'" 
+                mode="determinate" 
+                [value]="currentTaskStatus.progress">
+              </mat-progress-bar>
+              <p *ngIf="currentTaskStatus.progress > 0" class="progress-text">پیشرفت: {{ currentTaskStatus.progress }}%</p>
+              <p *ngIf="currentTaskStatus.error" class="error-text">{{ currentTaskStatus.error }}</p>
+            </div>
+          </mat-card-content>
+        </mat-card>
+        
         <!-- Knowledge Contribution Form -->
         <mat-card class="form-card">
           <mat-card-header>
@@ -33,26 +63,27 @@
             <form class="contribution-form">
               <!-- Title -->
               <mat-form-field appearance="outline" class="full-width">
-                <mat-label>عنوان *</mat-label>
+                <mat-label>عنوان</mat-label>
                 <input matInput [(ngModel)]="form.title" name="title" 
-                      placeholder="عنوان مطلب را وارد کنید" required>
+                      placeholder="عنوان مطلب را وارد کنید" required
+                      [disabled]="isSubmitting || isProcessing">
               </mat-form-field>
-
-         
 
               <!-- Content -->
               <mat-form-field appearance="outline" class="full-width">
-                <mat-label>محتوا *</mat-label>
+                <mat-label>محتوا</mat-label>
                 <textarea matInput [(ngModel)]="form.content" name="content"
-                          rows="8" placeholder="محتوای دانش خود را به تفصیل بنویسید..." required>
+                          rows="8" placeholder="محتوای دانش خود را به تفصیل بنویسید..." required
+                          [disabled]="isSubmitting || isProcessing">
                 </textarea>
               </mat-form-field>
 
               <!-- Tags -->
               <mat-form-field appearance="outline" class="full-width">
-                <mat-label>برچسب‌ها *</mat-label>
+                <mat-label>برچسب‌ها</mat-label>
                 <input matInput [(ngModel)]="form.tags" name="tags"
-                      placeholder="برچسب‌ها را با کامه جدا کنید (مثال: گندم، کود، آبیاری)" required>
+                      placeholder="برچسب‌ها را با کامه جدا کنید (مثال: گندم، کود، آبیاری)" required
+                      [disabled]="isSubmitting || isProcessing">
                 <mat-hint>برچسب‌ها به بهتر پیدا شدن مطلب کمک می‌کنند</mat-hint>
               </mat-form-field>
 
@@ -61,7 +92,8 @@
                 <mat-slide-toggle
                   [(ngModel)]="form.is_public"
                   name="is_public"
-                  color="primary">
+                  color="primary"
+                  [disabled]="isSubmitting || isProcessing">
                   انتشار عمومی (محتوای غیر تخصصی)
                 </mat-slide-toggle>
                 <p class="toggle-hint">
@@ -69,21 +101,17 @@
                 </p>
               </div>
 
-           
-
-
-           
             </form>
           </mat-card-content>
           
           <mat-card-actions>
             <button mat-raised-button color="primary" 
                     (click)="submitContribution()"
-                    [disabled]="!isFormValid() || isSubmitting"
+                    [disabled]="!isFormValid() || isSubmitting || isProcessing"
                     class="submit-button">
               <mat-spinner *ngIf="isSubmitting" diameter="20" class="button-spinner"></mat-spinner>
               <mat-icon *ngIf="!isSubmitting">send</mat-icon>
-              {{ isSubmitting ? 'در حال ارسال...' : 'ثبت مشارکت' }}
+              {{ isSubmitting ? 'در حال ارسال...' : (isProcessing ? 'در حال پردازش...' : 'ثبت مشارکت') }}
             </button>
           </mat-card-actions>
         </mat-card>
@@ -103,23 +131,24 @@
               <input type="file" id="fileInput" 
                     (change)="onFileSelected($event)"
                     accept=".pdf,.docx,.xls,.xlsx"
-                    style="display: none;">
+                    style="display: none;"
+                    [disabled]="isSubmitting || isProcessing">
               
-              <div class="file-drop-zone" (click)="onFileDropZoneClick()">
+              <div class="file-drop-zone" (click)="!isProcessing && onFileDropZoneClick()" [class.disabled]="isProcessing">
                 <mat-icon class="upload-icon-large">cloud_upload</mat-icon>
                 <p class="upload-text">
                   <strong>فایل را انتخاب کنید</strong><br>
                   یا اینجا بکشید و رها کنید
                 </p>
                 <p class="upload-hint">
-                  فرمت‌های پذیرفته شده: PDF, Word (.docx), Excel (.xls, .xlsx)
+                  فرمت‌های پذیرفته شده: PDF، Word (.docx)، Excel (.xls، .xlsx)
                 </p>
               </div>
               
               <div *ngIf="selectedFile" class="selected-file">
                 <mat-icon>description</mat-icon>
                 <span>{{ selectedFile.name }}</span>
-                <button mat-icon-button (click)="selectedFile = null">
+                <button mat-icon-button (click)="selectedFile = null" [disabled]="isProcessing">
                   <mat-icon>close</mat-icon>
                 </button>
               </div>
@@ -133,50 +162,4 @@
   <!-- Knowledge List Component -->
 <app-knowledge-list #knowledgeList></app-knowledge-list>
 
-  <!-- Guidelines Section
-  <mat-card class="guidelines-card">
-    <mat-card-header>
-      <div mat-card-avatar class="guidelines-icon">
-        <mat-icon>help_outline</mat-icon>
-      </div>
-      <mat-card-title>راهنمای مشارکت</mat-card-title>
-    </mat-card-header>
-    
-    <mat-card-content>
-      <div class="guidelines-grid">
-        <div class="guideline-item">
-          <mat-icon>check_circle</mat-icon>
-          <div>
-            <h4>محتوای مفید</h4>
-            <p>اطلاعات عملی و کاربردی در زمینه  ارائه دهید</p>
-          </div>
-        </div>
-        
-        <div class="guideline-item">
-          <mat-icon>check_circle</mat-icon>
-          <div>
-            <h4>زبان ساده</h4>
-            <p>از زبان ساده و قابل فهم استفاده کنید</p>
-          </div>
-        </div>
-        
-        <div class="guideline-item">
-          <mat-icon>check_circle</mat-icon>
-          <div>
-            <h4>منابع معتبر</h4>
-            <p>در صورت امکان منبع اطلاعات خود را ذکر کنید</p>
-          </div>
-        </div>
-        
-        <div class="guideline-item">
-          <mat-icon>check_circle</mat-icon>
-          <div>
-            <h4>دسته‌بندی صحیح</h4>
-            <p>مطلب خود را در دسته‌بندی مناسب قرار دهید</p>
-          </div>
-        </div>
-      </div>
-    </mat-card-content>
-  </mat-card> -->
 </div>
-

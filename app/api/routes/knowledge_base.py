@@ -4,6 +4,7 @@ from enum import Enum
 import os
 import uuid
 from datetime import datetime
+from pydantic import BaseModel
 from app.services.database import get_database_service
 from app.core.config import settings
 
@@ -14,25 +15,53 @@ from app.schemas.knowledge_base import (
     KnowledgeContributionResponse,
     KnowledgeRemovalResponse,
     KnowledgeContributionItem,
-    KnowledgeItemDb
+    KnowledgeItemDb,
+    PaginatedKnowledgeListResponse
 )
 from app.services.knowledge_base import get_knowledge_base_service
 from app.services.document_processor import get_document_processor
+from app.services.task_service import get_task_service, TaskStatus
 
 # Create router for knowledge base endpoints
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
-@router.get("/knowledge-list", response_model=List[KnowledgeItemDb])
-async def get_knowledge_list(db_service=Depends(get_database_service)):
-    """Retrieve the list of knowledge contributions.
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    status: TaskStatus
+    progress: int
+    error: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: str
+    updated_at: str
+    completed_at: Optional[str] = None
+
+
+@router.get("/knowledge-list", response_model=PaginatedKnowledgeListResponse)
+async def get_knowledge_list(
+    page: int = 1,
+    page_size: int = 10,
+    db_service=Depends(get_database_service)
+):
+    """Retrieve paginated list of knowledge contributions.
     
-    This endpoint returns a list of all knowledge contributions, including
-    questions, answers, and metadata.
+    This endpoint returns a paginated list of all knowledge contributions,
+    including questions, answers, and metadata.
     """
     try:
-        # Query the database for knowledge contributions
-        documents = await db_service.get_knowledge_documents()
+        # Validate page and page size
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 10
+        if page_size > 100:
+            page_size = 100
+            
+        # Query the database for paginated knowledge contributions
+        documents, total_count = await db_service.get_knowledge_documents_paginated(
+            page=page,
+            page_size=page_size
+        )
         
         # Convert documents to KnowledgeContributionItem format
         knowledge_list = []
@@ -47,13 +76,23 @@ async def get_knowledge_list(db_service=Depends(get_database_service)):
                     meta_tags=doc["meta_tags"],
                     entry_type=doc["entry_type"],
                     submission_timestamp=doc["submission_timestamp"],
-                    synced=doc.get("synced", True),  # Use get() to handle missing fields
-                    file_type=doc.get("file_type"),  # Use get() to handle missing fields
-                    file_name=doc.get("file_name")   # Use get() to handle missing fields
+                    synced=doc.get("synced", True),
+                    file_type=doc.get("file_type"),
+                    file_name=doc.get("file_name"),
+                    task_id=doc.get("task_id")
                 ))
             # Add handling for other entry types if needed
         
-        return knowledge_list
+        # Calculate total pages
+        total_pages = (total_count + page_size - 1) // page_size
+        
+        return PaginatedKnowledgeListResponse(
+            items=knowledge_list,
+            total=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Knowledge list retrieval error: {str(e)}")
 
@@ -176,8 +215,33 @@ async def get_processing_status():
 
 
 
+@router.get("/task/{task_id}", response_model=TaskStatusResponse)
+async def get_task_status(task_id: str, task_service=Depends(get_task_service)):
+    """Get the status of a background processing task."""
+    try:
+        task = await task_service.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        return TaskStatusResponse(
+            task_id=task["task_id"],
+            status=TaskStatus(task["status"]),
+            progress=task.get("progress", 0),
+            error=task.get("error"),
+            metadata=task.get("metadata"),
+            created_at=task["created_at"],
+            updated_at=task["updated_at"],
+            completed_at=task.get("completed_at")
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get task status: {str(e)}")
+
+
 @router.post("/contribute", response_model=KnowledgeContributionResponse)
 async def contribute_knowledge(
+    background_tasks: BackgroundTasks,
     kb_service=Depends(get_knowledge_base_service),
     title: str = Form(..., description="Title of the knowledge entry."),
     content: str = Form(..., description="Main body/content of the knowledge in Persian."),
@@ -200,7 +264,6 @@ async def contribute_knowledge(
     """
     try:
         # Basic input sanitation (FastAPI handles basic type validation)
-        # More advanced sanitation (e.g., HTML stripping) could be added here if content allows HTML
         cleaned_title = title.strip()
         cleaned_content = content.strip()
         cleaned_source = source.strip() if source else None
@@ -254,6 +317,25 @@ async def contribute_knowledge(
             uploaded_file_path=uploaded_file_path,
             is_public=is_public
         )
+        
+        # Add the background task to process the contribution
+        task_id = contribution_details.get("task_id")
+        if task_id:
+            background_tasks.add_task(
+                kb_service.process_knowledge_contribution_background,
+                task_id,
+                contribution_details["id"],
+                {
+                    "title": cleaned_title,
+                    "content": cleaned_content,
+                    "source": cleaned_source,
+                    "author_name": author_name.strip() if author_name else None,
+                    "additional_references": additional_references.strip() if additional_references else None,
+                    "uploaded_file_path": uploaded_file_path,
+                    "is_public": is_public,
+                    "meta_tags": parsed_meta_tags
+                }
+            )
         
         return KnowledgeContributionResponse(
             success=True,

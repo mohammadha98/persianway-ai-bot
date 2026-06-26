@@ -26,7 +26,7 @@ class KnowledgeContributionItem(BaseModel):
     title: str = Field(..., description="Title of the entry")
     submitted_at: str = Field(..., description="Timestamp of submission")
     meta_tags: List[str] = Field(..., description="Keywords for categorization")
-    content:Optional[str] = Field(..., description="The content of the knowledge entry")
+    content: Optional[str] = Field(None, description="The content of the knowledge entry")
     source: str = Field(..., description="The origin or reference for the knowledge")
     author_name: Optional[str] = Field(None, description="Name of the contributor")
     additional_references: Optional[str] = Field(None, description="URLs or citation text for further reading")
@@ -35,6 +35,8 @@ class KnowledgeContributionItem(BaseModel):
     file_name: Optional[str] = Field(None, description="Name of the processed file")
     qa_count: Optional[int] = Field(None, description="Number of QA pairs processed from Excel file")
     is_public: bool = Field(False, description="Indicates if the contribution is marked as public information.")
+    task_id: Optional[str] = Field(None, description="Task ID for background processing")
+    status: Optional[str] = Field(None, description="Status of the contribution processing")
 
 
 class KnowledgeContributionResponse(BaseModel):
@@ -57,9 +59,11 @@ class KnowledgeContributionResponse(BaseModel):
                     "additional_references": "https://example.com/loamy-soil-guide",
                     "file_processed": True,
                     "file_type": "pdf",
-                "file_name": "soil_analysis.pdf",
-                "qa_count": None,
-                "is_public": False
+                    "file_name": "soil_analysis.pdf",
+                    "qa_count": None,
+                    "is_public": False,
+                    "task_id": "some-task-id",
+                    "status": "queued"
                 }
             },
             "example_failure": {
@@ -105,48 +109,6 @@ class KnowledgeBaseResponse(BaseModel):
                 "confidence_score": 0.85,
                 "requires_human_support": False,
                 "query_id": None
-            }
-        }
-    }
-
-
-class KnowledgeContributionItem(BaseModel):
-    """Schema for a single knowledge contribution item, used in the response."""
-    id: str = Field(..., description="Unique identifier for the contribution")
-    title: str = Field(..., description="Title of the entry")
-    submitted_at: str = Field(..., description="Timestamp of submission")
-    meta_tags: List[str] = Field(..., description="Keywords for categorization")
-    source: str = Field(..., description="The origin or reference for the knowledge")
-    author_name: Optional[str] = Field(None, description="Name of the contributor")
-    additional_references: Optional[str] = Field(None, description="URLs or citation text for further reading")
-    is_public: bool = Field(False, description="Indicates if the contribution is marked as public information.")
-    is_public: bool = Field(False, description="Indicates if the contribution is marked as public information.")
-
-
-class KnowledgeContributionResponse(BaseModel):
-    """Schema for the knowledge contribution API response."""
-    success: bool = Field(..., description="Indicates if the contribution was successful")
-    contribution: Optional[KnowledgeContributionItem] = Field(None, description="Details of the submitted contribution")
-    message: Optional[str] = Field(None, description="Error message in case of failure")
-
-    model_config = {
-        "json_schema_extra": {
-            "example_success": {
-                "success": True,
-                "contribution": {
-                    "id": "4dfaaf98-4036-4e8a-9235-18f915d21a24",
-                    "title": "Properties of Loamy Soil",
-                    "submitted_at": "2024-06-01T14:10:22+03:30",
-                    "meta_tags": ["loam", "soil", "agriculture"],
-                    "source": "Expert observation",
-                    "author_name": "Dr. KhakShenas",
-                "additional_references": "https://example.com/loamy-soil-guide",
-                "is_public": False
-                }
-            },
-            "example_failure": {
-                "success": False,
-                "message": "Invalid content_type provided."
             }
         }
     }
@@ -232,17 +194,6 @@ class ProcessDocsResponse(BaseModel):
     }
 
 
-class KnowledgeContributionItem(BaseModel):
-    """Schema for a single knowledge contribution item, used in the response."""
-    id: str = Field(..., description="Unique identifier for the contribution")
-    title: str = Field(..., description="Title of the entry")
-    submitted_at: str = Field(..., description="Timestamp of submission")
-    meta_tags: List[str] = Field(..., description="Keywords for categorization")
-    source: str = Field(..., description="The origin or reference for the knowledge")
-    author_name: Optional[str] = Field(None, description="Name of the contributor")
-    additional_references: Optional[str] = Field(None, description="URLs or citation text for further reading")
-
-
 class KnowledgeItemDb(BaseModel):
     """Schema for a single knowledge item in the database."""
     hash_id: str = Field(..., description="Unique hashed identifier for the knowledge item")
@@ -256,31 +207,13 @@ class KnowledgeItemDb(BaseModel):
     file_name: Optional[str] = Field(None, description="Name of the uploaded File")
     synced: bool = Field(True, description="Indicates if the document has been synced with the vector store")
     is_public: bool = Field(False, description="Indicates if the knowledge item is marked as public information.")
+    task_id: Optional[str] = Field(None, description="Task ID for background processing of this knowledge item")
 
-class KnowledgeContributionResponse(BaseModel):
-    """Schema for the knowledge contribution API response."""
-    success: bool = Field(..., description="Indicates if the contribution was successful")
-    contribution: Optional[KnowledgeContributionItem] = Field(None, description="Details of the submitted contribution")
-    message: Optional[str] = Field(None, description="Error message in case of failure")
 
-    model_config = {
-        "json_schema_extra": {
-            "example_success": {
-                "success": True,
-                "contribution": {
-                    "id": "4dfaaf98-4036-4e8a-9235-18f915d21a24",
-                    "title": "Properties of Loamy Soil",
-                    "submitted_at": "2024-06-01T14:10:22+03:30",
-                    "meta_tags": ["loam", "soil", "agriculture"],
-                    "source": "Expert observation",
-                    "author_name": "Dr. KhakShenas",
-                "additional_references": "https://example.com/loamy-soil-guide",
-                "is_public": False
-                }
-            },
-            "example_failure": {
-                "success": False,
-                "message": "Invalid content_type provided."
-            }
-        }
-    }
+class PaginatedKnowledgeListResponse(BaseModel):
+    """Schema for paginated knowledge list response."""
+    items: List[KnowledgeItemDb] = Field(..., description="List of knowledge items for the current page")
+    total: int = Field(..., description="Total number of knowledge items")
+    page: int = Field(..., description="Current page number")
+    page_size: int = Field(..., description="Number of items per page")
+    total_pages: int = Field(..., description="Total number of pages")

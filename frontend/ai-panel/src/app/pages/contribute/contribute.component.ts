@@ -1,4 +1,4 @@
-import { Component, ViewChild } from '@angular/core';
+import { Component, ViewChild, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -9,10 +9,12 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { ContributeService } from '../../services/contribute.service';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { ContributeService, TaskStatus, TaskStatusResponse } from '../../services/contribute.service';
 import { KnowledgeListComponent } from '../knowledge-list/knowledge-list.component';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { Subscription } from 'rxjs';
 
 interface ContributionForm {
   title: string;
@@ -39,6 +41,7 @@ interface ContributionForm {
     MatSelectModule,
     MatSnackBarModule,
     MatProgressSpinnerModule,
+    MatProgressBarModule,
     MatExpansionModule,
     MatSlideToggleModule,
     KnowledgeListComponent
@@ -46,7 +49,7 @@ interface ContributionForm {
   templateUrl: './contribute.component.html',
   styleUrl: './contribute.component.scss'
 })
-export class ContributeComponent {
+export class ContributeComponent implements OnDestroy {
   // Expandable section state
   isExpanded: boolean = true;
   @ViewChild('knowledgeList') private knowledgeListComponent?: KnowledgeListComponent;
@@ -75,7 +78,11 @@ export class ContributeComponent {
   ];
 
   isSubmitting = false;
+  isProcessing = false;
   selectedFile: File | null = null;
+  currentTaskId: string | null = null;
+  currentTaskStatus: TaskStatusResponse | null = null;
+  private pollingSubscription: Subscription | null = null;
   
   // Toggle expand/collapse function
   toggleExpand(): void {
@@ -86,6 +93,10 @@ export class ContributeComponent {
     private contributeService: ContributeService,
     private snackBar: MatSnackBar
   ) { }
+
+  ngOnDestroy(): void {
+    this.pollingSubscription?.unsubscribe();
+  }
 
   onFileSelected(event: any) {
     const file = event.target.files[0];
@@ -120,6 +131,10 @@ export class ContributeComponent {
       this.showMessage('لطفاً تمام فیلدهای ضروری را پر کنید.', 'error');
       return;
     }
+    if (this.isProcessing) {
+      this.showMessage('لطفاً منتظر تکمیل پردازش فعلی باشید.', 'error');
+      return;
+    }
     this.isSubmitting = true;
 
     const formData = new FormData();
@@ -139,15 +154,46 @@ export class ContributeComponent {
       next: (response) => {
         this.isSubmitting = false;
         console.log(response);
-        this.showMessage('مشارکت شما با موفقیت ثبت شد. متشکریم!', 'success');
-        this.resetForm();
-        this.knowledgeListComponent?.refresh();
-      
+        if (response.task_id) {
+          this.currentTaskId = response.task_id;
+          this.isProcessing = true;
+          this.showMessage('مشارکت شما ثبت شد. در حال پردازش...', 'success');
+          this.startPolling(response.task_id);
+        } else {
+          this.showMessage('مشارکت شما با موفقیت ثبت شد. متشکریم!', 'success');
+          this.resetForm();
+          this.knowledgeListComponent?.refresh();
+        }
       },
       error: (error) => {
         this.isSubmitting = false;
         console.error('Contribution error:', error);
         this.showMessage('خطا در ثبت مشارکت. لطفاً دوباره تلاش کنید.', 'error');
+      }
+    });
+  }
+
+  private startPolling(taskId: string): void {
+    this.pollingSubscription = this.contributeService.pollTaskStatus(taskId).subscribe({
+      next: (status) => {
+        this.currentTaskStatus = status;
+        if (status.status === 'COMPLETED') {
+          this.isProcessing = false;
+          this.showMessage('پردازش با موفقیت انجام شد!', 'success');
+          this.resetForm();
+          this.knowledgeListComponent?.refresh();
+          this.pollingSubscription?.unsubscribe();
+        } else if (status.status === 'FAILED') {
+          this.isProcessing = false;
+          this.showMessage(`خطا در پردازش: ${status.error}`, 'error');
+          this.pollingSubscription?.unsubscribe();
+        }
+      },
+      error: (error) => {
+        this.isProcessing = false;
+        console.error('Polling error:', error);
+        this.showMessage('خطا در دریافت وضعیت پردازش.', 'error');
+        this.pollingSubscription?.unsubscribe();
       }
     });
   }
@@ -197,6 +243,8 @@ export class ContributeComponent {
       is_public:false
     };
     this.selectedFile = null;
+    this.currentTaskId = null;
+    this.currentTaskStatus = null;
     const fileInput = document.getElementById('fileInput') as HTMLInputElement;
     if (fileInput) fileInput.value = '';
   }
@@ -213,5 +261,15 @@ export class ContributeComponent {
   getCategoryLabel(value: string): string {
     const category = this.categories.find(cat => cat.value === value);
     return category ? category.label : value;
+  }
+
+  getStatusText(status: TaskStatus): string {
+    const statusMap: Record<TaskStatus, string> = {
+      'PENDING': 'در انتظار پردازش',
+      'PROCESSING': 'در حال پردازش',
+      'COMPLETED': 'تکمیل شده',
+      'FAILED': 'خطا در پردازش'
+    };
+    return statusMap[status] || status;
   }
 }

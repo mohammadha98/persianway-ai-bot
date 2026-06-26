@@ -1,6 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from typing import Optional
+from typing import Optional, Dict, Any
 import logging
+from datetime import datetime
 
 from app.core.config import settings
 
@@ -38,11 +39,11 @@ class DatabaseService:
             logger.info("Disconnected from MongoDB")
     
     async def _create_indexes(self) -> None:
-        """Create necessary indexes for the conversations collection."""
+        """Create necessary indexes for all collections."""
         try:
+            # Create indexes for conversations
             conversations_collection = self.database[settings.MONGODB_CONVERSATIONS_COLLECTION]
             
-            # Create indexes for better query performance with new embedded message structure
             await conversations_collection.create_index("user_id")
             await conversations_collection.create_index("messages.knowledge_source")
             await conversations_collection.create_index("messages.requires_human_referral")
@@ -51,9 +52,7 @@ class DatabaseService:
             await conversations_collection.create_index("is_active")
             await conversations_collection.create_index("total_messages")
             
-            # Create timestamp indexes with TTL if configured, otherwise regular indexes
             if settings.CONVERSATION_TTL_DAYS > 0:
-                # Try to create TTL index, handle conflict if regular index exists
                 try:
                     await conversations_collection.create_index(
                         "updated_at",
@@ -73,23 +72,22 @@ class DatabaseService:
                 await conversations_collection.create_index("updated_at")
             
             await conversations_collection.create_index("created_at")
-            
-            # Create compound indexes for common query patterns
             await conversations_collection.create_index([("user_id", 1), ("updated_at", -1)])
             await conversations_collection.create_index([("updated_at", -1), ("messages.confidence_score", -1)])
             await conversations_collection.create_index([("user_id", 1), ("is_active", 1), ("updated_at", -1)])
+            await conversations_collection.create_index([("title", "text"), ("messages.content", "text")])
             
-            # Create text index for full-text search in title and message content
-            await conversations_collection.create_index([
-                ("title", "text"),
-                ("messages.content", "text")
-            ])
+            # Create indexes for tasks
+            tasks_collection = self.get_tasks_collection()
+            await tasks_collection.create_index("task_id", unique=True)
+            await tasks_collection.create_index("status")
+            await tasks_collection.create_index("created_at")
+            await tasks_collection.create_index("knowledge_hash_id")
             
-            logger.info("Successfully created MongoDB indexes for embedded message structure")
+            logger.info("Successfully created all MongoDB indexes")
             
         except Exception as e:
             logger.error(f"Failed to create MongoDB indexes: {str(e)}")
-            # Don't raise here as the application can still work without indexes
     
     def get_database(self) -> AsyncIOMotorDatabase:
         """Get the database instance."""
@@ -111,6 +109,45 @@ class DatabaseService:
         """Get the knowledgebase collection."""
         database = self.get_database()
         return database["knowledgebase"]
+        
+    def get_tasks_collection(self):
+        """Get the tasks collection."""
+        database = self.get_database()
+        return database["tasks"]
+    
+    async def insert_task(self, task: Dict[str, Any]) -> str:
+        """Insert a new task into the tasks collection."""
+        try:
+            collection = self.get_tasks_collection()
+            result = await collection.insert_one(task)
+            return str(result.inserted_id)
+        except Exception as e:
+            logger.error(f"Failed to insert task: {str(e)}")
+            raise RuntimeError(f"Failed to insert task: {str(e)}")
+    
+    async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Get a task by task_id."""
+        try:
+            collection = self.get_tasks_collection()
+            task = await collection.find_one({"task_id": task_id})
+            return task
+        except Exception as e:
+            logger.error(f"Failed to get task: {str(e)}")
+            raise RuntimeError(f"Failed to get task: {str(e)}")
+    
+    async def update_task(self, task_id: str, update_data: Dict[str, Any]) -> bool:
+        """Update a task by task_id."""
+        try:
+            collection = self.get_tasks_collection()
+            update_data["updated_at"] = datetime.now().isoformat()
+            result = await collection.update_one(
+                {"task_id": task_id},
+                {"$set": update_data}
+            )
+            return result.matched_count > 0
+        except Exception as e:
+            logger.error(f"Failed to update task: {str(e)}")
+            raise RuntimeError(f"Failed to update task: {str(e)}")
         
     async def insert_knowledge_document(self, document: dict) -> str:
         """
@@ -181,6 +218,33 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Failed to retrieve knowledge documents: {str(e)}")
             raise RuntimeError(f"Failed to retrieve knowledge documents: {str(e)}")
+            
+    async def get_knowledge_documents_paginated(self, page: int = 1, page_size: int = 10) -> tuple[list[dict], int]:
+        """
+        Retrieve paginated knowledge documents and total count.
+        
+        Args:
+            page: Page number (starting from 1)
+            page_size: Number of documents per page
+            
+        Returns:
+            Tuple of (list of documents, total count)
+        """
+        try:
+            collection = self.get_knowledgebase_collection()
+            skip = (page - 1) * page_size
+            
+            # Get total count first
+            total_count = await collection.count_documents({})
+            
+            # Get paginated documents
+            cursor = collection.find().sort("submission_timestamp", -1).skip(skip).limit(page_size)
+            documents = await cursor.to_list(length=page_size)
+            
+            return documents, total_count
+        except Exception as e:
+            logger.error(f"Failed to retrieve paginated knowledge documents: {str(e)}")
+            raise RuntimeError(f"Failed to retrieve paginated knowledge documents: {str(e)}")
             
     async def update_knowledge_document_sync_status(self, hash_id: str, synced: bool = False) -> bool:
         """

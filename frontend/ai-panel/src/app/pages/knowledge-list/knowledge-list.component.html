@@ -55,30 +55,42 @@
             </td>
           </ng-container>
           
-          <!-- Author Column
-          <ng-container matColumnDef="author">
-            <th mat-header-cell *matHeaderCellDef>نویسنده</th>
-            <td mat-cell *matCellDef="let item" class="author-cell">
-              <span [matTooltip]="item.author_name || 'نامشخص'">{{ item.author_name || 'نامشخص' }}</span>
-            </td>
-          </ng-container> -->
-          
-          <!-- Synced Column -->
-          <ng-container matColumnDef="synced">
+          <!-- Status Column -->
+          <ng-container matColumnDef="status">
             <th mat-header-cell *matHeaderCellDef>وضعیت</th>
             <td mat-cell *matCellDef="let item">
-              <span *ngIf="item.synced === true" class="sync-status synced" matTooltip="همگام‌سازی شده">
-                <mat-icon>check_circle</mat-icon>
-                <span class="status-text">همگام‌سازی شده</span>
-              </span>
-              <span *ngIf="item.synced === false" class="sync-status not-synced" matTooltip="همگام‌سازی نشده">
-                <mat-icon>cancel</mat-icon>
-                <span class="status-text">همگام‌سازی نشده</span>
-              </span>
-              <span *ngIf="item.synced === null || item.synced === undefined" class="sync-status unknown" matTooltip="وضعیت نامشخص">
-                <mat-icon>help</mat-icon>
-                <span class="status-text">نامشخص</span>
-              </span>
+              <div class="status-cell">
+                <span [ngSwitch]="item.task_status || (item.synced ? 'completed' : 'PENDING')">
+                  <span *ngSwitchCase="'PENDING'" class="sync-status not-synced" matTooltip="در انتظار پردازش">
+                    <mat-icon>schedule</mat-icon>
+                    <span class="status-text">در انتظار پردازش</span>
+                  </span>
+                  <span *ngSwitchCase="'PROCESSING'" class="sync-status not-synced" matTooltip="در حال پردازش">
+                    <mat-icon>hourglass_empty</mat-icon>
+                    <span class="status-text">در حال پردازش</span>
+                  </span>
+                  <span *ngSwitchCase="'completed'" class="sync-status synced" matTooltip="تکمیل شده">
+                    <mat-icon>check_circle</mat-icon>
+                    <span class="status-text">تکمیل شده</span>
+                  </span>
+                  <span *ngSwitchCase="'FAILED'" class="sync-status not-synced" matTooltip="خطا در پردازش">
+                    <mat-icon>error</mat-icon>
+                    <span class="status-text">خطا</span>
+                  </span>
+                  <span *ngSwitchDefault class="sync-status unknown" matTooltip="نامشخص">
+                    <mat-icon>help</mat-icon>
+                    <span class="status-text">نامشخص</span>
+                  </span>
+                </span>
+                <button 
+                  mat-icon-button 
+                  *ngIf="item.task_id" 
+                  (click)="refreshItemStatus(item)"
+                  [disabled]="item.refreshing_status"
+                  matTooltip="به‌روزرسانی وضعیت">
+                  <mat-icon>refresh</mat-icon>
+                </button>
+              </div>
             </td>
           </ng-container>
           
@@ -94,8 +106,8 @@
                   mat-icon-button 
                   color="warn" 
                   (click)="deleteKnowledge(item)" 
-                  [disabled]="item.synced === false"
-                  [matTooltip]="item.synced === false ? 'امکان حذف سند همگام‌سازی نشده وجود ندارد' : 'حذف'">
+                  [disabled]="item.task_status === 'PROCESSING' || item.task_status === 'PENDING'"
+                  [matTooltip]="(item.task_status === 'PROCESSING' || item.task_status === 'PENDING') ? 'امکان حذف سند در حال پردازش وجود ندارد' : 'حذف'">
                   <mat-icon>delete</mat-icon>
                 </button>
               </div>
@@ -131,25 +143,38 @@
               </div>
             </div>
             
-            <!-- <div class="card-row">
-              <span class="card-label">نویسنده:</span>
-              <span>{{ item.author_name || 'نامشخص' }}</span>
-            </div> -->
-            
             <div class="card-row">
               <span class="card-label">وضعیت:</span>
-              <span *ngIf="item.synced === true" class="sync-status synced">
-                <mat-icon>check_circle</mat-icon>
-                همگام‌سازی شده
+              <span [ngSwitch]="item.task_status || (item.synced ? 'completed' : 'PENDING')">
+                <span *ngSwitchCase="'PENDING'" class="sync-status not-synced">
+                  <mat-icon>schedule</mat-icon>
+                  در انتظار پردازش
+                </span>
+                <span *ngSwitchCase="'PROCESSING'" class="sync-status not-synced">
+                  <mat-icon>hourglass_empty</mat-icon>
+                  در حال پردازش
+                </span>
+                <span *ngSwitchCase="'completed'" class="sync-status synced">
+                  <mat-icon>check_circle</mat-icon>
+                  تکمیل شده
+                </span>
+                <span *ngSwitchCase="'FAILED'" class="sync-status not-synced">
+                  <mat-icon>error</mat-icon>
+                  خطا
+                </span>
+                <span *ngSwitchDefault class="sync-status unknown">
+                  <mat-icon>help</mat-icon>
+                  نامشخص
+                </span>
               </span>
-              <span *ngIf="item.synced === false" class="sync-status not-synced">
-                <mat-icon>cancel</mat-icon>
-                همگام‌سازی نشده
-              </span>
-              <span *ngIf="item.synced === null || item.synced === undefined" class="sync-status unknown">
-                <mat-icon>help</mat-icon>
-                نامشخص
-              </span>
+              <button 
+                mat-icon-button 
+                *ngIf="item.task_id" 
+                (click)="refreshItemStatus(item)"
+                [disabled]="item.refreshing_status"
+                matTooltip="به‌روزرسانی وضعیت">
+                <mat-icon>refresh</mat-icon>
+              </button>
             </div>
           </div>
           
@@ -162,7 +187,7 @@
               mat-raised-button 
               color="warn" 
               (click)="deleteKnowledge(item)" 
-              [disabled]="item.synced === false">
+              [disabled]="item.task_status === 'PROCESSING' || item.task_status === 'PENDING'">
               <mat-icon>delete</mat-icon>
               حذف
             </button>

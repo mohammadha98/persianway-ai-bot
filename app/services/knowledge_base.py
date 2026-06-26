@@ -16,6 +16,7 @@ from app.services.config_service import ConfigService
 from app.services.context_condenser import batch_condense
 from app.services.utility import search_persianway
 from langchain_core.documents import Document
+from app.services.task_service import TaskStatus
 # Set up logging for human referrals
 referral_logger = logging.getLogger("human_referral")
 file_handler = logging.FileHandler("human_referrals.log", encoding="utf-8")
@@ -234,7 +235,7 @@ class KnowledgeBaseService:
         uploaded_file_path: Optional[str] = None,
         is_public: bool = False,
     ) -> Dict[str, Any]:
-        """Adds a new knowledge entry to the vector store and relational database.
+        """Adds a new knowledge entry - uses background processing for files.
 
         Args:
             title: Title of the entry.
@@ -247,135 +248,32 @@ class KnowledgeBaseService:
             is_public: Flag indicating if the contribution is public-facing metadata.
 
         Returns:
-            A dictionary with the ID and timestamp of the new entry, and file processing information if applicable.
+            A dictionary with the ID, timestamp, and task ID for background processing.
         """
+        from app.services.task_service import get_task_service
+        from app.services.database import get_database_service
+        
         try:
-            # Generate a unique hash_id that will be used in both vector store and database
             hash_id = str(uuid.uuid4())
             submitted_at = datetime.now().isoformat()
-            processed_file = False
-            file_type = None
-            file_docs = []
-
-            # Process uploaded file if provided
-            if uploaded_file_path:
-                file_ext = uploaded_file_path.lower().split('.')[-1]
-                
-                # Process PDF file
-                if file_ext == 'pdf':
-                    file_type = 'pdf'
-                    # Use the document processor to process the PDF
-                    pdf_docs = self.document_processor.process_pdf(uploaded_file_path)
-                    if pdf_docs:
-                        # Add custom metadata to the PDF documents
-                        for doc in pdf_docs:
-                            doc.metadata["source"] = os.path.basename(uploaded_file_path)
-                            doc.metadata["title"] = title
-                            doc.metadata["meta_tags"] = ",".join(meta_tags)
-                            doc.metadata["author_name"] = author_name if author_name else "Unknown"
-                            doc.metadata["additional_references"] = additional_references if additional_references else "None"
-                            doc.metadata["submission_timestamp"] = submitted_at
-                            doc.metadata["entry_type"] = "user_contribution_pdf"
-                            doc.metadata["is_public"] = is_public
-                            doc.metadata["hash_id"] = hash_id  # Use hash_id as common identifier
-                            doc.metadata["id"] = hash_id       # Keep id for backward compatibility
-                        
-                        file_docs.extend(pdf_docs)
-                        processed_file = True
-                
-                # Process DOCX file
-                elif file_ext == 'docx':
-                    file_type = 'docx'
-                    # Use the document processor to process the DOCX file
-                    docx_docs = self.document_processor.process_docx(uploaded_file_path)
-                    if docx_docs:
-                        # Add custom metadata to the DOCX documents
-                        for doc in docx_docs:
-                            doc.metadata["source"] = os.path.basename(uploaded_file_path)
-                            doc.metadata["title"] = title
-                            doc.metadata["meta_tags"] = ",".join(meta_tags)
-                            doc.metadata["author_name"] = author_name if author_name else "Unknown"
-                            doc.metadata["additional_references"] = additional_references if additional_references else "None"
-                            doc.metadata["submission_timestamp"] = submitted_at
-                            doc.metadata["entry_type"] = "user_contribution_docx"
-                            doc.metadata["is_public"] = is_public
-                            doc.metadata["hash_id"] = hash_id  # Use hash_id as common identifier
-                            doc.metadata["id"] = hash_id       # Keep id for backward compatibility
-                        
-                        file_docs.extend(docx_docs)
-                        processed_file = True
-                        logging.info(f"Processed DOCX file with {len(docx_docs)} document chunks")
-                
-                # Process Excel file
-                elif file_ext in ['xlsx', 'xls']:
-                    file_type = 'excel'
-                    # Use the excel processor to process the Excel file
-                    qa_count, excel_docs = self.excel_processor.process_excel_file(uploaded_file_path)
-                    if excel_docs:
-                        # Add custom metadata to the Excel documents
-                        for doc in excel_docs:
-                            doc.metadata["meta_tags"] = ",".join(meta_tags)
-                            doc.metadata["author_name"] = author_name if author_name else "Unknown"
-                            doc.metadata["additional_references"] = additional_references if additional_references else "None"
-                            doc.metadata["submission_timestamp"] = submitted_at
-                            doc.metadata["entry_type"] = "user_contribution_excel"
-                            doc.metadata["is_public"] = is_public
-                            doc.metadata["hash_id"] = hash_id  # Use hash_id as common identifier
-                            doc.metadata["id"] = hash_id       # Keep id for backward compatibility
-                        
-                        file_docs.extend(excel_docs)
-                        processed_file = True
-
-            # Prepare metadata for text contribution
-            metadata = {
-                "source": source if source else "Unknown",
-                "title": title,
-                "meta_tags": ",".join(meta_tags), # Store as comma-separated string as per existing patterns if any, or adjust if vector store handles lists
-                "author_name": author_name if author_name else "Unknown",
-                "additional_references": additional_references if additional_references else "None",
-                "submission_timestamp": submitted_at,
-                "entry_type": "user_contribution", # Differentiate from PDF/Excel
-                "source_type": "qa_contribution", # Mark as QA contribution for retrieval priority
-                "question": title, # Store the title as the question
-                "answer": content, # Store the content as the answer
-                "hash_id": hash_id,  # Use hash_id as common identifier
-                "id": hash_id,        # Keep id for backward compatibility
-                "is_public": is_public
-            }
-
-            # Create Langchain Document for text contribution
-            document_content = f"Title: {title}\n\nContent: {content}"
-            langchain_document = self.document_processor.text_splitter.create_documents(
-                texts=[document_content],
-                metadatas=[metadata] # Pass metadata for each document
+            db_service = await get_database_service()
+            
+            # Create a background task first to get task_id
+            task_service = await get_task_service()
+            task_id = await task_service.create_task(
+                task_type="process_knowledge_contribution",
+                knowledge_hash_id=hash_id,
+                metadata={
+                    "title": title,
+                    "content": content,
+                    "source": source,
+                    "author_name": author_name,
+                    "additional_references": additional_references,
+                    "uploaded_file_path": uploaded_file_path,
+                    "is_public": is_public,
+                    "meta_tags": meta_tags
+                }
             )
-            
-            # Ensure documents are created and metadata is correctly assigned
-            if not langchain_document and not file_docs:
-                 raise ValueError("Failed to create document for vector store.")
-
-            # Add to vector store
-            vector_store = self.document_processor.get_vector_store()
-            
-            # Add text contribution documents
-            if langchain_document:
-                vector_store.add_documents(langchain_document)
-            
-            # Add file documents if any
-            if file_docs:
-                # Process in batches to avoid token limit issues
-                batch_size = 100
-                for i in range(0, len(file_docs), batch_size):
-                    batch = file_docs[i:i + batch_size]
-                    vector_store.add_documents(batch)
-                    logging.info(f"Processed batch {i//batch_size + 1}/{(len(file_docs) + batch_size - 1)//batch_size} with {len(batch)} documents from uploaded file")
-            
-            # # Persist changes to vector store
-            # vector_store.persist() # Ensure data is saved
-
-            # After adding new documents, the QA chain should be reset to reflect the changes.
-            self._qa_chain = None
-            logging.info("Vector store updated. QA chain has been reset.")
             
             # Prepare document for database insertion
             db_document = {
@@ -386,25 +284,20 @@ class KnowledgeBaseService:
                 "author_name": author_name if author_name else "Unknown",
                 "additional_references": additional_references.split(",") if additional_references else [],
                 "submission_timestamp": submitted_at,
-                "synced": True,
-                "entry_type": "user_contribution"
+                "synced": False,
+                "entry_type": "user_contribution",
+                "is_public": is_public,
+                "task_id": task_id
             }
             
-            # Add file information if a file was processed
-            if processed_file:
-                db_document["file_processed"] = True
-                db_document["file_type"] = file_type
-                db_document["file_name"] = os.path.basename(uploaded_file_path) if uploaded_file_path else None
-                if file_type == 'excel' and 'qa_count' in locals():
-                    db_document["qa_count"] = qa_count
-            db_document["is_public"] = is_public
+            if uploaded_file_path:
+                db_document["file_path"] = uploaded_file_path
+                db_document["file_type"] = uploaded_file_path.lower().split('.')[-1]
+                db_document["file_name"] = os.path.basename(uploaded_file_path)
             
-            # Insert document into database
-            from app.services.database import get_database_service
-            db_service = await get_database_service()
             db_id = await db_service.insert_knowledge_document(db_document)
             logging.info(f"Document inserted into database with ID: {db_id}")
-
+            
             # Prepare response
             response = {
                 "id": hash_id,
@@ -415,22 +308,190 @@ class KnowledgeBaseService:
                 "author_name": author_name,
                 "additional_references": additional_references,
                 "db_id": db_id,
-                "is_public": is_public
+                "is_public": is_public,
+                "task_id": task_id,
+                "status": "queued"
             }
-            
-            # Add file information if a file was processed
-            if processed_file:
-                response["file_processed"] = True
-                response["file_type"] = file_type
-                response["file_name"] = os.path.basename(uploaded_file_path) if uploaded_file_path else None
-                if file_type == 'excel':
-                    response["qa_count"] = qa_count if 'qa_count' in locals() else 0
             
             return response
         except Exception as e:
             logging.error(f"Error adding knowledge contribution: {str(e)}")
-            # Re-raise the exception so the route can handle it and return a 500 error
             raise
+    
+    async def process_knowledge_contribution_background(self, task_id: str, knowledge_hash_id: str, metadata: Dict[str, Any]):
+        """Process a knowledge contribution in the background with retry logic."""
+        from app.services.task_service import get_task_service
+        from app.services.database import get_database_service
+        import asyncio
+        
+        task_service = await get_task_service()
+        db_service = await get_database_service()
+        
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                await task_service.update_task_status(task_id, TaskStatus.PROCESSING, progress=0)
+                
+                title = metadata.get("title")
+                content = metadata.get("content")
+                source = metadata.get("source")
+                author_name = metadata.get("author_name")
+                additional_references = metadata.get("additional_references")
+                uploaded_file_path = metadata.get("uploaded_file_path")
+                is_public = metadata.get("is_public", False)
+                meta_tags = metadata.get("meta_tags", [])
+                submitted_at = datetime.now().isoformat()
+                processed_file = False
+                file_type = None
+                file_docs = []
+                qa_count = 0
+
+                # Process uploaded file if provided
+                if uploaded_file_path:
+                    file_ext = uploaded_file_path.lower().split('.')[-1]
+                    
+                    if file_ext == 'pdf':
+                        file_type = 'pdf'
+                        pdf_docs = self.document_processor.process_pdf(uploaded_file_path)
+                        if pdf_docs:
+                            for idx, doc in enumerate(pdf_docs):
+                                doc.metadata["source"] = os.path.basename(uploaded_file_path)
+                                doc.metadata["title"] = title
+                                doc.metadata["meta_tags"] = ",".join(meta_tags)
+                                doc.metadata["author_name"] = author_name if author_name else "Unknown"
+                                doc.metadata["additional_references"] = additional_references if additional_references else "None"
+                                doc.metadata["submission_timestamp"] = submitted_at
+                                doc.metadata["entry_type"] = "user_contribution_pdf"
+                                doc.metadata["is_public"] = is_public
+                                doc.metadata["hash_id"] = knowledge_hash_id
+                                doc.metadata["id"] = f"{knowledge_hash_id}_pdf_{idx}"
+                            file_docs.extend(pdf_docs)
+                            processed_file = True
+                    
+                    elif file_ext == 'docx':
+                        file_type = 'docx'
+                        docx_docs = self.document_processor.process_docx(uploaded_file_path)
+                        if docx_docs:
+                            for idx, doc in enumerate(docx_docs):
+                                doc.metadata["source"] = os.path.basename(uploaded_file_path)
+                                doc.metadata["title"] = title
+                                doc.metadata["meta_tags"] = ",".join(meta_tags)
+                                doc.metadata["author_name"] = author_name if author_name else "Unknown"
+                                doc.metadata["additional_references"] = additional_references if additional_references else "None"
+                                doc.metadata["submission_timestamp"] = submitted_at
+                                doc.metadata["entry_type"] = "user_contribution_docx"
+                                doc.metadata["is_public"] = is_public
+                                doc.metadata["hash_id"] = knowledge_hash_id
+                                doc.metadata["id"] = f"{knowledge_hash_id}_docx_{idx}"
+                            file_docs.extend(docx_docs)
+                            processed_file = True
+                    
+                    elif file_ext in ['xlsx', 'xls']:
+                        file_type = 'excel'
+                        qa_count, excel_docs = self.excel_processor.process_excel_file(uploaded_file_path)
+                        if excel_docs:
+                            for idx, doc in enumerate(excel_docs):
+                                doc.metadata["meta_tags"] = ",".join(meta_tags)
+                                doc.metadata["author_name"] = author_name if author_name else "Unknown"
+                                doc.metadata["additional_references"] = additional_references if additional_references else "None"
+                                doc.metadata["submission_timestamp"] = submitted_at
+                                doc.metadata["entry_type"] = "user_contribution_excel"
+                                doc.metadata["is_public"] = is_public
+                                doc.metadata["hash_id"] = knowledge_hash_id
+                                doc.metadata["id"] = f"{knowledge_hash_id}_excel_{idx}"
+                            file_docs.extend(excel_docs)
+                            processed_file = True
+                
+                # Prepare metadata for text contribution
+                base_doc_metadata = {
+                    "source": source if source else "Unknown",
+                    "title": title,
+                    "meta_tags": ",".join(meta_tags),
+                    "author_name": author_name if author_name else "Unknown",
+                    "additional_references": additional_references if additional_references else "None",
+                    "submission_timestamp": submitted_at,
+                    "entry_type": "user_contribution",
+                    "source_type": "qa_contribution",
+                    "question": title,
+                    "answer": content,
+                    "hash_id": knowledge_hash_id,
+                    "is_public": is_public
+                }
+
+                # Create Langchain Document for text contribution
+                document_content = f"Title: {title}\n\nContent: {content}"
+                langchain_documents = self.document_processor.text_splitter.create_documents(
+                    texts=[document_content],
+                    metadatas=[base_doc_metadata]
+                )
+                
+                # Ensure each text chunk has a unique ID
+                for idx, doc in enumerate(langchain_documents):
+                    doc.metadata["id"] = f"{knowledge_hash_id}_text_{idx}"
+                
+                if not langchain_documents and not file_docs:
+                     raise ValueError("Failed to create document for vector store.")
+
+                vector_store = self.document_processor.get_vector_store()
+                
+                # Add text contribution
+                if langchain_documents:
+                    vector_store.add_documents(langchain_documents)
+                    await task_service.update_task_status(task_id, TaskStatus.PROCESSING, progress=30)
+                
+                # Add file documents
+                if file_docs:
+                    batch_size = 100
+                    total_batches = (len(file_docs) + batch_size - 1) // batch_size
+                    for i in range(0, len(file_docs), batch_size):
+                        batch = file_docs[i:i + batch_size]
+                        vector_store.add_documents(batch)
+                        progress = 30 + int(((i // batch_size + 1) / total_batches) * 60)
+                        await task_service.update_task_status(task_id, TaskStatus.PROCESSING, progress=progress)
+                        logging.info(f"Processed batch {i//batch_size + 1}/{total_batches}")
+                
+                self._qa_chain = None
+                logging.info("Vector store updated")
+                
+                # Update the database document
+                update_data = {"synced": True}
+                if processed_file:
+                    update_data["file_processed"] = True
+                    update_data["file_type"] = file_type
+                    if file_type == 'excel':
+                        update_data["qa_count"] = qa_count
+                
+                await db_service.update_knowledge_document_sync_status(knowledge_hash_id, True)
+                
+                await task_service.update_task_status(
+                    task_id, 
+                    TaskStatus.COMPLETED, 
+                    progress=100, 
+                    metadata={
+                        "processed_file": processed_file,
+                        "file_type": file_type,
+                        "qa_count": qa_count if file_type == 'excel' else 0
+                    }
+                )
+                
+                return  # Success, exit retry loop
+                
+            except Exception as e:
+                logging.error(f"Attempt {attempt + 1}/{max_retries} failed: {str(e)}", exc_info=True)
+                
+                if attempt < max_retries - 1:
+                    # Wait before retrying
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    # All retries failed
+                    await task_service.update_task_status(
+                        task_id, 
+                        TaskStatus.FAILED, 
+                        error=f"All {max_retries} attempts failed: {str(e)}"
+                    )
     
 
     async def expand_query_with_context(

@@ -19,6 +19,7 @@ from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.schema import Document
 from app.services.database import DatabaseService
 from chromadb.config import Settings as ChromaSettings
+from chromadb.config import Settings
 
 try:
     from docx import Document as DocxDocument
@@ -185,11 +186,22 @@ class DocumentProcessor:
             
         if self._vector_store is None:
             if self.chroma_client is None:
-                self.chroma_client = chromadb.PersistentClient(
-                    path=self.persist_directory,
-                    settings=ChromaSettings(anonymized_telemetry=False)
-                )
-                logging.info(f"[PID {os.getpid()}] Chroma PersistentClient initialized at: {self.persist_directory}")
+                # Check if we should use remote ChromaDB or local persistent storage
+                if settings.USE_REMOTE_CHROMADB:
+                    logging.info(f"[PID {os.getpid()}] Using remote ChromaDB at {settings.CHROMADB_HOST}:{settings.CHROMADB_PORT}")
+                    self.chroma_client = chromadb.HttpClient(
+                        host=settings.CHROMADB_HOST,
+                        port=settings.CHROMADB_PORT,
+                        ssl=settings.CHROMADB_SSL,
+                        settings=ChromaSettings(anonymized_telemetry=False)
+                    )
+                else:
+                    # Use local persistent storage in project root
+                    logging.info(f"[PID {os.getpid()}] Using local ChromaDB at: {self.persist_directory}")
+                    self.chroma_client = chromadb.PersistentClient(
+                        path=self.persist_directory,
+                        settings=ChromaSettings(anonymized_telemetry=False)
+                    )
             
             # تغییر ۳: get_or_create_collection — NEVER overwrites existing data
             collection_name = "knowledge_base"
@@ -202,8 +214,9 @@ class DocumentProcessor:
                 embedding_function=self.embeddings
             )
             logging.info(f"[PID {os.getpid()}] Vector store loaded. "
-                        f"Collection exists: {collection_name} "
-                        f"Dir contents: {os.listdir(self.persist_directory)}")
+                        f"Collection exists: {collection_name} ")
+            if not settings.USE_REMOTE_CHROMADB:
+                logging.info(f"[PID {os.getpid()}] Local dir contents: {os.listdir(self.persist_directory)}")
         
         return self._vector_store
     
