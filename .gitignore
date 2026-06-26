@@ -5,6 +5,7 @@ env/
 
 
 vectordb/
+/vectordb/
 # Python
 __pycache__/
 *.py[cod]
