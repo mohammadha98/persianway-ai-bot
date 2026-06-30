@@ -27,17 +27,17 @@ referral_logger.setLevel(logging.INFO)
 
 class KnowledgeBaseService:
     """Service for retrieving information from the knowledge base using RAG.
-    
+
     This service integrates the document processor with LangChain's retrieval
     capabilities to provide context-aware responses based on the document collection.
     """
-    
+
     def __init__(self):
         """Initialize the knowledge base service."""
         self.document_processor = get_document_processor()
         self.excel_processor = get_excel_qa_processor()
         self.config_service = ConfigService()
-        
+
         # Initialize the retrieval QA chain
         self._qa_chain = None
         self.llm = None
@@ -57,7 +57,7 @@ class KnowledgeBaseService:
         except Exception as e:
             self.reranker = None
             logging.warning(f"[KB SERVICE] Reranker initialization failed: {str(e)}")
-    
+
     async def _get_document_chain(self):
         """Get document processing chain WITHOUT automatic retrieval.
         Returns only the document chain; retrieval is handled manually in query_knowledge_base.
@@ -85,7 +85,7 @@ class KnowledgeBaseService:
         self._qa_chain = None
         self.llm = None
         await self._get_document_chain()
-    
+
     def _normalize_documents_for_context(
         self,
         docs: List[Any]
@@ -127,14 +127,14 @@ class KnowledgeBaseService:
                 f"[Context Normalization] Complete: {len(normalized_docs)}/{len(docs)} docs, total_chars={total_chars}, reduction={reduction_pct:.1f}%"
             )
         return normalized_docs
-    
+
     def _calculate_confidence_score(self, docs_with_scores: List[tuple], top_n: int = 3) -> float:
         """
         Calculates multi-factor confidence score based on:
         1. Best document score (primary factor)
         2. Score consistency across top results (secondary factor)
         3. Number of relevant documents found (coverage factor)
-        
+
         Lower distance scores indicate higher similarity in L2 distance.
 
         Args:
@@ -146,20 +146,20 @@ class KnowledgeBaseService:
         """
         import math
         import numpy as np
-        
+
         if not docs_with_scores:
             return 0.0
-        
+
         # Extract scores from top N documents
         top_scores = [score for _, score in docs_with_scores[:min(top_n, len(docs_with_scores))]]
-        
+
         # --- Factor 1: Best Score (60% weight) ---
         # Convert best similarity score to confidence using logistic decay
         best_score = top_scores[0]
         midpoint = 1.5  # Distance at which confidence is 50%
         scale = 5.0     # Steepness of decay
         best_confidence = 1.0 / (1.0 + math.exp(scale * (best_score - midpoint)))
-        
+
         # --- Factor 2: Score Consistency (30% weight) ---
         # Lower standard deviation = more consistent = higher confidence
         if len(top_scores) > 1:
@@ -168,20 +168,20 @@ class KnowledgeBaseService:
             consistency_score = 1.0 / (1.0 + score_std * 2.0)
         else:
             consistency_score = 1.0  # Single result = perfect consistency
-        
+
         # --- Factor 3: Coverage (10% weight) ---
         # Having multiple relevant docs increases confidence
         coverage_score = min(len(docs_with_scores) / top_n, 1.0)
-        
+
         # --- Combined Confidence ---
         final_confidence = (
-            best_confidence * 0.6 + 
-            consistency_score * 0.3 + 
+            best_confidence * 0.6 +
+            consistency_score * 0.3 +
             coverage_score * 0.1
         )
-        
+
         return max(0.0, min(final_confidence, 1.0))
-    
+
     def _calculate_single_score_confidence(self, similarity_score: float) -> float:
         import math
         max_distance = 2.5
@@ -196,10 +196,10 @@ class KnowledgeBaseService:
         inverted_score = 1.0 - normalized_distance
         confidence = math.pow(inverted_score, 0.7)
         return max(0.0, min(confidence, 1.0))
-    
+
     def _log_human_referral(self, query: str, answer: str, confidence: float) -> None:
         """Log a query that requires human attention.
-        
+
         Args:
             query: The original query
             answer: The generated answer
@@ -215,10 +215,10 @@ class KnowledgeBaseService:
             f"Timestamp: {datetime.now().isoformat()}\n"
             f"{'=' * 50}"
         )
-    
+
     def process_excel_files(self) -> int:
         """Process all Excel QA files in the configured directory.
-        
+
         Returns:
             Number of QA pairs processed
         """
@@ -252,12 +252,12 @@ class KnowledgeBaseService:
         """
         from app.services.task_service import get_task_service
         from app.services.database import get_database_service
-        
+
         try:
             hash_id = str(uuid.uuid4())
             submitted_at = datetime.now().isoformat()
             db_service = await get_database_service()
-            
+
             # Create a background task first to get task_id
             task_service = await get_task_service()
             task_id = await task_service.create_task(
@@ -274,7 +274,10 @@ class KnowledgeBaseService:
                     "meta_tags": meta_tags
                 }
             )
-            
+
+            # NOTE: vectordb write is handled exclusively by
+            # process_knowledge_contribution_background to avoid duplicates.
+
             # Prepare document for database insertion
             db_document = {
                 "hash_id": hash_id,
@@ -289,15 +292,15 @@ class KnowledgeBaseService:
                 "is_public": is_public,
                 "task_id": task_id
             }
-            
+
             if uploaded_file_path:
                 db_document["file_path"] = uploaded_file_path
                 db_document["file_type"] = uploaded_file_path.lower().split('.')[-1]
                 db_document["file_name"] = os.path.basename(uploaded_file_path)
-            
+
             db_id = await db_service.insert_knowledge_document(db_document)
             logging.info(f"Document inserted into database with ID: {db_id}")
-            
+
             # Prepare response
             response = {
                 "id": hash_id,
@@ -312,28 +315,28 @@ class KnowledgeBaseService:
                 "task_id": task_id,
                 "status": "queued"
             }
-            
+
             return response
         except Exception as e:
             logging.error(f"Error adding knowledge contribution: {str(e)}")
             raise
-    
+
     async def process_knowledge_contribution_background(self, task_id: str, knowledge_hash_id: str, metadata: Dict[str, Any]):
         """Process a knowledge contribution in the background with retry logic."""
         from app.services.task_service import get_task_service
         from app.services.database import get_database_service
         import asyncio
-        
+
         task_service = await get_task_service()
         db_service = await get_database_service()
-        
+
         max_retries = 3
         retry_delay = 2  # seconds
-        
+
         for attempt in range(max_retries):
             try:
                 await task_service.update_task_status(task_id, TaskStatus.PROCESSING, progress=0)
-                
+
                 title = metadata.get("title")
                 content = metadata.get("content")
                 source = metadata.get("source")
@@ -351,7 +354,7 @@ class KnowledgeBaseService:
                 # Process uploaded file if provided
                 if uploaded_file_path:
                     file_ext = uploaded_file_path.lower().split('.')[-1]
-                    
+
                     if file_ext == 'pdf':
                         file_type = 'pdf'
                         pdf_docs = self.document_processor.process_pdf(uploaded_file_path)
@@ -369,7 +372,7 @@ class KnowledgeBaseService:
                                 doc.metadata["id"] = f"{knowledge_hash_id}_pdf_{idx}"
                             file_docs.extend(pdf_docs)
                             processed_file = True
-                    
+
                     elif file_ext == 'docx':
                         file_type = 'docx'
                         docx_docs = self.document_processor.process_docx(uploaded_file_path)
@@ -387,7 +390,7 @@ class KnowledgeBaseService:
                                 doc.metadata["id"] = f"{knowledge_hash_id}_docx_{idx}"
                             file_docs.extend(docx_docs)
                             processed_file = True
-                    
+
                     elif file_ext in ['xlsx', 'xls']:
                         file_type = 'excel'
                         qa_count, excel_docs = self.excel_processor.process_excel_file(uploaded_file_path)
@@ -403,7 +406,7 @@ class KnowledgeBaseService:
                                 doc.metadata["id"] = f"{knowledge_hash_id}_excel_{idx}"
                             file_docs.extend(excel_docs)
                             processed_file = True
-                
+
                 # Prepare metadata for text contribution
                 base_doc_metadata = {
                     "source": source if source else "Unknown",
@@ -426,21 +429,21 @@ class KnowledgeBaseService:
                     texts=[document_content],
                     metadatas=[base_doc_metadata]
                 )
-                
+
                 # Ensure each text chunk has a unique ID
                 for idx, doc in enumerate(langchain_documents):
                     doc.metadata["id"] = f"{knowledge_hash_id}_text_{idx}"
-                
+
                 if not langchain_documents and not file_docs:
                      raise ValueError("Failed to create document for vector store.")
 
                 vector_store = self.document_processor.get_vector_store()
-                
+
                 # Add text contribution
                 if langchain_documents:
                     vector_store.add_documents(langchain_documents)
                     await task_service.update_task_status(task_id, TaskStatus.PROCESSING, progress=30)
-                
+
                 # Add file documents
                 if file_docs:
                     batch_size = 100
@@ -451,10 +454,10 @@ class KnowledgeBaseService:
                         progress = 30 + int(((i // batch_size + 1) / total_batches) * 60)
                         await task_service.update_task_status(task_id, TaskStatus.PROCESSING, progress=progress)
                         logging.info(f"Processed batch {i//batch_size + 1}/{total_batches}")
-                
+
                 self._qa_chain = None
                 logging.info("Vector store updated")
-                
+
                 # Update the database document
                 update_data = {"synced": True}
                 if processed_file:
@@ -462,25 +465,25 @@ class KnowledgeBaseService:
                     update_data["file_type"] = file_type
                     if file_type == 'excel':
                         update_data["qa_count"] = qa_count
-                
+
                 await db_service.update_knowledge_document_sync_status(knowledge_hash_id, True)
-                
+
                 await task_service.update_task_status(
-                    task_id, 
-                    TaskStatus.COMPLETED, 
-                    progress=100, 
+                    task_id,
+                    TaskStatus.COMPLETED,
+                    progress=100,
                     metadata={
                         "processed_file": processed_file,
                         "file_type": file_type,
                         "qa_count": qa_count if file_type == 'excel' else 0
                     }
                 )
-                
+
                 return  # Success, exit retry loop
-                
+
             except Exception as e:
                 logging.error(f"Attempt {attempt + 1}/{max_retries} failed: {str(e)}", exc_info=True)
-                
+
                 if attempt < max_retries - 1:
                     # Wait before retrying
                     await asyncio.sleep(retry_delay)
@@ -488,31 +491,31 @@ class KnowledgeBaseService:
                 else:
                     # All retries failed
                     await task_service.update_task_status(
-                        task_id, 
-                        TaskStatus.FAILED, 
+                        task_id,
+                        TaskStatus.FAILED,
                         error=f"All {max_retries} attempts failed: {str(e)}"
                     )
-    
+
 
     async def expand_query_with_context(
-        self, 
-        query: str, 
+        self,
+        query: str,
         conversation_history: List[Dict[str, str]] = None,
         max_history: int = 4
     ) -> Dict[str, Any]:
         """Rewrite query based on conversation context and expand it for better search results.
-        
+
         This method combines contextual query rewriting and query expansion:
         1. If conversation history exists, rewrites the query to be self-contained
         2. Expands the query (original or rewritten) into multiple variations
         3. Returns all queries for comprehensive search
 
-        
+
         Args:
             query: The original query string
             conversation_history: List of conversation messages with 'role' and 'content' keys
             max_history: Maximum number of previous messages to consider (default: 4 = 2 exchanges)
-            
+
         Returns:
             A dictionary containing:
                 - original_query: The original user query
@@ -522,11 +525,11 @@ class KnowledgeBaseService:
         """
         try:
             import json
-            
+
             llm = await get_llm(model_name="qwen/qwen3-32b", temperature=0.1, max_tokens=800)
-            
+
             rewritten_query = query
-            
+
             # Build recent context from conversation history if available
             recent_context = ""
             if conversation_history:
@@ -593,13 +596,13 @@ Return ONLY a JSON object in PERSIAN.
 <|im_end|>
 <|im_start|>assistant
  """
-            
+
             # Call llm for both rewriting and expansion
             response = await llm.ainvoke([
                 SystemMessage(content="تو دستیار هوشمندی هستی که پرسش‌ها را بازنویسی و گسترش می‌دهی برای بهبود نتایج جست‌وجو. فقط JSON معتبر برگردان."),
                 HumanMessage(content=prompt)
             ])
-            
+
             raw_content = getattr(response, "content", "")
             try:
                 result = json.loads(raw_content)
@@ -617,23 +620,23 @@ Return ONLY a JSON object in PERSIAN.
                 logging.error(f"Error parsing expansion result: {str(e)}")
                 rewritten_query = query
                 expanded_queries = []
-            
+
             # Combine all queries for search (rewritten + expanded)
             # Remove duplicates while preserving order
             all_queries = [rewritten_query]
-            
+
             logging.info(f"[Query Expansion] Original: '{query[:50]}...'")
             if rewritten_query != query:
                 logging.info(f"[Query Expansion] Rewritten: '{rewritten_query[:50]}...'")
             logging.info(f"[Query Expansion] Generated {len(expanded_queries)} expanded variations")
-            
+
             return {
                 "original_query": query,
                 "rewritten_query": rewritten_query,
                 "expanded_queries": expanded_queries,
                 "all_queries": all_queries
             }
-            
+
         except Exception as e:
             logging.error(f"Error in expand_query_with_context: {str(e)}")
             # Return just the original query if there's an error
@@ -647,16 +650,16 @@ Return ONLY a JSON object in PERSIAN.
     def _extract_conversation_history(self, conversation_history) -> List[Dict[str, str]]:
         """
         Extract conversation messages from ConversationResponse format.
-        
+
         Args:
             conversation_history: ConversationResponse object or list of messages
-            
+
         Returns:
             List[Dict[str, str]]: List of messages with 'role' and 'content' keys
         """
         if not conversation_history:
             return []
-            
+
         # Handle ConversationResponse object
         if hasattr(conversation_history, 'messages'):
             messages = []
@@ -666,7 +669,7 @@ Return ONLY a JSON object in PERSIAN.
                     'content': msg.content
                 })
             return messages
-        
+
         # Handle list of ConversationResponse objects
         elif isinstance(conversation_history, list) and conversation_history:
             # If it's a list of ConversationResponse objects, take the latest one
@@ -682,7 +685,7 @@ Return ONLY a JSON object in PERSIAN.
             # If it's already a list of dict messages, return as is
             elif isinstance(conversation_history[0], dict) and 'role' in conversation_history[0]:
                 return conversation_history
-        
+
         return []
 
     def _normalize_text_for_comparison(self, text: str) -> str:
@@ -691,45 +694,45 @@ Return ONLY a JSON object in PERSIAN.
         text = re.sub(r"[؟?!.،,;:\(\)\[\]\{}«»\"']+", "", text)
         text = re.sub(r"\s+", " ", text)
         return text.lower().strip()
-    
+
 
 
 
     async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False, external_context: str = None) -> Dict[str, Any]:
         """Query the knowledge base with a question using improved retrieval strategy.
-        
+
         PERF: This method includes detailed timing instrumentation for performance analysis.
-        
+
         Improvements:
         - Weighted multi-query search (original query gets higher weight)
         - Similarity threshold filtering
         - MMR for diversity
         - Multi-factor confidence calculation
-        
+
         Args:
             query: The question to ask
             conversation_history: Previous conversation messages for context
             is_public: When True, restricts retrieval to documents tagged with public metadata
             external_context: Optional string containing external information (e.g., web search results) to be included in the context
-            
+
         Returns:
             A dictionary with the answer, confidence score, and source information
         """
         # === PERF: Timing Instrumentation ===
         t_kb_start = time.perf_counter()
         kb_timings = {}
-        
+
         try:
             # Log the incoming query for debugging
             logging.info(f"[KB Query] Original query: '{query[:100]}...', is_public={is_public}")
-            
+
             # === PERF: Expand Query Timing ===
             t0 = time.perf_counter()
-            
+
             # Extract conversation history
             extracted_history = self._extract_conversation_history(conversation_history)
             logging.debug(f"[KB Query] Extracted {len(extracted_history)} messages from conversation history")
-            
+
             # Filter out the current query from history to prevent circular context
             filtered_history = []
             if extracted_history:
@@ -743,7 +746,7 @@ Return ONLY a JSON object in PERSIAN.
                             continue
                     filtered_history.append(msg)
                 logging.info(f"[History Filter] Kept {len(filtered_history)}/{len(extracted_history)} messages")
-            
+
             # Use the combined method to rewrite query with context and expand it
             # This handles both contextual rewriting and query expansion in one step
             query_expansion_result = await self.expand_query_with_context(
@@ -752,24 +755,24 @@ Return ONLY a JSON object in PERSIAN.
             )
             kb_timings['expand_query'] = time.perf_counter() - t0
             logging.info(f"[PERF_KB] step=expand_query elapsed={kb_timings['expand_query']:.3f}s")
-            
+
             rewritten_query = query_expansion_result["rewritten_query"]
             logging.debug(f"[KB Query] Original query: {query}")
             logging.info(f"[KB Query] Using rewritten query: '{rewritten_query[:100]}...'")
             # Log the query transformation
             if rewritten_query != query:
                 logging.info(f"[KB Query] Query rewritten with context: '{query[:50]}...' -> '{rewritten_query[:50]}...'")
-            
+
             # ===== PersianWay Web Search Integration =====
             # Search PersianWay for relevant information and merge with vector search results
             persianway_docs_for_rerank = []
             web_search_content = ""
-            
+
             if is_public:
                 try:
                     search_result = await search_persianway.ainvoke({"query": rewritten_query})
                     web_search_content = search_result
-                    
+
                     # Parse the web search result and create a Document for reranking
                     if search_result and "Error executing search" not in search_result and "Error searching web" not in search_result:
                         # Create a pseudo-document from web search results to pass to reranker
@@ -794,19 +797,19 @@ Return ONLY a JSON object in PERSIAN.
 
             # === PERF: Hybrid Retrieval Timing ===
             t0 = time.perf_counter()
-            
+
             # First, check if we have an exact or semantically similar match in our QA database
             vector_store = self.document_processor.get_vector_store()
-            
+
             # If vector store is not available, raise an exception to be handled by chat service
             if vector_store is None:
                 raise RuntimeError("Vector store not available. OpenAI embeddings may not be properly configured. Please check your OPENAI_API_KEY and ensure the vector database is initialized.")
-                
+
 
             rag_settings = await self.config_service.get_rag_settings()
-            
+
             logging.info(f"[KB Query] Performing hybrid retrieval (dense + BM25)")
-            
+
 
             def _validate_is_public(doc) -> bool:
                 doc_is_public = doc.metadata.get("is_public", False)
@@ -816,7 +819,7 @@ Return ONLY a JSON object in PERSIAN.
                         logging.debug(f"[Filter] Rejected: {doc.metadata.get('source', '')[:50]}")
                     return result
                 return True
-            
+
             search_query = rewritten_query.strip()
             if not search_query:
                 logging.warning("[KB Query] Empty rewritten query")
@@ -838,7 +841,7 @@ Return ONLY a JSON object in PERSIAN.
                     logging.error(f"[KB Query] Hybrid retrieval failed for query '{search_query[:50]}...': {str(e)}")
                     docs_with_scores = []
                     initial_count = 0
-            
+
             kb_timings['hybrid_retrieval'] = time.perf_counter() - t0
             logging.info(f"[PERF_KB] step=hybrid_retrieval elapsed={kb_timings['hybrid_retrieval']:.3f}s docs_found={initial_count}")
             logging.info(f"[Filter] After validation: {len(docs_with_scores)} docs")
@@ -850,7 +853,7 @@ Return ONLY a JSON object in PERSIAN.
                 for doc, score in docs_with_scores
                 if score <= rag_settings.similarity_threshold
             ]
-            
+
             # ===== Merge PersianWay web search docs with filtered_docs =====
             if persianway_docs_for_rerank:
                 filtered_docs = filtered_docs + persianway_docs_for_rerank
@@ -876,7 +879,7 @@ Return ONLY a JSON object in PERSIAN.
             # See PIPELINE_PERFORMANCE_REPORT.md for full analysis.
             kb_timings['reranking'] = 0.0  # Already done in hybrid_retrieve()
             logging.info(f"[PERF_KB] step=reranking elapsed=0.000s (SKIPPED - already done in hybrid_retrieve)")
-            
+
             # ===== IMPROVEMENT 3: Deduplication with Source Tracking =====
             def _get_doc_hash(doc) -> str:
                 import hashlib
@@ -908,23 +911,23 @@ Return ONLY a JSON object in PERSIAN.
                 [(doc, score) for doc, score, _, _ in deduplicated_docs],
                 key=lambda x: x[1]
             )
-            
+
             # Take top K results
             docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
-            
+
             kb_timings['deduplication'] = time.perf_counter() - t0
             logging.info(f"[PERF_KB] step=deduplication elapsed={kb_timings['deduplication']:.3f}s")
-            
+
             logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {initial_count} initial candidates)")
             if docs_with_scores:
                 logging.debug(f"[KB Query] Score range: {docs_with_scores[0][1]:.4f} (best) to {docs_with_scores[-1][1]:.4f} (worst)")
-            
+
             # === PERF: Document Chain & Response Generation Timing ===
             t0 = time.perf_counter()
-            
+
             # Get document chain (no internal retrieval)
             doc_chain = await self._get_document_chain()
-            
+
             # If document chain is not available, return a fallback message
             if doc_chain is None:
                 logging.warning("QA chain not available. Cannot query knowledge base.")
@@ -939,10 +942,10 @@ Return ONLY a JSON object in PERSIAN.
                     "sources": [],
                     "retrieval_method": "similarity_search"
                 }
-                
+
             # Prepare documents and manual context
             docs = [doc for doc, score in docs_with_scores]
-            
+
             # Incorporate external context (e.g., web search results)
             if external_context:
                 logging.info("[KB Query] Incorporating external context into response generation")
@@ -956,7 +959,7 @@ Return ONLY a JSON object in PERSIAN.
                     }
                 )
                 docs.append(external_doc)
-                
+
             normalized_docs = self._normalize_documents_for_context(docs)
             # summaries = await batch_condense(normalized_docs, rewritten_query)
             # summary_docs = []
@@ -970,10 +973,10 @@ Return ONLY a JSON object in PERSIAN.
             if answer is None:
                 raise KeyError("answer")
             source_docs = normalized_docs
-            
+
             kb_timings['response_generation'] = time.perf_counter() - t0
             logging.info(f"[PERF_KB] step=response_generation elapsed={kb_timings['response_generation']:.3f}s")
-            
+
             # ===== IMPROVEMENT 4: Multi-factor Confidence Calculation =====
             # Calculate confidence based on multiple factors:
             # - Best document score (60% weight)
@@ -983,26 +986,26 @@ Return ONLY a JSON object in PERSIAN.
                 confidence = self._calculate_confidence_score(docs_with_scores, top_n=3)
                 logging.info(f"[KB Query] Multi-factor confidence score: {confidence:.4f}")
                 logging.debug(f"[DEBUG] KB raw confidence: {confidence:.3f}")
-                
+
                 # Log individual document scores for debugging
                 for i, (doc, score) in enumerate(docs_with_scores[:3]):
                     logging.debug(f"[KB Query] Top doc {i+1} score: {score:.4f}")
             else:
                 confidence = 0.0
                 logging.warning("[KB Query] No documents found, confidence = 0.0")
-            
+
             # Get dynamic configuration if not already loaded
             if 'rag_settings' not in locals():
                 await self.config_service._load_config()
                 rag_settings =await self.config_service.get_rag_settings()
-            
+
             # Determine if human referral is needed based on confidence
             requires_human = confidence < rag_settings.knowledge_base_confidence_threshold
-            
+
             # If confidence is too low, log for human review
             if requires_human:
                 self._log_human_referral(query, answer, confidence)
-            
+
             # Prepare sources list
             sources = []
             if source_docs:
@@ -1018,7 +1021,7 @@ Return ONLY a JSON object in PERSIAN.
                         "answer": doc.metadata.get("answer"),
                         "meta_tags": doc.metadata.get("meta_tags")
                     })
-            
+
             # Prepare response
             source_type = "unknown"
             if source_docs:
@@ -1038,13 +1041,13 @@ Return ONLY a JSON object in PERSIAN.
                 "sources": sources,
                 "retrieval_method": "similarity_search"
             }
-         
+
             # === PERF: KB Total Timing ===
             kb_timings['total_kb_query'] = time.perf_counter() - t_kb_start
             logging.info(f"[PERF_KB] KB_TIMING: {kb_timings}")
-            
+
             return response
-            
+
         except Exception as e:
             logging.error(f"Error querying knowledge base: {str(e)}")
             # Return a proper error response instead of None
@@ -1054,7 +1057,7 @@ Return ONLY a JSON object in PERSIAN.
                 error_message = rag_settings.human_referral_message
             except:
                 error_message = "متأسفانه، خطایی در سیستم رخ داده است. لطفاً دوباره تلاش کنید."
-            
+
             return {
                 "answer": error_message,
                 "confidence_score": 0.0,
@@ -1067,10 +1070,10 @@ Return ONLY a JSON object in PERSIAN.
 
     async def remove_knowledge_contribution(self, hash_id: str) -> Dict[str, Any]:
         """Removes a knowledge entry from both the vector store and relational database.
-    
+
         Args:
             hash_id: The unique hash_id of the entry to remove.
-    
+
         Returns:
             A dictionary with the removal status and details.
         """
@@ -1078,10 +1081,10 @@ Return ONLY a JSON object in PERSIAN.
             removed_count = 0
             vector_removal_success = False
             db_removal_success = False
-            
+
             # Get vector store
             vector_store = self.document_processor.get_vector_store()
-            
+
             if vector_store is None:
                 logging.warning("Vector store is not available. Cannot remove documents from vector database.")
             else:
@@ -1089,10 +1092,10 @@ Return ONLY a JSON object in PERSIAN.
                 try:
                     # Access the underlying ChromaDB collection to delete by metadata
                     collection = vector_store._collection
-                    
+
                     # Get documents with the specified hash_id to count them before deletion
                     existing_docs = collection.get(where={"hash_id": hash_id})
-                    
+
                     # Safely get the count of documents
                     if isinstance(existing_docs, dict) and 'ids' in existing_docs:
                         removed_count = len(existing_docs['ids']) if existing_docs['ids'] else 0
@@ -1100,23 +1103,23 @@ Return ONLY a JSON object in PERSIAN.
                         # Fallback: if the structure is unexpected, assume no documents found
                         removed_count = 0
                         logging.warning(f"Unexpected structure from collection.get(): {type(existing_docs)}")
-                    
+
                     if removed_count > 0:
                         # Delete documents by metadata <mcreference link="https://github.com/langchain-ai/langchain/discussions/1690" index="5">5</mcreference>
                         collection.delete(where={"hash_id": hash_id})
-                        
+
                         # # Persist changes to vector store
                         # vector_store.persist()
-                        
+
                         # Reset QA chain to reflect changes
                         self._qa_chain = None
-                        
+
                         vector_removal_success = True
                         logging.info(f"Successfully removed {removed_count} documents from vector store with hash_id: {hash_id}")
                     else:
                         logging.info(f"No documents found in vector store with hash_id: {hash_id}")
                         vector_removal_success = True  # Consider it successful if nothing to remove
-                        
+
                 except Exception as e:
                     logging.error(f"Error removing documents from vector store: {str(e)}")
                     # Try alternative method using LangChain's delete method if available <mcreference link="https://python.langchain.com/api_reference/chroma/vectorstores/langchain_chroma.vectorstores.Chroma.html" index="3">3</mcreference>
@@ -1124,7 +1127,7 @@ Return ONLY a JSON object in PERSIAN.
                         # Get all documents and find IDs with matching hash_id
                         all_docs = collection.get(include=['metadatas'])
                         ids_to_delete = []
-                        
+
                         # Safely handle the response structure
                         if isinstance(all_docs, dict) and 'metadatas' in all_docs and 'ids' in all_docs:
                             if all_docs['metadatas']:
@@ -1133,31 +1136,31 @@ Return ONLY a JSON object in PERSIAN.
                                         ids_to_delete.append(all_docs['ids'][i])
                         else:
                             logging.warning(f"Unexpected structure from collection.get(include=['metadatas']): {type(all_docs)}")
-                        
+
                         if ids_to_delete:
                             # Use LangChain's delete method <mcreference link="https://github.com/langchain-ai/langchain/discussions/17797" index="1">1</mcreference>
                             vector_store.delete(ids=ids_to_delete)
                             removed_count = len(ids_to_delete)
                             vector_removal_success = True
-                            
+
                             # # Persist changes and reset QA chain
                             # vector_store.persist()
                             self._qa_chain = None
-                            
+
                             logging.info(f"Successfully removed {removed_count} documents using alternative method with hash_id: {hash_id}")
                         else:
                             logging.info(f"No documents found with hash_id: {hash_id}")
                             vector_removal_success = True
-                            
+
                     except Exception as e2:
                         logging.error(f"Alternative removal method also failed: {str(e2)}")
                         vector_removal_success = False
-            
+
             # Update database document (mark as unsynced instead of deleting)
             try:
                 from app.services.database import get_database_service
                 db_service = await get_database_service()
-                
+
                 # If vector removal was successful, mark the document as unsynced
                 if vector_removal_success and removed_count > 0:
                     try:
@@ -1184,14 +1187,14 @@ Return ONLY a JSON object in PERSIAN.
                     except Exception as sync_error:
                         logging.error(f"Failed to update sync status for hash_id {hash_id}: {str(sync_error)}")
                         db_removal_success = False
-                    
+
             except Exception as e:
                 logging.error(f"Error updating document in database: {str(e)}")
                 db_removal_success = False
-            
+
             # Prepare response
             overall_success = vector_removal_success and db_removal_success
-            
+
             response = {
                 "success": overall_success,
                 "hash_id": hash_id,
@@ -1200,14 +1203,14 @@ Return ONLY a JSON object in PERSIAN.
                 "documents_removed_count": removed_count,
                 "timestamp": datetime.now().isoformat()
             }
-            
+
             if overall_success:
                 logging.info(f"Successfully removed knowledge contribution with hash_id: {hash_id}")
             else:
                 logging.warning(f"Partial or failed removal of knowledge contribution with hash_id: {hash_id}")
-            
+
             return response
-            
+
         except Exception as e:
             logging.error(f"Error removing knowledge contribution: {str(e)}")
             return {
@@ -1227,7 +1230,7 @@ _knowledge_base_service = None
 
 def get_knowledge_base_service() -> KnowledgeBaseService:
     """Get the knowledge base service instance.
-    
+
     Returns:
         A singleton instance of the KnowledgeBaseService
     """
