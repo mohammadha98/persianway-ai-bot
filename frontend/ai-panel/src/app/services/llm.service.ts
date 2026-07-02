@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
+import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 
 export interface LlmSettings {
@@ -36,22 +36,39 @@ export interface LlmSettingsUpdateRequest {
 }
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class LlmService {
   private apiUrl = environment.apiUrl || 'http://localhost:8000';
-  
-  constructor(private http: HttpClient) { }
+
+  constructor(private http: HttpClient) {}
 
   getLlmSettings(): Observable<LlmSettingsResponse> {
-    return this.http.get<LlmSettingsResponse>(`${this.apiUrl}/api/config/llm`);
+    const headers = new HttpHeaders({
+      accept: 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    });
+
+    const params = new HttpParams().set('_t', Date.now().toString());
+
+    return this.http.get<LlmSettingsResponse>(`${this.apiUrl}/api/config/llm`, {
+      headers,
+      params,
+    });
   }
 
-  updateLlmSettings(settings: LlmSettingsUpdateRequest): Observable<LlmSettingsResponse> {
+  updateLlmSettings(
+    settings: LlmSettingsUpdateRequest,
+  ): Observable<LlmSettingsResponse> {
     const headers = new HttpHeaders({
       'Content-Type': 'application/json',
-      'accept': 'application/json'
+      accept: 'application/json',
     });
-    return this.http.put<LlmSettingsResponse>(`${this.apiUrl}/api/config/llm`, settings, { headers });
+    return this.http.put<LlmSettingsResponse>(
+      `${this.apiUrl}/api/config/llm`,
+      settings,
+      { headers },
+    );
   }
 }

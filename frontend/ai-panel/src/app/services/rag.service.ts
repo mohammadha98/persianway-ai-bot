@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
+import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 
 interface RagSettings {
@@ -23,27 +23,38 @@ interface RagConfigResponse {
 }
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class RagService {
   private apiUrl = environment.apiUrl || 'http://localhost:8000';
-  
-  constructor(private http: HttpClient) { }
+
+  constructor(private http: HttpClient) {}
 
   getRagConfig(): Observable<RagConfigResponse> {
     const headers = new HttpHeaders({
-      'accept': 'application/json'
+      accept: 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
     });
-    
-    return this.http.get<RagConfigResponse>(`${this.apiUrl}/api/config/rag`, { headers });
+
+    const params = new HttpParams().set('_t', Date.now().toString());
+
+    return this.http.get<RagConfigResponse>(`${this.apiUrl}/api/config/rag`, {
+      headers,
+      params,
+    });
   }
 
   updateRagConfig(settings: RagSettings): Observable<RagConfigResponse> {
     const headers = new HttpHeaders({
-      'accept': 'application/json',
-      'Content-Type': 'application/json'
+      accept: 'application/json',
+      'Content-Type': 'application/json',
     });
-    
-    return this.http.put<RagConfigResponse>(`${this.apiUrl}/api/config/rag`, settings, { headers });
+
+    return this.http.put<RagConfigResponse>(
+      `${this.apiUrl}/api/config/rag`,
+      settings,
+      { headers },
+    );
   }
 }
