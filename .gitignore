@@ -1,0 +1,119 @@
+# === Python virtual environment ===
+venv/
+env/
+*.venv/
+.venv/
+pyvenv.cfg
+.python-version
+
+# === Python ===
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Test coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# === IDE / editor ===
+.vscode/
+.vercel/
+.trae/
+.idea/
+.history/
+*.swp
+*.swo
+*~
+
+# === Database ===
+*.db
+*.sqlite
+*.sqlite3
+
+# === Environment variables ===
+.env
+.env.local
+.env.*.local
+
+# === Logs ===
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# === Temporary / backup files ===
+*.tmp
+*.temp
+*.bak
+*.orig
+*.pid
+.DS_Store
+
+# === OS system files (Windows) ===
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# === Office temp & lock files ===
+~$*
+*~$*
+
+# === Jupyter ===
+.ipynb_checkpoints/
+
+# === Frontend / Angular ===
+node_modules/
+dist/
+.angular/
+*.js.map
+
+# === Runtime / generated data (uploads, outputs) ===
+/vectordb
+/docs
+/processed_pdfs
+/responses
+
+# === Virtualenv remnants mistakenly committed under scripts/ ===
+scripts/activate
+scripts/activate.bat
+scripts/activate.fish
+scripts/Activate.ps1
+scripts/deactivate.bat
+scripts/pip*.exe
+scripts/python*.exe
+
+# === Scratch / one-off debug scripts (repo root) ===
+/_*.py
+/_*.txt
+/debug_template*.py
+/verify_*.py
+
+
+

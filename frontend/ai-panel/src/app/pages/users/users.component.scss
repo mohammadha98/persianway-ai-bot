@@ -1,0 +1,481 @@
+// Users Component Styles
+.users-container {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  direction: rtl;
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif;
+  background-color: #f8f9fa;
+}
+
+// Page Header
+.page-header {
+  margin-bottom: 24px;
+  
+  .header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    
+    .title-section {
+      flex: 1;
+      
+      .page-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 1.8rem;
+        font-weight: 600;
+        color: #2c3e50;
+        margin: 0 0 4px 0;
+        
+        mat-icon {
+          font-size: 1.8rem;
+          width: 1.8rem;
+          height: 1.8rem;
+          color: #667eea;
+        }
+      }
+      
+      .page-subtitle {
+        font-size: 0.9rem;
+        color: #7f8c8d;
+        margin: 0;
+        font-weight: 400;
+      }
+    }
+    
+    .header-actions {
+      .create-btn {
+        background-color: #667eea;
+        color: white;
+        border-radius: 4px;
+        padding: 8px 16px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        
+        &:hover {
+          background-color: #5a6edb;
+        }
+        
+        mat-icon {
+          margin-left: 6px;
+          margin-right: 0;
+        }
+      }
+    }
+  }
+}
+
+// Filters Section
+.filters-section {
+  margin-bottom: 20px;
+  background-color: white;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  
+  .filters-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr auto;
+    gap: 16px;
+    align-items: end;
+    
+    .search-field {
+      .mat-mdc-form-field-icon-suffix {
+        color: #667eea;
+      }
+    }
+    
+    .clear-filters-btn {
+      height: 56px;
+      border-radius: 4px;
+      border-color: #e0e0e0;
+      color: #666;
+      transition: all 0.2s ease;
+      
+      &:hover {
+        background-color: #f5f5f5;
+      }
+      
+      mat-icon {
+        margin-left: 6px;
+        margin-right: 0;
+      }
+    }
+  }
+}
+
+// Table Section
+.table-section {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  
+  .table-header {
+    padding: 16px;
+    border-bottom: 1px solid #f0f0f0;
+    
+    .table-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 1.2rem;
+      font-weight: 500;
+      color: #2c3e50;
+      margin: 0;
+      
+      .users-count {
+        font-size: 0.85rem;
+        color: #7f8c8d;
+        font-weight: 400;
+        margin-right: 8px;
+      }
+    }
+  }
+}
+
+// Loading Container
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 30px;
+  
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+// Table Container
+.table-container {
+  overflow-x: auto;
+  
+  .users-table {
+    width: 100%;
+    background: white;
+  }
+}
+
+// Table Cell Styles
+.user-avatar {
+  .avatar-circle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 500;
+    font-size: 0.85rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+}
+
+.user-name-cell {
+  .name {
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 2px;
+  }
+  
+  .username {
+    font-size: 0.8rem;
+    color: #888;
+    direction: ltr;
+    text-align: right;
+  }
+}
+
+.email-cell {
+  font-size: 0.85rem;
+  color: #555;
+  text-align: left;
+}
+
+.department-cell {
+  color: #555;
+  font-weight: 400;
+}
+
+.date-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: #888;
+  
+  .date-icon {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    color: #ccc;
+  }
+}
+
+.actions-cell {
+  display: flex;
+  gap: 2px;
+  
+  .mat-mdc-icon-button {
+    width: 32px;
+    height: 32px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  
+    &:hover {
+      background-color: #f5f5f5;
+    }
+    
+    mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: -3px;
+    }
+  }
+}
+
+// No Data Message
+.no-data {
+  text-align: center;
+  padding: 40px 20px;
+  
+  mat-icon {
+    font-size: 3rem;
+    width: 3rem;
+    height: 3rem;
+    color: #ddd;
+    margin-bottom: 12px;
+  }
+  
+  h3 {
+    color: #666;
+    font-weight: 500;
+    margin-bottom: 6px;
+    font-size: 1.1rem;
+  }
+  
+  p {
+    color: #999;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+  }
+}
+
+// Pagination
+.users-paginator {
+  margin-top: 0;
+  border-top: 1px solid #eee;
+  background: white;
+  
+  ::ng-deep .mat-mdc-paginator-range-label {
+    direction: rtl;
+    font-size: 0.85rem;
+    color: #666;
+  }
+}
+
+// Material Form Field Customization
+::ng-deep .mat-mdc-form-field {
+  .mat-mdc-form-field-outline {
+    border-radius: 4px;
+  }
+  
+  &.mat-focused .mat-mdc-form-field-outline-thick {
+    border-color: #667eea;
+  }
+  
+  .mat-mdc-form-field-label {
+    color: #666;
+  }
+  
+  &.mat-focused .mat-mdc-form-field-label {
+    color: #667eea;
+  }
+}
+
+// Role and Status Styles
+.role-indicator, .status-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  
+  &.admin {
+    background-color: #e3f2fd;
+    color: #1976d2;
+  }
+  
+  &.user {
+    background-color: #f5f5f5;
+    color: #616161;
+  }
+  
+  &.active {
+    background-color: #e8f5e9;
+    color: #388e3c;
+  }
+  
+  &.inactive {
+    background-color: #ffebee;
+    color: #d32f2f;
+  }
+}
+
+// Snackbar Styles
+::ng-deep .snackbar-success {
+  background-color: #4caf50;
+  color: white;
+}
+
+::ng-deep .snackbar-error {
+  background-color: #f44336;
+  color: white;
+}
+
+::ng-deep .snackbar-info {
+  background-color: #2196f3;
+  color: white;
+}
+
+// Responsive Design
+@media (max-width: 1200px) {
+  .filters-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    
+    .search-field {
+      grid-column: 1 / -1;
+    }
+    
+    .clear-filters-btn {
+      grid-column: 1 / -1;
+      justify-self: start;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .users-container {
+    padding: 12px;
+  }
+  
+  .page-header {
+    .header-content {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+      
+      .title-section {
+        .page-title {
+          font-size: 1.5rem;
+          
+          mat-icon {
+            font-size: 1.5rem;
+            width: 1.5rem;
+            height: 1.5rem;
+          }
+        }
+      }
+      
+      .header-actions {
+        .create-btn {
+          width: 100%;
+          justify-content: center;
+        }
+      }
+    }
+  }
+  
+  .filters-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .table-container {
+    .users-table {
+      .mat-mdc-header-cell,
+      .mat-mdc-cell {
+        padding: 8px;
+        font-size: 0.8rem;
+      }
+    }
+  }
+  
+  .actions-cell {
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 480px) {
+  .page-header {
+    .header-content {
+      .title-section {
+        .page-title {
+          font-size: 1.3rem;
+          
+          mat-icon {
+            font-size: 1.3rem;
+            width: 1.3rem;
+            height: 1.3rem;
+          }
+        }
+        
+        .page-subtitle {
+          font-size: 0.85rem;
+        }
+      }
+    }
+  }
+  
+  // Hide less important columns on small screens
+  .mat-column-department,
+  .mat-column-lastLogin {
+    display: none;
+  }
+}
+  
+@media (max-width: 400px) {
+  .mat-column-email {
+    display: none;
+  }
+  
+  .user-name-cell {
+    .username {
+      display: none;
+    }
+  }
+  
+  .actions-cell {
+    .mat-mdc-icon-button {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      
+      mat-icon {
+        font-size: 14px;
+        width: 14px;
+        height: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+      }
+    }
+  }
+}

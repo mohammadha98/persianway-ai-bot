@@ -1,0 +1,284 @@
+<div class="modal-header">
+  <div class="header-content">
+    <div class="header-icon">
+      <mat-icon>info</mat-icon>
+    </div>
+    <div class="header-text">
+      <h2 mat-dialog-title>جزئیات مدل</h2>
+      <p class="header-subtitle">اطلاعات کامل و جزئیات فنی مدل</p>
+    </div>
+  </div>
+  <button mat-icon-button (click)="onClose()" class="close-button">
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
+
+<mat-dialog-content class="modal-content">
+  <!-- Model Basic Info -->
+  <div class="info-section model-overview">
+    <div class="section-header">
+      <div class="section-icon model-icon">
+        <mat-icon>smart_toy</mat-icon>
+      </div>
+      <div class="section-title">
+        <h3>اطلاعات کلی مدل</h3>
+        <span class="section-subtitle">نام، شناسه و توضیحات مدل</span>
+      </div>
+    </div>
+    
+    <div class="section-content">
+      <div class="model-header">
+        <div class="model-avatar">
+          <mat-icon>psychology</mat-icon>
+        </div>
+        <div class="model-info">
+          <h4 class="model-name">{{ model.name }}</h4>
+          <p class="model-id">{{ model.id }}</p>
+        </div>
+        <div class="model-actions">
+          <button mat-fab color="primary" (click)="copyModelId()" class="copy-fab" matTooltip="کپی شناسه مدل">
+            <mat-icon>content_copy</mat-icon>
+          </button>
+        </div>
+      </div>
+      
+      <div class="model-description">
+        <p>{{ model.description }}</p>
+      </div>
+      
+      <div class="model-stats">
+        <div class="stat-item">
+          <div class="stat-icon">
+            <mat-icon>event</mat-icon>
+          </div>
+          <div class="stat-content">
+            <span class="stat-label">تاریخ ایجاد</span>
+            <span class="stat-value">{{ formatDate(model.created) }}</span>
+          </div>
+        </div>
+        
+        <div class="stat-item" *ngIf="model.context_length">
+          <div class="stat-icon">
+            <mat-icon>memory</mat-icon>
+          </div>
+          <div class="stat-content">
+            <span class="stat-label">طول متن</span>
+            <span class="stat-value">{{ formatContextLength(model.context_length) }} توکن</span>
+          </div>
+        </div>
+        
+        <div class="stat-item" *ngIf="model.hugging_face_id">
+          <div class="stat-icon">
+            <mat-icon>hub</mat-icon>
+          </div>
+          <div class="stat-content">
+            <span class="stat-label">Hugging Face ID</span>
+            <span class="stat-value">{{ model.hugging_face_id }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Architecture Info -->
+  <div class="info-section architecture-section">
+    <div class="section-header">
+      <div class="section-icon architecture-icon">
+        <mat-icon>architecture</mat-icon>
+      </div>
+      <div class="section-title">
+        <h3>معماری مدل</h3>
+        <span class="section-subtitle">جزئیات فنی و ساختار مدل</span>
+      </div>
+    </div>
+    
+    <div class="section-content">
+      <div class="details-grid">
+        <div class="detail-card">
+          <div class="detail-header">
+            <mat-icon>code</mat-icon>
+            <span>نوع دستورالعمل</span>
+          </div>
+          <div class="detail-value">{{ model.architecture.instruct_type || 'نامشخص' }}</div>
+        </div>
+        
+        <div class="detail-card">
+          <div class="detail-header">
+            <mat-icon>token</mat-icon>
+            <span>توکنایزر</span>
+          </div>
+          <div class="detail-value">{{ model.architecture.tokenizer || 'نامشخص' }}</div>
+        </div>
+      </div>
+      
+      <div class="modalities-section">
+        <div class="modality-group">
+          <div class="modality-header">
+            <mat-icon>input</mat-icon>
+            <span>ورودی‌های پشتیبانی شده</span>
+          </div>
+          <div class="modality-chips">
+            <mat-chip-set>
+              <mat-chip *ngFor="let modality of model.architecture.input_modalities" class="input-chip">
+                {{ modality }}
+              </mat-chip>
+            </mat-chip-set>
+          </div>
+        </div>
+        
+        <div class="modality-group">
+          <div class="modality-header">
+            <mat-icon>output</mat-icon>
+            <span>خروجی‌های پشتیبانی شده</span>
+          </div>
+          <div class="modality-chips">
+            <mat-chip-set>
+              <mat-chip *ngFor="let modality of model.architecture.output_modalities" class="output-chip">
+                {{ modality }}
+              </mat-chip>
+            </mat-chip-set>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Provider Info -->
+  <div class="info-section provider-section">
+    <div class="section-header">
+      <div class="section-icon provider-icon">
+        <mat-icon>cloud</mat-icon>
+      </div>
+      <div class="section-title">
+        <h3>اطلاعات ارائه‌دهنده</h3>
+        <span class="section-subtitle">مشخصات و محدودیت‌های ارائه‌دهنده</span>
+      </div>
+    </div>
+    
+    <div class="section-content">
+      <div class="provider-stats">
+        <div class="provider-stat">
+          <div class="stat-icon">
+            <mat-icon>memory</mat-icon>
+          </div>
+          <div class="stat-info">
+            <span class="stat-label">طول متن ارائه‌دهنده</span>
+            <span class="stat-value">{{ formatContextLength(model.top_provider.context_length) }} توکن</span>
+          </div>
+        </div>
+        
+        <div class="provider-stat">
+          <div class="stat-icon">
+            <mat-icon>speed</mat-icon>
+          </div>
+          <div class="stat-info">
+            <span class="stat-label">حداکثر توکن‌های تکمیل</span>
+            <span class="stat-value">{{ formatContextLength(model.top_provider.max_completion_tokens) }} توکن</span>
+          </div>
+        </div>
+        
+        <div class="provider-stat">
+          <div class="stat-icon">
+            <mat-icon [class.moderated]="model.top_provider.is_moderated">{{ model.top_provider.is_moderated ? 'verified' : 'gpp_maybe' }}</mat-icon>
+          </div>
+          <div class="stat-info">
+            <span class="stat-label">وضعیت نظارت</span>
+            <span class="stat-value moderation-status" [class.moderated]="model.top_provider.is_moderated">
+              {{ model.top_provider.is_moderated ? 'تحت نظارت' : 'آزاد' }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pricing Info -->
+  <div class="info-section pricing-section">
+    <div class="section-header">
+      <div class="section-icon pricing-icon">
+        <mat-icon>payments</mat-icon>
+      </div>
+      <div class="section-title">
+        <h3>قیمت‌گذاری</h3>
+        <span class="section-subtitle">هزینه‌های استفاده از مدل</span>
+      </div>
+    </div>
+    
+    <div class="section-content">
+      <div class="pricing-cards">
+        <div class="pricing-card primary">
+          <div class="pricing-header">
+            <mat-icon>chat</mat-icon>
+            <span>پرامپت</span>
+          </div>
+          <div class="pricing-amount">{{ formatPrice(model.pricing.prompt) }}</div>
+        </div>
+        
+        <div class="pricing-card primary">
+          <div class="pricing-header">
+            <mat-icon>auto_fix_high</mat-icon>
+            <span>تکمیل</span>
+          </div>
+          <div class="pricing-amount">{{ formatPrice(model.pricing.completion) }}</div>
+        </div>
+        
+        <div class="pricing-card secondary" *ngIf="model.pricing.image && model.pricing.image !== '0'">
+          <div class="pricing-header">
+            <mat-icon>image</mat-icon>
+            <span>تصویر</span>
+          </div>
+          <div class="pricing-amount">{{ formatPrice(model.pricing.image) }}</div>
+        </div>
+        
+        <div class="pricing-card secondary" *ngIf="model.pricing.request && model.pricing.request !== '0'">
+          <div class="pricing-header">
+            <mat-icon>http</mat-icon>
+            <span>درخواست</span>
+          </div>
+          <div class="pricing-amount">{{ formatPrice(model.pricing.request) }}</div>
+        </div>
+        
+        <div class="pricing-card secondary" *ngIf="model.pricing.web_search && model.pricing.web_search !== '0'">
+          <div class="pricing-header">
+            <mat-icon>search</mat-icon>
+            <span>جستجوی وب</span>
+          </div>
+          <div class="pricing-amount">{{ formatPrice(model.pricing.web_search) }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Supported Parameters -->
+  <div class="info-section parameters-section" *ngIf="model.supported_parameters && model.supported_parameters.length > 0">
+    <div class="section-header">
+      <div class="section-icon params-icon">
+        <mat-icon>tune</mat-icon>
+      </div>
+      <div class="section-title">
+        <h3>پارامترهای پشتیبانی شده</h3>
+        <span class="section-subtitle">تنظیمات قابل استفاده در مدل</span>
+      </div>
+    </div>
+    
+    <div class="section-content">
+      <div class="parameters-grid">
+        <mat-chip-set>
+          <mat-chip *ngFor="let param of model.supported_parameters" class="param-chip">
+            <mat-icon>settings</mat-icon>
+            {{ param }}
+          </mat-chip>
+        </mat-chip-set>
+      </div>
+    </div>
+  </div>
+</mat-dialog-content>
+
+<div class="modal-footer">
+  <div class="footer-actions">
+    <button mat-raised-button color="primary" (click)="onClose()" class="close-action">
+      <mat-icon>check</mat-icon>
+      متوجه شدم
+    </button>
+  </div>
+</div>

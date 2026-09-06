@@ -1,0 +1,200 @@
+.dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #7b1fa2;
+  font-size: 18px;
+  font-weight: 700;
+
+  .title-icon {
+    color: #7b1fa2;
+  }
+}
+
+.dialog-content {
+  padding: 16px 24px;
+  min-width: 700px;
+  max-width: 90vw;
+  max-height: 80vh;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px;
+
+  p {
+    color: #64748b;
+    font-size: 14px;
+  }
+}
+
+.context-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+// Parameters Summary
+.params-summary {
+  background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+  border-radius: 10px;
+  padding: 14px 16px;
+  border: 1px solid rgba(123, 31, 162, 0.2);
+
+  h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #6a1b9a;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+  }
+}
+
+.params-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.param-box {
+  background: rgba(255, 255, 255, 0.7);
+  padding: 8px 12px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  .param-key {
+    font-size: 11px;
+    color: #7e57c2;
+    font-weight: 600;
+  }
+
+  .param-value {
+    font-size: 13px;
+    color: #4a148c;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+  }
+}
+
+// Tab content
+.tab-content {
+  padding: 16px 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e2e8f0;
+
+  h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #1e293b;
+  }
+}
+
+.code-block {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 16px;
+  border-radius: 8px;
+  font-family: 'Courier New', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  direction: rtl;
+  text-align: right;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 0;
+  border: 1px solid #334155;
+
+  &.system-prompt {
+    border-right: 4px solid #7b1fa2;
+  }
+
+  &.context-block {
+    border-right: 4px solid #1976d2;
+  }
+
+  &.user-query {
+    border-right: 4px solid #4caf50;
+  }
+
+  &.full-prompt {
+    border-right: 4px solid #ff9800;
+  }
+}
+
+// History list
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-item {
+  padding: 12px;
+  border-radius: 8px;
+  border-right: 4px solid;
+
+  &.user {
+    background: #e3f2fd;
+    border-right-color: #1976d2;
+  }
+
+  &.assistant {
+    background: #f3e5f5;
+    border-right-color: #7b1fa2;
+  }
+}
+
+.history-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+
+  mat-icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+  }
+
+  strong {
+    font-size: 13px;
+    color: #1e293b;
+  }
+}
+
+.history-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #334155;
+  padding-right: 26px;
+}
+
+.dialog-actions {
+  padding: 8px 24px 16px;
+  border-top: 1px solid #e2e8f0;
+}

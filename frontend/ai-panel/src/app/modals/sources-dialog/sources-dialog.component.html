@@ -1,0 +1,75 @@
+<h2 mat-dialog-title class="dialog-title">
+  <mat-icon class="title-icon">library_books</mat-icon>
+  منابع استفاده شده توسط هوش مصنوعی
+</h2>
+
+<mat-dialog-content class="dialog-content">
+  <div *ngIf="data.isLoading" class="loading-state">
+    <mat-progress-spinner diameter="40" mode="indeterminate"></mat-progress-spinner>
+    <p>در حال بارگذاری منابع...</p>
+  </div>
+
+  <div *ngIf="!data.isLoading && data.sources.length === 0" class="empty-state">
+    <mat-icon>info</mat-icon>
+    <p>هیچ منبعی برای این پاسخ یافت نشد.</p>
+  </div>
+
+  <div *ngIf="!data.isLoading && data.sources.length > 0" class="sources-list">
+    <div class="sources-summary">
+      <mat-chip class="summary-chip">
+        <mat-icon>source</mat-icon>
+        تعداد منابع: {{ data.sources.length }}
+      </mat-chip>
+    </div>
+
+    <div *ngFor="let source of data.sources; let i = index" class="source-card">
+      <div class="source-header">
+        <div class="source-index">{{ i + 1 }}</div>
+        <div class="source-title-section">
+          <h3 class="source-title">{{ source.title }}</h3>
+          <div class="source-meta">
+            <mat-chip class="type-chip" [matTooltip]="'نوع منبع'">
+              {{ getSourceTypeLabel(source.source_type) }}
+            </mat-chip>
+            <mat-chip 
+              *ngIf="source.page"
+              class="page-chip"
+              [matTooltip]="'شماره صفحه'">
+              <mat-icon>description</mat-icon>
+              صفحه {{ source.page }}
+            </mat-chip>
+            <mat-chip 
+              class="relevance-chip"
+              [style.background-color]="getRelevanceColor(source.relevance_score)"
+              [matTooltip]="'امتیاز ارتباط'">
+              {{ getRelevanceLabel(source.relevance_score) }}
+              ({{ (source.relevance_score * 100).toFixed(0) }}%)
+            </mat-chip>
+          </div>
+        </div>
+        <button 
+          mat-icon-button 
+          [cdkCopyToClipboard]="source.content"
+          (click)="copyContent(source.content, source.title)"
+          matTooltip="کپی محتوا">
+          <mat-icon>content_copy</mat-icon>
+        </button>
+      </div>
+      
+      <div class="source-content">
+        <p>{{ source.content }}</p>
+      </div>
+      
+      <div class="source-footer">
+        <div class="source-id">
+          <small>شناسه: <code>{{ source.id }}</code></small>
+          <small *ngIf="source.hash_id"> | هش: <code>{{ source.hash_id }}</code></small>
+        </div>
+      </div>
+    </div>
+  </div>
+</mat-dialog-content>
+
+<mat-dialog-actions class="dialog-actions" align="end">
+  <button mat-button (click)="onClose()">بستن</button>
+</mat-dialog-actions>

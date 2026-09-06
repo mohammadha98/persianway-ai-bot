@@ -1,0 +1,128 @@
+.feedback-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+
+  .warning-icon {
+    color: #f57c00;
+  }
+
+  .edit-icon {
+    color: #1976d2;
+  }
+
+  // For report mode, use red title; for edit mode, use blue
+  &:has(.warning-icon) {
+    color: #d32f2f;
+  }
+
+  &:has(.edit-icon) {
+    color: #1976d2;
+  }
+}
+
+.feedback-content {
+  padding: 16px 24px;
+  min-width: 400px;
+}
+
+.message-preview {
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 20px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.preview-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 4px;
+  margin-top: 8px;
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.preview-content {
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+
+  &.user-preview {
+    background: #e3f2fd;
+    color: #1565c0;
+  }
+
+  &.ai-preview {
+    background: #fff3e0;
+    color: #e65100;
+  }
+}
+
+.edit-field {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.form-section {
+  margin-bottom: 16px;
+}
+
+.section-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.category-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.category-btn {
+  padding: 6px 14px;
+  border: 1px solid #ddd;
+  border-radius: 20px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+  font-family: inherit;
+
+  &:hover {
+    background: #f5f5f5;
+    border-color: #999;
+  }
+
+  &.active {
+    background: #1976d2;
+    color: #fff;
+    border-color: #1976d2;
+  }
+}
+
+.comment-field {
+  width: 100%;
+}
+
+.feedback-actions {
+  padding: 8px 24px 16px;
+  border-top: 1px solid #eee;
+
+  button mat-icon {
+    margin-left: 4px;
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+  }
+}

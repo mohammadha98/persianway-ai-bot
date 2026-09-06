@@ -1,0 +1,48 @@
+<div class="modal-header">
+  <h2 mat-dialog-title>جزئیات دانش</h2>
+  <button 
+    mat-icon-button 
+    (click)="onClose()" 
+    class="close-btn"
+    aria-label="بستن مودال"
+    matTooltip="بستن">
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
+
+<mat-dialog-content class="modal-content" role="main">
+  <div *ngIf="knowledge" class="knowledge-details">
+
+
+    <!-- Content Section -->
+    <div class="detail-section">
+      <div class="section-header">
+        <mat-icon>description</mat-icon>
+   <p class="knowledge-title">{{ knowledge.title }}</p>
+      </div>
+      <div class="section-content">
+        <div class="knowledge-content">{{ knowledge.content }}</div>
+      </div>
+    </div>
+
+  
+
+  </div>
+
+  <!-- Loading State -->
+  <div *ngIf="!knowledge" class="loading-state">
+    <mat-icon>hourglass_empty</mat-icon>
+    <p>در حال بارگذاری...</p>
+  </div>
+
+</mat-dialog-content>
+
+<mat-dialog-actions class="modal-actions">
+  <button 
+    mat-raised-button 
+    color="primary" 
+    (click)="onClose()"
+    aria-label="بستن مودال">
+    بستن
+  </button>
+</mat-dialog-actions>

@@ -1,0 +1,214 @@
+<div class="knowledge-list-container">
+  <!-- Knowledge Table -->
+  <mat-card class="table-card">
+     <mat-card-header>
+      <div mat-card-avatar class="table-icon">
+        <mat-icon>format_list_bulleted</mat-icon>
+      </div>
+      <mat-card-title>دانش‌های ثبت شده</mat-card-title>
+      <mat-card-subtitle>مشاهده و مدیریت محتوای پایگاه دانش</mat-card-subtitle>
+    </mat-card-header> 
+    
+    <mat-card-content>
+      <!-- Search and Filter -->
+      <div class="search-filter-container">
+        <mat-form-field appearance="outline" class="search-field">
+          <mat-label>جستجو</mat-label>
+          <input matInput [(ngModel)]="searchText" (input)="onSearchInput($event)" placeholder="جستجو در عنوان، محتوا یا برچسب‌ها">
+          <mat-icon matSuffix *ngIf="!isSearching">search</mat-icon>
+          <mat-icon matSuffix *ngIf="isSearching" class="searching-icon">hourglass_empty</mat-icon>
+        </mat-form-field>
+      </div>
+      
+      <!-- Loading indicator -->
+      <div *ngIf="isLoading" class="loading-state">
+        <mat-icon>hourglass_empty</mat-icon>
+        <p>در حال بارگذاری...</p>
+      </div>
+
+      <!-- Desktop Table View -->
+      <div class="table-container desktop-view" *ngIf="!isLoading">
+        <table mat-table [dataSource]="filteredKnowledgeItems" class="knowledge-table">
+          <!-- Title Column -->
+          <ng-container matColumnDef="title">
+            <th mat-header-cell *matHeaderCellDef>عنوان</th>
+            <td mat-cell *matCellDef="let item" class="title-cell">
+              <div class="title-content">
+                <span class="title-text" [matTooltip]="item.title">{{ item.title }}</span>
+                <span *ngIf="item.file_name" class="file-badge" [matTooltip]="'فایل: ' + item.file_name">
+                  <mat-icon>attach_file</mat-icon>
+                </span>
+              </div>
+            </td>
+          </ng-container>
+    
+          <!-- Tags Column -->
+          <ng-container matColumnDef="tags">
+            <th mat-header-cell *matHeaderCellDef>برچسب‌ها</th>
+            <td mat-cell *matCellDef="let item" class="tags-cell">
+              <div class="tags-content" [matTooltip]="item.meta_tags?.join(', ') || ''">
+                <span class="tag-chip" *ngFor="let tag of item.meta_tags?.slice(0, 2)">{{ tag }}</span>
+                <span class="more-tags" *ngIf="item.meta_tags && item.meta_tags.length > 2">
+                  +{{ item.meta_tags.length - 2 }}
+                </span>
+              </div>
+            </td>
+          </ng-container>
+          
+          <!-- Status Column -->
+          <ng-container matColumnDef="status">
+            <th mat-header-cell *matHeaderCellDef>وضعیت</th>
+            <td mat-cell *matCellDef="let item">
+              <div class="status-cell">
+                <span [ngSwitch]="item.task_status || (item.synced ? 'completed' : 'PENDING')">
+                  <span *ngSwitchCase="'PENDING'" class="sync-status not-synced" matTooltip="در انتظار پردازش">
+                    <mat-icon>schedule</mat-icon>
+                    <span class="status-text">در انتظار پردازش</span>
+                  </span>
+                  <span *ngSwitchCase="'PROCESSING'" class="sync-status not-synced" matTooltip="در حال پردازش">
+                    <mat-icon>hourglass_empty</mat-icon>
+                    <span class="status-text">در حال پردازش</span>
+                  </span>
+                  <span *ngSwitchCase="'completed'" class="sync-status synced" matTooltip="تکمیل شده">
+                    <mat-icon>check_circle</mat-icon>
+                    <span class="status-text">تکمیل شده</span>
+                  </span>
+                  <span *ngSwitchCase="'FAILED'" class="sync-status not-synced" matTooltip="خطا در پردازش">
+                    <mat-icon>error</mat-icon>
+                    <span class="status-text">خطا</span>
+                  </span>
+                  <span *ngSwitchDefault class="sync-status unknown" matTooltip="نامشخص">
+                    <mat-icon>help</mat-icon>
+                    <span class="status-text">نامشخص</span>
+                  </span>
+                </span>
+                <button 
+                  mat-icon-button 
+                  *ngIf="item.task_id" 
+                  (click)="refreshItemStatus(item)"
+                  [disabled]="item.refreshing_status"
+                  matTooltip="به‌روزرسانی وضعیت">
+                  <mat-icon>refresh</mat-icon>
+                </button>
+              </div>
+            </td>
+          </ng-container>
+          
+          <!-- Actions Column -->
+          <ng-container matColumnDef="actions">
+            <th mat-header-cell *matHeaderCellDef>عملیات</th>
+            <td mat-cell *matCellDef="let item" class="actions-cell">
+              <div class="action-buttons">
+                <button mat-icon-button color="primary" (click)="viewKnowledge(item)" matTooltip="مشاهده">
+                  <mat-icon>visibility</mat-icon>
+                </button>
+                <button 
+                  mat-icon-button 
+                  color="warn" 
+                  (click)="deleteKnowledge(item)" 
+                  [disabled]="item.task_status === 'PROCESSING' || item.task_status === 'PENDING'"
+                  [matTooltip]="(item.task_status === 'PROCESSING' || item.task_status === 'PENDING') ? 'امکان حذف سند در حال پردازش وجود ندارد' : 'حذف'">
+                  <mat-icon>delete</mat-icon>
+                </button>
+              </div>
+            </td>
+          </ng-container>
+          
+          <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+          <tr mat-row *matRowDef="let row; columns: displayedColumns;" class="table-row"></tr>
+        </table>
+        
+        <!-- Empty State -->
+        <div *ngIf="filteredKnowledgeItems.length === 0" class="empty-state">
+          <mat-icon>info</mat-icon>
+          <p>هیچ موردی یافت نشد.</p>
+        </div>
+      </div>
+
+      <!-- Mobile Card View -->
+      <div class="mobile-view" *ngIf="!isLoading">
+        <div class="knowledge-card" *ngFor="let item of filteredKnowledgeItems">
+          <div class="card-header">
+            <h3 class="card-title">{{ item.title }}</h3>
+            <span *ngIf="item.file_name" class="file-badge" [matTooltip]="'فایل: ' + item.file_name">
+              <mat-icon>attach_file</mat-icon>
+            </span>
+          </div>
+          
+          <div class="card-body">
+            <div class="card-row" *ngIf="item.meta_tags && item.meta_tags.length > 0">
+              <span class="card-label">برچسب‌ها:</span>
+              <div class="tags-content">
+                <span class="tag-chip" *ngFor="let tag of item.meta_tags">{{ tag }}</span>
+              </div>
+            </div>
+            
+            <div class="card-row">
+              <span class="card-label">وضعیت:</span>
+              <span [ngSwitch]="item.task_status || (item.synced ? 'completed' : 'PENDING')">
+                <span *ngSwitchCase="'PENDING'" class="sync-status not-synced">
+                  <mat-icon>schedule</mat-icon>
+                  در انتظار پردازش
+                </span>
+                <span *ngSwitchCase="'PROCESSING'" class="sync-status not-synced">
+                  <mat-icon>hourglass_empty</mat-icon>
+                  در حال پردازش
+                </span>
+                <span *ngSwitchCase="'completed'" class="sync-status synced">
+                  <mat-icon>check_circle</mat-icon>
+                  تکمیل شده
+                </span>
+                <span *ngSwitchCase="'FAILED'" class="sync-status not-synced">
+                  <mat-icon>error</mat-icon>
+                  خطا
+                </span>
+                <span *ngSwitchDefault class="sync-status unknown">
+                  <mat-icon>help</mat-icon>
+                  نامشخص
+                </span>
+              </span>
+              <button 
+                mat-icon-button 
+                *ngIf="item.task_id" 
+                (click)="refreshItemStatus(item)"
+                [disabled]="item.refreshing_status"
+                matTooltip="به‌روزرسانی وضعیت">
+                <mat-icon>refresh</mat-icon>
+              </button>
+            </div>
+          </div>
+          
+          <div class="card-actions">
+            <button mat-raised-button color="primary" (click)="viewKnowledge(item)">
+              <mat-icon>visibility</mat-icon>
+              مشاهده
+            </button>
+            <button 
+              mat-raised-button 
+              color="warn" 
+              (click)="deleteKnowledge(item)" 
+              [disabled]="item.task_status === 'PROCESSING' || item.task_status === 'PENDING'">
+              <mat-icon>delete</mat-icon>
+              حذف
+            </button>
+          </div>
+        </div>
+        
+        <!-- Empty State -->
+        <div *ngIf="filteredKnowledgeItems.length === 0" class="empty-state">
+          <mat-icon>info</mat-icon>
+          <p>هیچ موردی یافت نشد.</p>
+        </div>
+      </div>
+      
+      <!-- Pagination -->
+      <mat-paginator 
+        [length]="totalItems"
+        [pageSize]="pageSize"
+        [pageSizeOptions]="[5, 10, 25, 50]"
+        (page)="onPageChange($event)"
+        aria-label="انتخاب صفحه">
+      </mat-paginator>
+    </mat-card-content>
+  </mat-card>
+</div>

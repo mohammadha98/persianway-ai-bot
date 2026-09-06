@@ -1,0 +1,136 @@
+<div class="page-container">
+  <div class="page-header">
+    <div class="header-content">
+      <h1 class="page-title">
+        <mat-icon>search</mat-icon>
+        تنظیمات موتور جستجو
+      </h1>
+      <p class="page-subtitle">مدیریت پارامترهای جستجوی وب برای پاسخ‌دهی هوشمند</p>
+    </div>
+  </div>
+
+  <div class="content-wrapper">
+    <mat-card class="settings-card">
+      <mat-card-header>
+        <div mat-card-avatar class="header-icon">
+          <mat-icon>travel_explore</mat-icon>
+        </div>
+        <mat-card-title>پیکربندی Tavily</mat-card-title>
+        <mat-card-subtitle>تنظیمات اتصال به سرویس جستجوی Tavily AI</mat-card-subtitle>
+      </mat-card-header>
+
+      <mat-card-content>
+        <div class="loading-shade" *ngIf="loading">
+          <mat-spinner diameter="40"></mat-spinner>
+          <span>در حال دریافت تنظیمات...</span>
+        </div>
+
+        <form [formGroup]="form" class="settings-form">
+          <!-- API Key Section -->
+          <div class="form-section">
+            <h3 class="section-title">کلید دسترسی</h3>
+            <div class="row">
+              <mat-form-field appearance="outline" class="full-width api-key-field">
+                <mat-label>کلید API (Tavily API Key)</mat-label>
+                <input matInput formControlName="tavily_api_key" placeholder="tvly-..." type="password">
+                <mat-icon matSuffix>vpn_key</mat-icon>
+                <mat-hint>کلید را از داشبورد Tavily دریافت کنید</mat-hint>
+              </mat-form-field>
+            </div>
+          </div>
+
+          <mat-divider></mat-divider>
+
+          <!-- Search Behavior Section -->
+          <div class="form-section">
+            <h3 class="section-title">رفتار جستجو</h3>
+            <div class="toggles-row">
+              <div class="toggle-item">
+                <mat-slide-toggle formControlName="is_enabled" color="primary">
+                  فعال‌سازی جستجو
+                </mat-slide-toggle>
+                <p class="toggle-desc">امکان استفاده از وب برای پاسخ‌دهی</p>
+              </div>
+
+              <div class="toggle-item">
+                <mat-slide-toggle formControlName="include_answer" color="accent">
+                  دریافت پاسخ مستقیم
+                </mat-slide-toggle>
+                <p class="toggle-desc">شامل شدن پاسخ تولید شده توسط Tavily</p>
+              </div>
+            </div>
+
+            <div class="row inputs-row">
+              <mat-form-field appearance="outline" class="half-width">
+                <mat-label>عمق جستجو</mat-label>
+                <mat-select formControlName="search_depth">
+                  <mat-option value="basic">پایه (Basic) - سریع</mat-option>
+                  <mat-option value="advanced">پیشرفته (Advanced) - دقیق</mat-option>
+                </mat-select>
+                <mat-icon matSuffix>layers</mat-icon>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="half-width">
+                <mat-label>تعداد نتایج</mat-label>
+                <input matInput type="number" formControlName="max_results" min="1" max="20">
+                <mat-icon matSuffix>format_list_numbered</mat-icon>
+                <mat-hint>حداکثر ۲۰ نتیجه</mat-hint>
+              </mat-form-field>
+            </div>
+          </div>
+
+          <mat-divider></mat-divider>
+
+          <!-- Domains Section -->
+          <div class="form-section">
+            <h3 class="section-title">فیلتر دامنه‌ها</h3>
+            <div class="row">
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>دامنه‌های مجاز (Include Domains)</mat-label>
+                <textarea matInput rows="2" formControlName="include_domains_string"
+                  placeholder="persianway.ir, example.com"></textarea>
+                <mat-icon matSuffix>check_circle_outline</mat-icon>
+                <mat-hint>دامنه‌ها را با کاما جدا کنید. خالی بگذارید تا همه دامنه‌ها مجاز باشند.</mat-hint>
+              </mat-form-field>
+            </div>
+
+            <div class="row">
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>دامنه‌های مسدود (Exclude Domains)</mat-label>
+                <textarea matInput rows="2" formControlName="exclude_domains_string"
+                  placeholder="spam-site.com, competitor.ir"></textarea>
+                <mat-icon matSuffix>block</mat-icon>
+                <mat-hint>دامنه‌هایی که نباید در نتایج باشند.</mat-hint>
+              </mat-form-field>
+            </div>
+          </div>
+
+          <!-- Snippet Config -->
+          <div class="form-section">
+            <div class="row">
+              <mat-form-field appearance="outline" class="half-width">
+                <mat-label>طول خلاصه متن (کاراکتر)</mat-label>
+                <input matInput type="number" formControlName="snippet_length" min="50">
+                <mat-icon matSuffix>short_text</mat-icon>
+              </mat-form-field>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button mat-raised-button color="primary" (click)="save()" [disabled]="saving || loading || form.invalid"
+              class="save-btn">
+              <mat-icon>save</mat-icon>
+              <span *ngIf="!saving">ذخیره تنظیمات</span>
+              <span *ngIf="saving">در حال ذخیره...</span>
+            </button>
+
+            <div class="status-message" *ngIf="saveMessage" [class.success]="!saveMessage.includes('Failed')">
+              <mat-icon>{{ saveMessage.includes('Failed') ? 'error' : 'check_circle' }}</mat-icon>
+              <span>{{ saveMessage === 'Saved' ? 'تنظیمات با موفقیت ذخیره شد' : saveMessage }}</span>
+            </div>
+          </div>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  </div>
+</div>

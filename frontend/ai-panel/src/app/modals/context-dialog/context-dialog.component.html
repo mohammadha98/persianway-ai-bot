@@ -1,0 +1,154 @@
+<h2 mat-dialog-title class="dialog-title">
+  <mat-icon class="title-icon">code</mat-icon>
+  Context و Prompt ارسال شده به LLM
+</h2>
+
+<mat-dialog-content class="dialog-content">
+  <div *ngIf="data.isLoading" class="loading-state">
+    <mat-progress-spinner diameter="40" mode="indeterminate"></mat-progress-spinner>
+    <p>در حال بارگذاری context...</p>
+  </div>
+
+  <div *ngIf="!data.isLoading && data.data" class="context-content">
+    <!-- Model Parameters Summary -->
+    <div class="params-summary">
+      <h4>
+        <mat-icon>settings</mat-icon>
+        پارامترهای مدل
+      </h4>
+      <div class="params-grid">
+        <div class="param-box">
+          <span class="param-key">مدل:</span>
+          <span class="param-value">{{ data.data.model_parameters.model }}</span>
+        </div>
+        <div class="param-box">
+          <span class="param-key">دما:</span>
+          <span class="param-value">{{ data.data.model_parameters.temperature }}</span>
+        </div>
+        <div class="param-box">
+          <span class="param-key">حداکثر توکن:</span>
+          <span class="param-value">{{ data.data.model_parameters.max_tokens }}</span>
+        </div>
+        <div class="param-box">
+          <span class="param-key">Top P:</span>
+          <span class="param-value">{{ data.data.model_parameters.top_p }}</span>
+        </div>
+      </div>
+    </div>
+
+    <mat-tab-group [(selectedIndex)]="selectedTabIndex" animationDuration="300ms">
+      <!-- Tab 1: System Prompt -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon>psychology</mat-icon>
+          System Prompt
+        </ng-template>
+        <div class="tab-content">
+          <div class="content-header">
+            <h4>دستورالعمل سیستم</h4>
+            <button 
+              mat-icon-button 
+              [cdkCopyToClipboard]="data.data.system_prompt"
+              (click)="copyToClipboard(data.data.system_prompt, 'System Prompt')"
+              matTooltip="کپی">
+              <mat-icon>content_copy</mat-icon>
+            </button>
+          </div>
+          <pre class="code-block system-prompt">{{ data.data.system_prompt }}</pre>
+        </div>
+      </mat-tab>
+
+      <!-- Tab 2: Retrieved Context -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon>library_books</mat-icon>
+          Context (اسناد بازیابی شده)
+        </ng-template>
+        <div class="tab-content">
+          <div class="content-header">
+            <h4>اسناد استفاده شده به عنوان Context</h4>
+            <button 
+              mat-icon-button 
+              [cdkCopyToClipboard]="data.data.retrieved_context"
+              (click)="copyToClipboard(data.data.retrieved_context, 'Context')"
+              matTooltip="کپی">
+              <mat-icon>content_copy</mat-icon>
+            </button>
+          </div>
+          <pre class="code-block context-block">{{ data.data.retrieved_context }}</pre>
+        </div>
+      </mat-tab>
+
+      <!-- Tab 3: Conversation History -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon>chat</mat-icon>
+          تاریخچه مکالمه
+        </ng-template>
+        <div class="tab-content">
+          <div class="content-header">
+            <h4>گفتگوهای قبلی ارسال شده به LLM</h4>
+          </div>
+          <div class="history-list">
+            <div *ngFor="let msg of data.data.conversation_history" 
+                 class="history-item"
+                 [class.user]="msg.role === 'user'"
+                 [class.assistant]="msg.role === 'assistant'">
+              <div class="history-role">
+                <mat-icon>{{ msg.role === 'user' ? 'person' : 'smart_toy' }}</mat-icon>
+                <strong>{{ getRoleLabel(msg.role) }}</strong>
+              </div>
+              <div class="history-content">{{ msg.content }}</div>
+            </div>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- Tab 4: User Query -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon>question_answer</mat-icon>
+          سوال کاربر
+        </ng-template>
+        <div class="tab-content">
+          <div class="content-header">
+            <h4>سوال اصلی کاربر</h4>
+            <button 
+              mat-icon-button 
+              [cdkCopyToClipboard]="data.data.user_query"
+              (click)="copyToClipboard(data.data.user_query, 'سوال کاربر')"
+              matTooltip="کپی">
+              <mat-icon>content_copy</mat-icon>
+            </button>
+          </div>
+          <pre class="code-block user-query">{{ data.data.user_query }}</pre>
+        </div>
+      </mat-tab>
+
+      <!-- Tab 5: Full Prompt -->
+      <mat-tab>
+        <ng-template mat-tab-label>
+          <mat-icon>description</mat-icon>
+          Prompt کامل
+        </ng-template>
+        <div class="tab-content">
+          <div class="content-header">
+            <h4>پرامپت کامل ارسالی به LLM</h4>
+            <button 
+              mat-icon-button 
+              [cdkCopyToClipboard]="data.data.full_prompt"
+              (click)="copyToClipboard(data.data.full_prompt, 'پرامپت کامل')"
+              matTooltip="کپی">
+              <mat-icon>content_copy</mat-icon>
+            </button>
+          </div>
+          <pre class="code-block full-prompt">{{ data.data.full_prompt }}</pre>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+  </div>
+</mat-dialog-content>
+
+<mat-dialog-actions class="dialog-actions" align="end">
+  <button mat-button (click)="onClose()">بستن</button>
+</mat-dialog-actions>

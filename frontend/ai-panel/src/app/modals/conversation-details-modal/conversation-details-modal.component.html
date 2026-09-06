@@ -1,0 +1,65 @@
+<div class="modal-header">
+  <h2 mat-dialog-title>جزئیات مکالمه</h2>
+  <button mat-icon-button (click)="onClose()" class="close-btn">
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
+
+<mat-dialog-content class="modal-content">
+  <div *ngIf="conversation">
+    <div class="info-section">
+      <div class="info-item">
+        <mat-icon>fingerprint</mat-icon>
+        <span>شناسه جلسه:</span>
+        <strong>{{ conversation.session_id }}</strong>
+      </div>
+      <!-- <div class="info-item">
+        <mat-icon>person</mat-icon>
+        <span>شناسه کاربر:</span>
+        <strong>{{ conversation.user_id }}</strong>
+      </div> -->
+      <div class="info-item">
+        <mat-icon>email</mat-icon>
+        <span>ایمیل کاربر:</span>
+        <strong>{{ conversation.user_email || '-' }}</strong>
+      </div>
+      <div class="info-item">
+        <mat-icon>access_time</mat-icon>
+        <span>تاریخ ایجاد:</span>
+        <strong>{{ conversation.created_at | date:'yyyy/MM/dd HH:mm' }}</strong>
+      </div>
+    </div>
+
+    <div class="messages-section">
+      <h3>پیام‌ها ({{ conversation.total_messages }})</h3>
+      <div class="messages-container">
+        <div *ngFor="let message of conversation.messages; let i = index" class="message-item" [ngClass]="{'user-message': message.role === 'user', 'ai-message': message.role !== 'user'}">
+          <div class="message-avatar" [ngClass]="{'user-avatar': message.role === 'user', 'ai-avatar': message.role !== 'user'}">
+            <mat-icon>{{ message.role === 'user' ? 'person' : 'smart_toy' }}</mat-icon>
+          </div>
+          <div class="message-bubble">
+            <div class="message-header">
+              <span class="message-sender">{{ message.role === 'user' ? 'کاربر' : 'هوش مصنوعی' }}</span>
+              <span class="message-timestamp">{{ message.timestamp | date:'yyyy/MM/dd HH:mm' }}</span>
+            </div>
+            <div class="message-content">
+              <p>{{ message.content }}</p>
+            </div>
+            <div class="message-actions" *ngIf="message.role !== 'user'">
+              <button mat-icon-button (click)="addToKnowledgeBase(message, i)" matTooltip="افزودن به دانش">
+                <mat-icon>add_circle_outline</mat-icon>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</mat-dialog-content>
+
+<mat-dialog-actions class="modal-actions">
+  <button mat-stroked-button (click)="onClose()" class="cancel-btn">
+    <mat-icon>close</mat-icon>
+    <span>بستن</span>
+  </button>
+</mat-dialog-actions>

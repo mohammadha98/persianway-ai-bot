@@ -1,0 +1,275 @@
+import { Component, ViewChild, OnDestroy } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { MatCardModule } from '@angular/material/card';
+import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatSelectModule } from '@angular/material/select';
+import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { ContributeService, TaskStatus, TaskStatusResponse } from '../../services/contribute.service';
+import { KnowledgeListComponent } from '../knowledge-list/knowledge-list.component';
+import { MatExpansionModule } from '@angular/material/expansion';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { Subscription } from 'rxjs';
+
+interface ContributionForm {
+  title: string;
+  content: string;
+  category: string;
+  tags: string;
+  source: string;
+  author: string;
+  additionalReferences: string;
+  is_public: boolean;
+}
+
+@Component({
+  selector: 'app-contribute',
+  standalone: true,
+  imports: [
+    CommonModule,
+    FormsModule,
+    MatCardModule,
+    MatButtonModule,
+    MatIconModule,
+    MatInputModule,
+    MatFormFieldModule,
+    MatSelectModule,
+    MatSnackBarModule,
+    MatProgressSpinnerModule,
+    MatProgressBarModule,
+    MatExpansionModule,
+    MatSlideToggleModule,
+    KnowledgeListComponent
+  ],
+  templateUrl: './contribute.component.html',
+  styleUrl: './contribute.component.scss'
+})
+export class ContributeComponent implements OnDestroy {
+  // Expandable section state
+  isExpanded: boolean = true;
+  @ViewChild('knowledgeList') private knowledgeListComponent?: KnowledgeListComponent;
+  
+  form: ContributionForm = {
+    title: '',
+    category: '',
+    content: '',
+    tags: '',
+    source: '',
+    author: '',
+    additionalReferences: '',
+    is_public:false
+  };
+
+  categories = [
+    { value: 'crops', label: 'زراعت و محصولات زراعی' },
+    { value: 'livestock', label: 'دامداری و طیور' },
+    { value: 'horticulture', label: 'باغبانی و گلخانه' },
+    { value: 'soil', label: 'خاک و کود' },
+    { value: 'pest', label: 'آفات و بیماری‌ها' },
+    { value: 'irrigation', label: 'آبیاری و منابع آب' },
+    { value: 'machinery', label: 'ماشین‌آلات کشاورزی' },
+    { value: 'marketing', label: 'بازاریابی و فروش' },
+    { value: 'other', label: 'سایر موضوعات' }
+  ];
+
+  isSubmitting = false;
+  isProcessing = false;
+  selectedFile: File | null = null;
+  currentTaskId: string | null = null;
+  currentTaskStatus: TaskStatusResponse | null = null;
+  private pollingSubscription: Subscription | null = null;
+  
+  // Toggle expand/collapse function
+  toggleExpand(): void {
+    this.isExpanded = !this.isExpanded;
+  }
+
+  constructor(
+    private contributeService: ContributeService,
+    private snackBar: MatSnackBar
+  ) { }
+
+  ngOnDestroy(): void {
+    this.pollingSubscription?.unsubscribe();
+  }
+
+  onFileSelected(event: any) {
+    const file = event.target.files[0];
+    if (file) {
+      // Check file type
+      const allowedTypes = [
+        'application/pdf',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+        'application/msword' // .doc
+      ];
+      if (allowedTypes.includes(file.type)) {
+        this.selectedFile = file;
+        this.showMessage('فایل انتخاب شد: ' + file.name);
+      } else {
+        this.showMessage('فقط فایل‌های PDF، Word و Excel پذیرفته می‌شوند.', 'error');
+        event.target.value = '';
+      }
+    }
+  }
+
+  onFileDropZoneClick(): void {
+    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.click();
+    }
+  }
+
+  submitContribution() {
+    if (!this.isFormValid()) {
+      this.showMessage('لطفاً تمام فیلدهای ضروری را پر کنید.', 'error');
+      return;
+    }
+    if (this.isProcessing) {
+      this.showMessage('لطفاً منتظر تکمیل پردازش فعلی باشید.', 'error');
+      return;
+    }
+    this.isSubmitting = true;
+
+    const formData = new FormData();
+    formData.append('title', this.form.title);
+    formData.append('content', this.form.content);
+    formData.append('source', this.form.source);
+    formData.append('meta_tags', this.form.tags);
+    formData.append('author_name', this.form.author || '');
+    formData.append('additional_references', this.form.additionalReferences || '');
+    formData.append('is_public',this.form.is_public.toString());
+
+    if (this.selectedFile) {
+      formData.append('file', this.selectedFile);
+    }
+
+    this.contributeService.submitContribution(formData).subscribe({
+      next: (response) => {
+        this.isSubmitting = false;
+        console.log(response);
+        if (response.task_id) {
+          this.currentTaskId = response.task_id;
+          this.isProcessing = true;
+          this.showMessage('مشارکت شما ثبت شد. در حال پردازش...', 'success');
+          this.startPolling(response.task_id);
+        } else {
+          this.showMessage('مشارکت شما با موفقیت ثبت شد. متشکریم!', 'success');
+          this.resetForm();
+          this.knowledgeListComponent?.refresh();
+        }
+      },
+      error: (error) => {
+        this.isSubmitting = false;
+        console.error('Contribution error:', error);
+        this.showMessage('خطا در ثبت مشارکت. لطفاً دوباره تلاش کنید.', 'error');
+      }
+    });
+  }
+
+  private startPolling(taskId: string): void {
+    this.pollingSubscription = this.contributeService.pollTaskStatus(taskId).subscribe({
+      next: (status) => {
+        this.currentTaskStatus = status;
+        if (status.status === 'COMPLETED') {
+          this.isProcessing = false;
+          this.showMessage('پردازش با موفقیت انجام شد!', 'success');
+          this.resetForm();
+          this.knowledgeListComponent?.refresh();
+          this.pollingSubscription?.unsubscribe();
+        } else if (status.status === 'FAILED') {
+          this.isProcessing = false;
+          this.showMessage(`خطا در پردازش: ${status.error}`, 'error');
+          this.pollingSubscription?.unsubscribe();
+        }
+      },
+      error: (error) => {
+        this.isProcessing = false;
+        console.error('Polling error:', error);
+        this.showMessage('خطا در دریافت وضعیت پردازش.', 'error');
+        this.pollingSubscription?.unsubscribe();
+      }
+    });
+  }
+
+  uploadFile() {
+    if (!this.selectedFile) {
+      this.showMessage('لطفاً ابتدا فایل را انتخاب کنید.', 'error');
+      return;
+    }
+
+    this.isSubmitting = true;
+    const formData = new FormData();
+    formData.append('file', this.selectedFile);
+
+    this.contributeService.uploadFile(formData).subscribe({
+      next: (response) => {
+        this.isSubmitting = false;
+        this.showMessage('فایل با موفقیت آپلود شد.', 'success');
+        this.selectedFile = null;
+        // Reset file input
+        const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+        if (fileInput) fileInput.value = '';
+      },
+      error: (error) => {
+        this.isSubmitting = false;
+        console.error('File upload error:', error);
+        this.showMessage('خطا در آپلود فایل. لطفاً دوباره تلاش کنید.', 'error');
+      }
+    });
+  }
+
+  public isFormValid(): boolean {
+    return !!(this.form.title.trim() &&
+      this.form.content.trim() &&
+      this.form.tags.trim() )
+  }
+
+  private resetForm() {
+    this.form = {
+      title: '',
+      content: '',
+      category: '',
+      tags: '',
+      source: '',
+      author: '',
+      additionalReferences: '',
+      is_public:false
+    };
+    this.selectedFile = null;
+    this.currentTaskId = null;
+    this.currentTaskStatus = null;
+    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+    if (fileInput) fileInput.value = '';
+  }
+
+  private showMessage(message: string, type: 'success' | 'error' = 'success') {
+    this.snackBar.open(message, 'بستن', {
+      duration: 5000,
+      horizontalPosition: 'center',
+      verticalPosition: 'top',
+      panelClass: type === 'success' ? 'success-snackbar' : 'error-snackbar'
+    });
+  }
+
+  getCategoryLabel(value: string): string {
+    const category = this.categories.find(cat => cat.value === value);
+    return category ? category.label : value;
+  }
+
+  getStatusText(status: TaskStatus): string {
+    const statusMap: Record<TaskStatus, string> = {
+      'PENDING': 'در انتظار پردازش',
+      'PROCESSING': 'در حال پردازش',
+      'COMPLETED': 'تکمیل شده',
+      'FAILED': 'خطا در پردازش'
+    };
+    return statusMap[status] || status;
+  }
+}

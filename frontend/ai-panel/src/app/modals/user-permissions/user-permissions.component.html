@@ -1,0 +1,48 @@
+<div class="permissions-dialog-container">
+  <h1 mat-dialog-title class="dialog-title">
+    <mat-icon>security</mat-icon>
+    تنظیم دسترسی‌های کاربر: {{user.full_name}}
+  </h1>
+
+  <mat-dialog-content>
+    <div class="user-info">
+      <div class="user-avatar">
+        <div class="avatar-circle">
+          {{user.full_name | slice:0:2}}
+        </div>
+      </div>
+      <div class="user-details">
+        <h3>{{user.full_name}}</h3>
+        <p>{{user.email}}</p>
+        <p>نقش: {{user.role}}</p>
+      </div>
+    </div>
+
+    <div class="permissions-section">
+      <h2>دسترسی‌ها</h2>
+      <p class="description">دسترسی‌های مورد نیاز برای این کاربر را انتخاب کنید:</p>
+
+      <form [formGroup]="form" class="permissions-form">
+        <div class="permissions-grid">
+          <mat-checkbox *ngFor="let permission of permissionTypes" 
+                       [formControlName]="permission.value" 
+                       color="primary" 
+                       class="permission-checkbox">
+            {{permission.label}}
+          </mat-checkbox>
+        </div>
+      </form>
+    </div>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="dialog-actions">
+    <button mat-stroked-button (click)="onCancel()" [disabled]="loading">لغو</button>
+    <button mat-raised-button color="primary" (click)="onSave()" [disabled]="loading">
+      <mat-spinner *ngIf="loading" diameter="20" class="button-spinner"></mat-spinner>
+      <span *ngIf="!loading">
+        <mat-icon>save</mat-icon>
+        ذخیره
+      </span>
+    </button>
+  </mat-dialog-actions>
+</div>

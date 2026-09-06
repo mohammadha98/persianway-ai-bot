@@ -1,0 +1,1593 @@
+from typing import List, Dict, Any, Optional, AsyncGenerator
+import uuid
+import logging
+import os
+import time
+from datetime import datetime
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from app.services.reranker import EmbeddingReranker
+from app.services.chat_service import get_llm
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
+from app.services.document_processor import get_document_processor
+from app.services.hybrid_retrieval import HybridRetrievalService
+from app.services.excel_processor import get_excel_qa_processor
+from app.services.config_service import ConfigService
+from app.services.context_condenser import batch_condense
+from app.services.utility import search_persianway
+from langchain_core.documents import Document
+from app.services.task_service import TaskStatus
+# Set up logging for human referrals
+referral_logger = logging.getLogger("human_referral")
+file_handler = logging.FileHandler("human_referrals.log", encoding="utf-8")
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+referral_logger.addHandler(file_handler)
+referral_logger.setLevel(logging.INFO)
+
+
+class KnowledgeBaseService:
+    """Service for retrieving information from the knowledge base using RAG.
+
+    This service integrates the document processor with LangChain's retrieval
+    capabilities to provide context-aware responses based on the document collection.
+    """
+
+    def __init__(self):
+        """Initialize the knowledge base service."""
+        self.document_processor = get_document_processor()
+        self.excel_processor = get_excel_qa_processor()
+        self.config_service = ConfigService()
+
+        # Initialize the retrieval QA chain
+        self._qa_chain = None
+        self.llm = None
+        self._active_final_template = None
+        self._active_system_prompt = None
+        self._active_rag_temperature = None
+
+        # Initialize reranker if embeddings are available
+        try:
+            if (
+                hasattr(self.document_processor, 'embeddings_available') and
+                self.document_processor.embeddings_available and
+                getattr(self.document_processor, 'embeddings', None) is not None
+            ):
+                self.reranker = EmbeddingReranker(self.document_processor.embeddings)
+                logging.info("[KB SERVICE] Reranker initialized")
+            else:
+                self.reranker = None
+                logging.info("[KB SERVICE] Reranker disabled: embeddings not available")
+        except Exception as e:
+            self.reranker = None
+            logging.warning(f"[KB SERVICE] Reranker initialization failed: {str(e)}")
+
+    async def _get_document_chain(self):
+        """Get document processing chain WITHOUT automatic retrieval.
+        Returns only the document chain; retrieval is handled manually in query_knowledge_base.
+        """
+        if self._qa_chain is None:
+            await self.config_service._load_config()
+            rag_settings = await self.config_service.get_rag_settings()
+            if self.llm is None:
+                self.llm = await get_llm(temperature=rag_settings.temperature)
+            if self.llm is None:
+                logging.warning("LLM not available")
+                return None
+            system_prompt = rag_settings.system_prompt
+            base_template = rag_settings.prompt_template
+            combined_template = f"""{system_prompt}
+
+{base_template}"""
+            final_template = combined_template.replace("{question}", "{input}")
+            self._active_final_template = final_template
+            self._active_system_prompt = system_prompt
+            self._active_rag_temperature = rag_settings.temperature
+            chat_prompt = ChatPromptTemplate.from_template(final_template)
+            self._qa_chain = create_stuff_documents_chain(self.llm, chat_prompt)
+        return self._qa_chain
+
+    async def build_prompt_snapshot(
+        self,
+        query,
+        normalized_docs,
+        external_context=None,
+        history=None,
+        rewritten_query=None,
+        model_params=None,
+    ) -> Dict[str, Any]:
+        if self._active_final_template is None:
+            await self._get_document_chain()
+
+        docs = list(normalized_docs or [])
+        context_parts = [getattr(doc, "page_content", "") for doc in docs]
+        if external_context:
+            context_parts.append(f"External Information (Web Search):\n{external_context}")
+        context_str = "\n\n".join(context_parts)
+        params = dict(model_params or {})
+        params["temperature"] = self._active_rag_temperature
+        full_prompt = self._active_final_template.replace("{context}", context_str).replace("{input}", query)
+        return {
+            "system_prompt": self._active_system_prompt,
+            "user_query": query,
+            "rewritten_query": rewritten_query,
+            "retrieved_context": context_str,
+            "conversation_history": history or [],
+            "model_parameters": params,
+            "full_prompt": full_prompt,
+            "response_type": "rag",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    async def refresh(self):
+        logging.info("[KB SERVICE] Force refresh requested")
+        self._qa_chain = None
+        self.llm = None
+        await self._get_document_chain()
+
+    def _normalize_documents_for_context(
+        self,
+        docs: List[Any]
+    ) -> List[Any]:
+        from langchain_core.documents import Document
+        if not docs:
+            return []
+        def _normalize_whitespace(text: str) -> str:
+            lines = (text or "").splitlines()
+            return "\n".join([" ".join(line.split()) for line in lines]).strip()
+        logging.info(f"[Context Normalization] Processing {len(docs)} docs (no length limits)")
+        normalized_docs = []
+        total_original_chars = 0
+        total_chars = 0
+        for idx, doc in enumerate(docs):
+            original_size = len(getattr(doc, 'page_content', '') or '') + len(str(getattr(doc, 'metadata', {})))
+            total_original_chars += original_size
+            clean_metadata = dict(doc.metadata) if isinstance(doc.metadata, dict) else {}
+            base_content = _normalize_whitespace((doc.page_content or "").strip())
+            if isinstance(clean_metadata, dict) and clean_metadata.get("source_type") == "qa_contribution":
+                t = clean_metadata.get("title")
+                q = clean_metadata.get("question")
+                a = clean_metadata.get("answer")
+                parts = []
+                if t:
+                    parts.append(f"Title: {t}")
+                if q:
+                    parts.append(f"Q: {q}")
+                if a:
+                    parts.append(f"A: {a}")
+                if parts:
+                    base_content = (base_content + "\n\n" + "\n".join(parts)).strip()
+            clean_content = base_content
+            total_chars += len(clean_content)
+            normalized_docs.append(Document(page_content=clean_content, metadata=clean_metadata))
+        if total_original_chars > 0:
+            reduction_pct = ((total_original_chars - total_chars) / total_original_chars * 100)
+            logging.info(
+                f"[Context Normalization] Complete: {len(normalized_docs)}/{len(docs)} docs, total_chars={total_chars}, reduction={reduction_pct:.1f}%"
+            )
+        return normalized_docs
+
+    def _calculate_confidence_score(self, docs_with_scores: List[tuple], top_n: int = 3) -> float:
+        """
+        Calculates multi-factor confidence score based on:
+        1. Best document score (primary factor)
+        2. Score consistency across top results (secondary factor)
+        3. Number of relevant documents found (coverage factor)
+
+        Lower distance scores indicate higher similarity in L2 distance.
+
+        Args:
+            docs_with_scores: List of (document, score) tuples from vector search
+            top_n: Number of top documents to consider for confidence calculation
+
+        Returns:
+            A confidence score between 0 and 1, where 1 is most confident.
+        """
+        import math
+        import numpy as np
+
+        if not docs_with_scores:
+            return 0.0
+
+        # Extract scores from top N documents
+        top_scores = [score for _, score in docs_with_scores[:min(top_n, len(docs_with_scores))]]
+
+        # --- Factor 1: Best Score (60% weight) ---
+        # Convert best similarity score to confidence using logistic decay
+        best_score = top_scores[0]
+        midpoint = 1.5  # Distance at which confidence is 50%
+        scale = 5.0     # Steepness of decay
+        best_confidence = 1.0 / (1.0 + math.exp(scale * (best_score - midpoint)))
+
+        # --- Factor 2: Score Consistency (30% weight) ---
+        # Lower standard deviation = more consistent = higher confidence
+        if len(top_scores) > 1:
+            score_std = float(np.std(top_scores))
+            # Normalize std to 0-1 range (assuming std usually < 0.5 for good results)
+            consistency_score = 1.0 / (1.0 + score_std * 2.0)
+        else:
+            consistency_score = 1.0  # Single result = perfect consistency
+
+        # --- Factor 3: Coverage (10% weight) ---
+        # Having multiple relevant docs increases confidence
+        coverage_score = min(len(docs_with_scores) / top_n, 1.0)
+
+        # --- Combined Confidence ---
+        final_confidence = (
+            best_confidence * 0.6 +
+            consistency_score * 0.3 +
+            coverage_score * 0.1
+        )
+
+        return max(0.0, min(final_confidence, 1.0))
+
+    def _calculate_single_score_confidence(self, similarity_score: float) -> float:
+        import math
+        max_distance = 2.5
+        normalized_distance = min(similarity_score / max_distance, 1.0)
+        inverted_score = 1.0 - normalized_distance
+        confidence = math.pow(inverted_score, 0.7)
+        return max(0.0, min(confidence, 1.0))
+
+    def _similarity_to_confidence(self, similarity_score: float, max_distance: float = 2.5) -> float:
+        import math
+        normalized_distance = min(similarity_score / max_distance, 1.0)
+        inverted_score = 1.0 - normalized_distance
+        confidence = math.pow(inverted_score, 0.7)
+        return max(0.0, min(confidence, 1.0))
+
+    def _log_human_referral(self, query: str, answer: str, confidence: float) -> None:
+        """Log a query that requires human attention.
+
+        Args:
+            query: The original query
+            answer: The generated answer
+            confidence: The confidence score
+        """
+        query_id = str(uuid.uuid4())
+        referral_logger.info(
+            f"HUMAN REFERRAL NEEDED\n"
+            f"Query ID: {query_id}\n"
+            f"Query: {query}\n"
+            f"Answer: {answer[:100]}...\n"
+            f"Confidence: {confidence}\n"
+            f"Timestamp: {datetime.now().isoformat()}\n"
+            f"{'=' * 50}"
+        )
+
+    def process_excel_files(self) -> int:
+        """Process all Excel QA files in the configured directory.
+
+        Returns:
+            Number of QA pairs processed
+        """
+        return self.excel_processor.process_all_excel_files()
+
+    async def add_knowledge_contribution(
+        self,
+        title: str,
+        content: str,
+        meta_tags: List[str],
+        source: Optional[str] = None,
+        author_name: Optional[str] = None,
+        additional_references: Optional[str] = None,
+        uploaded_file_path: Optional[str] = None,
+        is_public: bool = False,
+    ) -> Dict[str, Any]:
+        """Adds a new knowledge entry - uses background processing for files.
+
+        Args:
+            title: Title of the entry.
+            content: Main body/content in Persian.
+            source: The origin or reference for the knowledge.
+            meta_tags: Comma-separated keywords for categorization.
+            author_name: Optional name of the contributor.
+            additional_references: Optional URLs or citations.
+            uploaded_file_path: Optional path to an uploaded PDF or Excel file.
+            is_public: Flag indicating if the contribution is public-facing metadata.
+
+        Returns:
+            A dictionary with the ID, timestamp, and task ID for background processing.
+        """
+        from app.services.task_service import get_task_service
+        from app.services.database import get_database_service
+
+        try:
+            hash_id = str(uuid.uuid4())
+            submitted_at = datetime.now().isoformat()
+            db_service = await get_database_service()
+
+            # Create a background task first to get task_id
+            task_service = await get_task_service()
+            task_id = await task_service.create_task(
+                task_type="process_knowledge_contribution",
+                knowledge_hash_id=hash_id,
+                metadata={
+                    "title": title,
+                    "content": content,
+                    "source": source,
+                    "author_name": author_name,
+                    "additional_references": additional_references,
+                    "uploaded_file_path": uploaded_file_path,
+                    "is_public": is_public,
+                    "meta_tags": meta_tags
+                }
+            )
+
+            # NOTE: vectordb write is handled exclusively by
+            # process_knowledge_contribution_background to avoid duplicates.
+
+            # Prepare document for database insertion
+            db_document = {
+                "hash_id": hash_id,
+                "title": title,
+                "content": content,
+                "meta_tags": meta_tags,
+                "author_name": author_name if author_name else "Unknown",
+                "additional_references": additional_references.split(",") if additional_references else [],
+                "submission_timestamp": submitted_at,
+                "synced": False,
+                "entry_type": "user_contribution",
+                "is_public": is_public,
+                "task_id": task_id
+            }
+
+            if uploaded_file_path:
+                db_document["file_path"] = uploaded_file_path
+                db_document["file_type"] = uploaded_file_path.lower().split('.')[-1]
+                db_document["file_name"] = os.path.basename(uploaded_file_path)
+
+            db_id = await db_service.insert_knowledge_document(db_document)
+            logging.info(f"Document inserted into database with ID: {db_id}")
+
+            # Prepare response
+            response = {
+                "id": hash_id,
+                "title": title,
+                "submitted_at": submitted_at,
+                "meta_tags": meta_tags,
+                "source": source,
+                "author_name": author_name,
+                "additional_references": additional_references,
+                "db_id": db_id,
+                "is_public": is_public,
+                "task_id": task_id,
+                "status": "queued"
+            }
+
+            return response
+        except Exception as e:
+            logging.error(f"Error adding knowledge contribution: {str(e)}")
+            raise
+
+    async def process_knowledge_contribution_background(self, task_id: str, knowledge_hash_id: str, metadata: Dict[str, Any]):
+        """Process a knowledge contribution in the background with retry logic."""
+        from app.services.task_service import get_task_service
+        from app.services.database import get_database_service
+        import asyncio
+
+        task_service = await get_task_service()
+        db_service = await get_database_service()
+
+        max_retries = 3
+        retry_delay = 2  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                await task_service.update_task_status(task_id, TaskStatus.PROCESSING, progress=0)
+
+                title = metadata.get("title")
+                content = metadata.get("content")
+                source = metadata.get("source")
+                author_name = metadata.get("author_name")
+                additional_references = metadata.get("additional_references")
+                uploaded_file_path = metadata.get("uploaded_file_path")
+                is_public = metadata.get("is_public", False)
+                meta_tags = metadata.get("meta_tags", [])
+                submitted_at = datetime.now().isoformat()
+                processed_file = False
+                file_type = None
+                file_docs = []
+                qa_count = 0
+
+                # Process uploaded file if provided
+                if uploaded_file_path:
+                    file_ext = uploaded_file_path.lower().split('.')[-1]
+
+                    if file_ext == 'pdf':
+                        file_type = 'pdf'
+                        pdf_docs = self.document_processor.process_pdf(uploaded_file_path)
+                        if pdf_docs:
+                            for idx, doc in enumerate(pdf_docs):
+                                doc.metadata["source"] = os.path.basename(uploaded_file_path)
+                                doc.metadata["title"] = title
+                                doc.metadata["meta_tags"] = ",".join(meta_tags)
+                                doc.metadata["author_name"] = author_name if author_name else "Unknown"
+                                doc.metadata["additional_references"] = additional_references if additional_references else "None"
+                                doc.metadata["submission_timestamp"] = submitted_at
+                                doc.metadata["entry_type"] = "user_contribution_pdf"
+                                doc.metadata["is_public"] = is_public
+                                doc.metadata["hash_id"] = knowledge_hash_id
+                                doc.metadata["id"] = f"{knowledge_hash_id}_pdf_{idx}"
+                            file_docs.extend(pdf_docs)
+                            processed_file = True
+
+                    elif file_ext == 'docx':
+                        file_type = 'docx'
+                        docx_docs = self.document_processor.process_docx(uploaded_file_path)
+                        if docx_docs:
+                            for idx, doc in enumerate(docx_docs):
+                                doc.metadata["source"] = os.path.basename(uploaded_file_path)
+                                doc.metadata["title"] = title
+                                doc.metadata["meta_tags"] = ",".join(meta_tags)
+                                doc.metadata["author_name"] = author_name if author_name else "Unknown"
+                                doc.metadata["additional_references"] = additional_references if additional_references else "None"
+                                doc.metadata["submission_timestamp"] = submitted_at
+                                doc.metadata["entry_type"] = "user_contribution_docx"
+                                doc.metadata["is_public"] = is_public
+                                doc.metadata["hash_id"] = knowledge_hash_id
+                                doc.metadata["id"] = f"{knowledge_hash_id}_docx_{idx}"
+                            file_docs.extend(docx_docs)
+                            processed_file = True
+
+                    elif file_ext in ['xlsx', 'xls']:
+                        file_type = 'excel'
+                        qa_count, excel_docs = self.excel_processor.process_excel_file(uploaded_file_path)
+                        if excel_docs:
+                            for idx, doc in enumerate(excel_docs):
+                                doc.metadata["meta_tags"] = ",".join(meta_tags)
+                                doc.metadata["author_name"] = author_name if author_name else "Unknown"
+                                doc.metadata["additional_references"] = additional_references if additional_references else "None"
+                                doc.metadata["submission_timestamp"] = submitted_at
+                                doc.metadata["entry_type"] = "user_contribution_excel"
+                                doc.metadata["is_public"] = is_public
+                                doc.metadata["hash_id"] = knowledge_hash_id
+                                doc.metadata["id"] = f"{knowledge_hash_id}_excel_{idx}"
+                            file_docs.extend(excel_docs)
+                            processed_file = True
+
+                # Prepare metadata for text contribution
+                base_doc_metadata = {
+                    "source": source if source else "Unknown",
+                    "title": title,
+                    "meta_tags": ",".join(meta_tags),
+                    "author_name": author_name if author_name else "Unknown",
+                    "additional_references": additional_references if additional_references else "None",
+                    "submission_timestamp": submitted_at,
+                    "entry_type": "user_contribution",
+                    "source_type": "qa_contribution",
+                    "question": title,
+                    "answer": content,
+                    "hash_id": knowledge_hash_id,
+                    "is_public": is_public
+                }
+
+                # Create Langchain Document for text contribution
+                document_content = f"Title: {title}\n\nContent: {content}"
+                langchain_documents = self.document_processor.text_splitter.create_documents(
+                    texts=[document_content],
+                    metadatas=[base_doc_metadata]
+                )
+
+                # Ensure each text chunk has a unique ID
+                for idx, doc in enumerate(langchain_documents):
+                    doc.metadata["id"] = f"{knowledge_hash_id}_text_{idx}"
+
+                if not langchain_documents and not file_docs:
+                     raise ValueError("Failed to create document for vector store.")
+
+                vector_store = self.document_processor.get_vector_store()
+
+                # Add text contribution
+                if langchain_documents:
+                    vector_store.add_documents(langchain_documents)
+                    await task_service.update_task_status(task_id, TaskStatus.PROCESSING, progress=30)
+
+                # Add file documents
+                if file_docs:
+                    batch_size = 100
+                    total_batches = (len(file_docs) + batch_size - 1) // batch_size
+                    for i in range(0, len(file_docs), batch_size):
+                        batch = file_docs[i:i + batch_size]
+                        vector_store.add_documents(batch)
+                        progress = 30 + int(((i // batch_size + 1) / total_batches) * 60)
+                        await task_service.update_task_status(task_id, TaskStatus.PROCESSING, progress=progress)
+                        logging.info(f"Processed batch {i//batch_size + 1}/{total_batches}")
+
+                self._qa_chain = None
+                logging.info("Vector store updated")
+
+                # Update the database document
+                update_data = {"synced": True}
+                if processed_file:
+                    update_data["file_processed"] = True
+                    update_data["file_type"] = file_type
+                    if file_type == 'excel':
+                        update_data["qa_count"] = qa_count
+
+                await db_service.update_knowledge_document_sync_status(knowledge_hash_id, True)
+
+                await task_service.update_task_status(
+                    task_id,
+                    TaskStatus.COMPLETED,
+                    progress=100,
+                    metadata={
+                        "processed_file": processed_file,
+                        "file_type": file_type,
+                        "qa_count": qa_count if file_type == 'excel' else 0
+                    }
+                )
+
+                return  # Success, exit retry loop
+
+            except Exception as e:
+                logging.error(f"Attempt {attempt + 1}/{max_retries} failed: {str(e)}", exc_info=True)
+
+                if attempt < max_retries - 1:
+                    # Wait before retrying
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    # All retries failed
+                    await task_service.update_task_status(
+                        task_id,
+                        TaskStatus.FAILED,
+                        error=f"All {max_retries} attempts failed: {str(e)}"
+                    )
+
+        
+
+    async def expand_query_with_context(
+        self,
+        query: str,
+        conversation_history: List[Dict[str, str]] = None,
+        max_history: int = 4
+    ) -> Dict[str, Any]:
+        """Rewrite query based on conversation context and expand it for better search results.
+
+        This method combines contextual query rewriting and query expansion:
+        1. If conversation history exists, rewrites the query to be self-contained
+        2. Expands the query (original or rewritten) into multiple variations
+        3. Returns all queries for comprehensive search
+
+
+        Args:
+            query: The original query string
+            conversation_history: List of conversation messages with 'role' and 'content' keys
+            max_history: Maximum number of previous messages to consider (default: 4 = 2 exchanges)
+
+        Returns:
+            A dictionary containing:
+                - original_query: The original user query
+                - rewritten_query: Query rewritten with context (same as original if no history)
+                - is_self_contained: Whether the query is self-contained (no history dependency)
+                - uses_history: Whether the query depends on chat history
+                - expanded_queries: List of expanded query variations
+                - all_queries: Combined list of all queries for search
+        """
+        try:
+            import json
+
+            llm = await get_llm(model_name="qwen/qwen3-32b", temperature=0.0, max_tokens=800)
+
+            rewritten_query = query
+            is_self_contained = True
+            uses_history = False
+
+            # Build recent context from conversation history if available
+            recent_context = ""
+            history_text = ""
+            if conversation_history:
+                recent_history = conversation_history[-max_history:] if len(conversation_history) > max_history else conversation_history
+                truncated_history = []
+                for msg in recent_history:
+                    content = msg.get('content', '')
+                    if len(content) > 300:
+                        content = content[:300] + "..."
+                    truncated_history.append({
+                        'role': msg['role'],
+                        'content': content
+                    })
+                recent_context = "\n".join(
+                    [f"{msg['role'].capitalize()}: {msg['content']}" for msg in truncated_history]
+                )
+                history_text = " ".join(msg['content'] for msg in truncated_history)
+
+            prompt = f"""<|im_start|>system
+You are a Query Expander And Rewriter for "Persian Way" (شرکت پرشین وی) RAG System.
+Your task is to convert the user's input into a **SHORT, PRECISE** query.
+
+**🚨 STRICT CONSTRAINTS:**
+1.  **MAX LENGTH:** Output MUST be less than 25 words.
+2.  **NO FLUFF:** No "comprehensive info", "history", "services".
+3.  **IDENTITY:** "Persian Way" is an company. DO NOT associate with VPN.
+4.  **FORMAT:** Return ONLY JSON.
+
+**⚠️ DECISION FIRST (Anti-Contamination):**
+Before rewriting, decide if the current query DEPENDS on the chat history.
+
+A query is a FOLLOW-UP only if it contains referential/elliptical cues:
+pronouns, "بعدی", "دیگه", "همون", "اون یکی", "قبلی", "ادامه بده",
+or an incomplete question that is meaningless without the previous turn.
+
+If the query introduces a NEW, self-contained topic (even mid-conversation),
+it is SELF-CONTAINED. In that case:
+- set "is_self_contained": true
+- set "uses_history": false
+- DO NOT inject ANY entity/word from the chat history.
+- rewritten_query = a clean version of ONLY the current query.
+
+Example of topic switch:
+- History: کوددهی پنبه …
+- User: "قیمت محصولات پوستی چنده؟"
+- ❌ Bad: "قیمت کود پنبه" (contaminated!)
+- ✅ Good: "قیمت محصولات مراقبت پوستی پرشین وی" (is_self_contained=true)
+
+**⚠️ LOGIC FOR "LAST/FINAL":**
+*   **CASE A (Growth End):** "Last stage" -> Inject "Harvest" (برداشت).
+*   **CASE B (Step End):** "End of step 3" -> Focus on step 3 actions.
+*   **CASE C (Price/Qty):** "Last price" -> Just "Price".
+
+**⚠️ LOGIC FOR SEQUENTIAL QUERIES (AVOID LOOPS):**
+If the user asks for "More", "Next", "The rest" (بقیه، بعدی، دیگه چی):
+1.  **Check History:** See what was just discussed (e.g., Cotton Stages 1 & 2).
+2.  **Target NEW Info:** The query MUST target the *next* steps explicitly.
+    *   User: "دیگه چه مراحلی داره؟" (Context: Covered Stage 1-2)
+    *   ❌ Bad Rewrite: "مراحل کوددهی پنبه" (This fetches stage 1 again!)
+    *   ✅ Good Rewrite: "مراحل سوم تا هشتم کوددهی پنبه" (Targeting specific missing parts)
+
+
+**FEW-SHOT EXAMPLES:**
+- User: در مورد پرشین وی بگو (no history dependency)
+  Output: {{ "is_self_contained": true, "uses_history": false, "rewritten_query": "معرفی شرکت پرشین وی و خدمات" }}
+
+- User: مرحله بعد چیه؟ (Context: Cotton Stage 1)
+  Output: {{ "is_self_contained": false, "uses_history": true, "rewritten_query": "مرحله دوم کوددهی پنبه" }}
+
+- User: مرحله آخرش کی هست؟ (Context: Pistachio)
+  Output: {{ "is_self_contained": false, "uses_history": true, "rewritten_query": "مرحله نهایی کوددهی پسته زمان برداشت" }}
+
+- User: قیمت محصولات پوستی چنده؟ (Context: کوددهی پنبه — topic switch)
+  Output: {{ "is_self_contained": true, "uses_history": false, "rewritten_query": "قیمت محصولات مراقبت پوستی پرشین وی" }}
+<|im_end|>
+<|im_start|>user
+**Chat History:**
+{recent_context if recent_context else "No history provided."}
+
+**User's Query:**
+{query}
+
+**OUTPUT FORMAT:**
+Return ONLY a JSON object in PERSIAN with these fields:
+{{
+    "is_self_contained": true or false,
+    "uses_history": true or false,
+    "rewritten_query": "رشته جستجوی دقیق"
+}}
+<|im_end|>
+<|im_start|>assistant
+ """
+
+            # Call llm for both rewriting and expansion
+            response = await llm.ainvoke([
+                SystemMessage(content="تو دستیار هوشمندی هستی که پرسش‌ها را بازنویسی و گسترش می‌دهی برای بهبود نتایج جست‌وجو. فقط JSON معتبر برگردان."),
+                HumanMessage(content=prompt)
+            ])
+
+            raw_content = getattr(response, "content", "")
+            try:
+                result = json.loads(raw_content)
+                if not isinstance(result, dict):
+                    raise ValueError("Invalid JSON type")
+                rewritten_query = result.get("rewritten_query", query)
+                is_self_contained = bool(result.get("is_self_contained", True))
+                uses_history = bool(result.get("uses_history", False))
+                expanded_queries = []
+
+                # Guard: if the model claims no history dependency but still injected
+                # history-only tokens, discard the contaminated rewrite and fall back.
+                if (is_self_contained or not uses_history) and self._looks_contaminated(query, rewritten_query, history_text):
+                    logging.warning(
+                        f"[Query Expansion] Contamination detected (claimed no history dependency). "
+                        f"Reverting to original: '{rewritten_query[:50]}...' -> '{query[:50]}...'"
+                    )
+                    rewritten_query = query
+                    is_self_contained = True
+                    uses_history = False
+                if not isinstance(expanded_queries, list):
+                    expanded_queries = []
+                expanded_queries = [eq.strip() for eq in expanded_queries if isinstance(eq, str) and eq and eq.strip()]
+                if len(expanded_queries) > 5:
+                    expanded_queries = expanded_queries[:5]
+                logging.info(f"[Query Expansion] Successfully parsed")
+            except Exception as e:
+                logging.error(f"Error parsing expansion result: {str(e)}")
+                rewritten_query = query
+                expanded_queries = []
+
+            # Safety net: keep both rewrite AND original (plus expansions) so a bad
+            # rewrite never starves retrieval. Dedupe downstream.
+            all_queries = []
+            seen = set()
+            for q in (rewritten_query, query, *expanded_queries):
+                key = self._normalize_text_for_comparison(q or "")
+                if q and key and key not in seen:
+                    seen.add(key)
+                    all_queries.append(q)
+
+            logging.info(f"[Query Expansion] Original: '{query[:50]}...'")
+            if rewritten_query != query:
+                logging.info(f"[Query Expansion] Rewritten: '{rewritten_query[:50]}...'")
+            logging.info(f"[Query Expansion] Generated {len(expanded_queries)} expanded variations")
+
+            return {
+                "original_query": query,
+                "rewritten_query": rewritten_query,
+                "is_self_contained": is_self_contained,
+                "uses_history": uses_history,
+                "expanded_queries": expanded_queries,
+                "all_queries": all_queries
+            }
+
+        except Exception as e:
+            logging.error(f"Error in expand_query_with_context: {str(e)}")
+            # Return just the original query if there's an error
+            return {
+                "original_query": query,
+                "rewritten_query": query,
+                "is_self_contained": True,
+                "uses_history": False,
+                "expanded_queries": [],
+                "all_queries": [query]
+            }
+
+    def _extract_conversation_history(self, conversation_history) -> List[Dict[str, str]]:
+        """
+        Extract conversation messages from ConversationResponse format.
+
+        Args:
+            conversation_history: ConversationResponse object or list of messages
+
+        Returns:
+            List[Dict[str, str]]: List of messages with 'role' and 'content' keys
+        """
+        if not conversation_history:
+            return []
+
+        # Handle ConversationResponse object
+        if hasattr(conversation_history, 'messages'):
+            messages = []
+            for msg in conversation_history.messages:
+                messages.append({
+                    'role': msg.role,
+                    'content': msg.content
+                })
+            return messages
+
+        # Handle list of ConversationResponse objects
+        elif isinstance(conversation_history, list) and conversation_history:
+            # If it's a list of ConversationResponse objects, take the latest one
+            if hasattr(conversation_history[0], 'messages'):
+                latest_conversation = conversation_history[-1]  # Get the most recent conversation
+                messages = []
+                for msg in latest_conversation.messages:
+                    messages.append({
+                        'role': msg.role,
+                        'content': msg.content
+                    })
+                return messages
+            # If it's already a list of dict messages, return as is
+            elif isinstance(conversation_history[0], dict) and 'role' in conversation_history[0]:
+                return conversation_history
+
+        return []
+
+    def _normalize_text_for_comparison(self, text: str) -> str:
+        import re
+        text = text.strip()
+        text = re.sub(r"[؟?!.،,;:\(\)\[\]\{}«»\"']+", "", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.lower().strip()
+
+    def _looks_contaminated(self, original: str, rewritten: str, history_text: str) -> bool:
+        """Detect if the rewrite injected history-only tokens that weren't in the original.
+
+        If the rewrite pulls significant tokens from history that were absent from the
+        original query, the rewrite is suspicious (likely topic contamination).
+        """
+        if not history_text:
+            return False
+        orig_tokens = set(self._normalize_text_for_comparison(original).split())
+        rw_tokens = set(self._normalize_text_for_comparison(rewritten).split())
+        hist_tokens = set(self._normalize_text_for_comparison(history_text).split())
+        # Tokens newly added by rewrite whose origin is history, not the query
+        injected = (rw_tokens - orig_tokens) & hist_tokens
+        # Ignore short/frequent stopword-like tokens
+        injected = {t for t in injected if len(t) > 2}
+        return len(injected) >= 2
+
+
+
+
+    async def _retrieve_context(
+        self,
+        query: str,
+        conversation_history: List = None,
+        is_public: bool = False,
+        include_web_search: bool = True,
+    ) -> Dict[str, Any]:
+        """Shared retrieval pipeline: rewrite/expand -> hybrid retrieval -> threshold filter -> dedup.
+
+        Performs NO answer generation. Used by both the non-stream and stream paths
+        so retrieval logic is never duplicated.
+
+        Returns:
+            Dict with docs_with_scores, normalized_docs, sources, confidence_score,
+            rewritten_query, source_type, retrieval_timings.
+        """
+        import hashlib
+
+        t_retrieval_start = time.perf_counter()
+        retrieval_timings = {}
+
+        # --- History extraction + filter (skip current query to avoid circular context) ---
+        extracted_history = self._extract_conversation_history(conversation_history)
+        filtered_history = []
+        if extracted_history:
+            normalized_query = self._normalize_text_for_comparison(query)
+            for msg in extracted_history:
+                if msg.get('role') == 'user':
+                    msg_content = msg.get('content', '')
+                    if self._normalize_text_for_comparison(msg_content) == normalized_query:
+                        continue
+                filtered_history.append(msg)
+
+        # --- Query rewriting/expansion ---
+        t0 = time.perf_counter()
+        query_expansion_result = await self.expand_query_with_context(
+            query=query,
+            conversation_history=filtered_history if filtered_history else None
+        )
+        rewritten_query = query_expansion_result["rewritten_query"]
+        all_queries = query_expansion_result.get("all_queries") or [rewritten_query]
+        retrieval_timings['expand_query'] = time.perf_counter() - t0
+        logging.info(f"[PERF_RETRIEVAL] step=expand_query elapsed={retrieval_timings['expand_query']:.3f}s")
+
+        # --- Web search (public queries only) ---
+        persianway_docs_for_rerank = []
+        web_search_content = ""
+        if is_public and include_web_search:
+            try:
+                search_result = await search_persianway.ainvoke({"query": rewritten_query})
+                web_search_content = search_result or ""
+                if search_result and "Error executing search" not in search_result and "Error searching web" not in search_result:
+                    web_search_doc = Document(
+                        page_content=search_result,
+                        metadata={
+                            "source": "PersianWay Web Search",
+                            "source_type": "web_search",
+                            "title": "PersianWay Domain Search Results",
+                            "is_public": True,
+                            "hybrid_score": 0.8,
+                            "page": 1
+                        }
+                    )
+                    persianway_docs_for_rerank.append((web_search_doc, 0.2, rewritten_query, "web_search"))
+                    logging.info("[Retrieval] Added PersianWay web search result for reranking")
+            except Exception as e:
+                logging.error(f"[Retrieval] Web search error: {str(e)}")
+
+        # --- Hybrid retrieval (dense + BM25, already reranked inside hybrid_retrieve) ---
+        vector_store = self.document_processor.get_vector_store()
+        if vector_store is None:
+            raise RuntimeError(
+                "Vector store not available. OpenAI embeddings may not be properly configured. "
+                "Please check your OPENAI_API_KEY and ensure the vector database is initialized."
+            )
+
+        rag_settings = await self.config_service.get_rag_settings()
+
+        def _validate_is_public(doc) -> bool:
+            if is_public:
+                return doc.metadata.get("is_public", False) is True
+            return True
+
+        t0 = time.perf_counter()
+        docs_with_scores = []
+        hrs = HybridRetrievalService(self.document_processor)
+        for search_query in all_queries:
+            search_query = (search_query or "").strip()
+            if not search_query:
+                continue
+            try:
+                hybrid_docs = await hrs.hybrid_retrieve(search_query, is_public)
+                for doc in hybrid_docs:
+                    if not _validate_is_public(doc):
+                        continue
+                    hs = float(doc.metadata.get("hybrid_score", 0.0) or 0.0)
+                    pseudo_distance = 1.0 - max(0.0, min(1.0, hs))
+                    docs_with_scores.append((doc, pseudo_distance, search_query, "single"))
+            except Exception as e:
+                logging.error(f"[Retrieval] Hybrid retrieval failed for query '{search_query[:50]}...': {str(e)}")
+        retrieval_timings['hybrid_retrieval'] = time.perf_counter() - t0
+        logging.info(f"[PERF_RETRIEVAL] step=hybrid_retrieval elapsed={retrieval_timings['hybrid_retrieval']:.3f}s docs_found={len(docs_with_scores)}")
+
+        # --- Similarity threshold filtering ---
+        filtered_docs = [
+            (doc, score, source_query, query_type)
+            for doc, score, source_query, query_type in docs_with_scores
+            if score <= rag_settings.similarity_threshold
+        ]
+        if persianway_docs_for_rerank:
+            filtered_docs = filtered_docs + persianway_docs_for_rerank
+
+        # NOTE: below-threshold docs are NOT kept. No graceful degradation:
+        # low confidence must route to handoff, not feed weak context to the LLM.
+
+        # --- Deduplication with source tracking ---
+        t0 = time.perf_counter()
+
+        def _get_doc_hash(doc) -> str:
+            content_sample = ' '.join((doc.page_content[:300] or "").strip().split())
+            source = doc.metadata.get('source', '')
+            page = doc.metadata.get('page', 0)
+            combined = f"{content_sample}|{source}|{page}"
+            return hashlib.md5(combined.encode('utf-8')).hexdigest()
+
+        seen_hashes = {}
+        deduplicated_docs = []
+        for doc, score, source_query, query_type in sorted(filtered_docs, key=lambda x: x[1]):
+            if not _validate_is_public(doc):
+                continue
+            doc_hash = _get_doc_hash(doc)
+            if doc_hash in seen_hashes:
+                existing_score = seen_hashes[doc_hash][1]
+                if score < existing_score:
+                    deduplicated_docs = [item for item in deduplicated_docs if _get_doc_hash(item[0]) != doc_hash]
+                    deduplicated_docs.append((doc, score, source_query, query_type))
+                    seen_hashes[doc_hash] = (doc, score, source_query, query_type)
+            else:
+                deduplicated_docs.append((doc, score, source_query, query_type))
+                seen_hashes[doc_hash] = (doc, score, source_query, query_type)
+
+        unique_docs_with_scores = sorted(
+            [(doc, score) for doc, score, _, _ in deduplicated_docs],
+            key=lambda x: x[1]
+        )
+        final_docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
+        retrieval_timings['deduplication'] = time.perf_counter() - t0
+        logging.info(
+            f"[PERF_RETRIEVAL] step=deduplication elapsed={retrieval_timings['deduplication']:.3f}s "
+            f"final_docs={len(final_docs_with_scores)} (from {len(docs_with_scores)} candidates)"
+        )
+
+        # --- Normalize + confidence + sources ---
+        docs = [doc for doc, score in final_docs_with_scores]
+        normalized_docs = self._normalize_documents_for_context(docs)
+
+        if final_docs_with_scores:
+            confidence = self._calculate_confidence_score(final_docs_with_scores, top_n=3)
+        else:
+            confidence = 0.0
+
+        source_docs = normalized_docs
+        sources = []
+        for doc in source_docs:
+            sources.append({
+                "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+                "source": doc.metadata.get("source", "Unknown"),
+                "page": doc.metadata.get("page", 1),
+                "source_type": doc.metadata.get("source_type", "unknown"),
+                "is_public": doc.metadata.get("is_public", False),
+                "title": doc.metadata.get("title"),
+                "question": doc.metadata.get("question"),
+                "answer": doc.metadata.get("answer"),
+                "meta_tags": doc.metadata.get("meta_tags")
+            })
+
+        source_type = source_docs[0].metadata.get("source_type", "unknown") if source_docs else "unknown"
+
+        retrieval_timings['total_retrieval'] = time.perf_counter() - t_retrieval_start
+        logging.info(f"[PERF_RETRIEVAL] total elapsed={retrieval_timings['total_retrieval']:.3f}s confidence={confidence:.3f}")
+
+        return {
+            "docs_with_scores": final_docs_with_scores,
+            "normalized_docs": normalized_docs,
+            "sources": sources,
+            "confidence_score": confidence,
+            "rewritten_query": rewritten_query,
+            "web_search_content": web_search_content,
+            "source_type": source_type,
+            "retrieval_timings": retrieval_timings,
+        }
+
+    async def stream_answer_from_context(
+        self,
+        query: str,
+        normalized_docs: List[Any],
+        external_context: str = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream the KB answer token-by-token for an already-retrieved context.
+
+        Raises on failure (caller decides error handling) — never yields error text.
+        """
+        doc_chain = await self._get_document_chain()
+        if doc_chain is None:
+            raise RuntimeError("QA chain not available. Cannot generate knowledge base answer.")
+
+        docs = list(normalized_docs or [])
+        if external_context:
+            docs.append(Document(
+                page_content=f"External Information (Web Search):\n{external_context}",
+                metadata={
+                    "source": "Web Search",
+                    "source_type": "external_web_search",
+                    "title": "Web Search Results",
+                    "is_public": True
+                }
+            ))
+
+        t_gen_start = time.perf_counter()
+        first_chunk_logged = False
+        async for chunk in doc_chain.astream({"input": query, "context": docs}):
+            content = None
+            if isinstance(chunk, str):
+                content = chunk
+            else:
+                content = getattr(chunk, "content", None)
+            if not content:
+                continue  # skip chunks without valid content; never str(chunk)
+            if not first_chunk_logged:
+                first_chunk_logged = True
+                logging.info(f"[PERF_KB] time_to_first_chunk={(time.perf_counter() - t_gen_start):.3f}s")
+            yield content
+        logging.info(f"[PERF_KB] step=response_generation_stream elapsed={(time.perf_counter() - t_gen_start):.3f}s")
+
+
+    async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False, external_context: str = None) -> Dict[str, Any]:
+        """Query the knowledge base with a question using improved retrieval strategy.
+
+        PERF: This method includes detailed timing instrumentation for performance analysis.
+
+        Improvements:
+        - Weighted multi-query search (original query gets higher weight)
+        - Similarity threshold filtering
+        - MMR for diversity
+        - Multi-factor confidence calculation
+
+        Args:
+            query: The question to ask
+            conversation_history: Previous conversation messages for context
+            is_public: When True, restricts retrieval to documents tagged with public metadata
+            external_context: Optional string containing external information (e.g., web search results) to be included in the context
+
+        Returns:
+            A dictionary with the answer, confidence score, and source information
+        """
+        # === PERF: Timing Instrumentation ===
+        t_kb_start = time.perf_counter()
+        kb_timings = {}
+
+        try:
+            # Log the incoming query for debugging
+            logging.info(f"[KB Query] Original query: '{query[:100]}...', is_public={is_public}")
+
+            # === PERF: Expand Query Timing ===
+            t0 = time.perf_counter()
+
+            # Extract conversation history
+            extracted_history = self._extract_conversation_history(conversation_history)
+            logging.debug(f"[KB Query] Extracted {len(extracted_history)} messages from conversation history")
+
+            # Filter out the current query from history to prevent circular context
+            filtered_history = []
+            if extracted_history:
+                normalized_query = self._normalize_text_for_comparison(query)
+                for msg in extracted_history:
+                    if msg.get('role') == 'user':
+                        msg_content = msg.get('content', '')
+                        normalized_msg = self._normalize_text_for_comparison(msg_content)
+                        if normalized_msg == normalized_query:
+                            logging.debug(f"[History Filter] Skipping duplicate user message: '{msg_content[:50]}...'")
+                            continue
+                    filtered_history.append(msg)
+                logging.info(f"[History Filter] Kept {len(filtered_history)}/{len(extracted_history)} messages")
+
+            # Use the combined method to rewrite query with context and expand it
+            # This handles both contextual rewriting and query expansion in one step
+            query_expansion_result = await self.expand_query_with_context(
+                query=query,
+                conversation_history=filtered_history if filtered_history else None
+            )
+            kb_timings['expand_query'] = time.perf_counter() - t0
+            logging.info(f"[PERF_KB] step=expand_query elapsed={kb_timings['expand_query']:.3f}s")
+
+            rewritten_query = query_expansion_result["rewritten_query"]
+            all_queries = query_expansion_result.get("all_queries") or [rewritten_query]
+            logging.debug(f"[KB Query] Original query: {query}")
+            logging.info(f"[KB Query] Using rewritten query: '{rewritten_query[:100]}...'")
+            # Log the query transformation
+            if rewritten_query != query:
+                logging.info(f"[KB Query] Query rewritten with context: '{query[:50]}...' -> '{rewritten_query[:50]}...'")
+
+            # ===== PersianWay Web Search Integration =====
+            # Search PersianWay for relevant information and merge with vector search results
+            persianway_docs_for_rerank = []
+            web_search_content = ""
+
+            if is_public:
+                try:
+                    search_result = await search_persianway.ainvoke({"query": rewritten_query})
+                    web_search_content = search_result
+
+                    # Parse the web search result and create a Document for reranking
+                    if search_result and "Error executing search" not in search_result and "Error searching web" not in search_result:
+                        # Create a pseudo-document from web search results to pass to reranker
+                        web_search_doc = Document(
+                            page_content=search_result,
+                            metadata={
+                                "source": "PersianWay Web Search",
+                                "source_type": "web_search",
+                                "title": "PersianWay Domain Search Results",
+                                "is_public": True,
+                                "hybrid_score": 0.8,  # Give a moderate score for reranking
+                                "page": 1
+                            }
+                        )
+                        persianway_docs_for_rerank.append((web_search_doc, 0.2, rewritten_query, "web_search"))
+                        logging.info(f"[KB Query] Added PersianWay web search result for reranking")
+                    else:
+                        logging.warning(f"[KB Query] PersianWay web search returned error or empty result")
+                except Exception as e:
+                    logging.error(f"[KB Query] Error calling PersianWay web search: {str(e)}")
+
+
+            # === PERF: Hybrid Retrieval Timing ===
+            t0 = time.perf_counter()
+
+            # First, check if we have an exact or semantically similar match in our QA database
+            vector_store = self.document_processor.get_vector_store()
+
+            # If vector store is not available, raise an exception to be handled by chat service
+            if vector_store is None:
+                raise RuntimeError("Vector store not available. OpenAI embeddings may not be properly configured. Please check your OPENAI_API_KEY and ensure the vector database is initialized.")
+
+
+            rag_settings = await self.config_service.get_rag_settings()
+
+            logging.info(f"[KB Query] Performing hybrid retrieval (dense + BM25)")
+
+
+            def _validate_is_public(doc) -> bool:
+                doc_is_public = doc.metadata.get("is_public", False)
+                if is_public:
+                    result = (doc_is_public is True)
+                    if not result:
+                        logging.debug(f"[Filter] Rejected: {doc.metadata.get('source', '')[:50]}")
+                    return result
+                return True
+
+            search_query = rewritten_query.strip()
+            all_queries_sanitized = [(q or "").strip() for q in all_queries if q and (q or "").strip()]
+            if not all_queries_sanitized:
+                logging.warning("[KB Query] Empty rewritten query")
+                docs_with_scores = []
+                initial_count = 0
+            else:
+                try:
+                    hrs = HybridRetrievalService(self.document_processor)
+                    docs_with_scores = []
+                    for q in all_queries_sanitized:
+                        try:
+                            hybrid_docs = await hrs.hybrid_retrieve(q, is_public)
+                            hybrid_docs = [doc for doc in hybrid_docs if _validate_is_public(doc)]
+                            for doc in hybrid_docs:
+                                hs = float(doc.metadata.get("hybrid_score", 0.0) or 0.0)
+                                pseudo_distance = 1.0 - max(0.0, min(1.0, hs))
+                                docs_with_scores.append((doc, pseudo_distance))
+                        except Exception as e:
+                            logging.error(f"[KB Query] Hybrid retrieval failed for query '{q[:50]}...': {str(e)}")
+                    initial_count = len(docs_with_scores)
+                    logging.debug(f"[KB Query] Hybrid retrieval produced {len(docs_with_scores)} docs")
+                except Exception as e:
+                    logging.error(f"[KB Query] Hybrid retrieval failed: {str(e)}")
+                    docs_with_scores = []
+                    initial_count = 0
+
+            kb_timings['hybrid_retrieval'] = time.perf_counter() - t0
+            logging.info(f"[PERF_KB] step=hybrid_retrieval elapsed={kb_timings['hybrid_retrieval']:.3f}s docs_found={initial_count}")
+            logging.info(f"[Filter] After validation: {len(docs_with_scores)} docs")
+
+            # ===== IMPROVEMENT 2: Similarity Threshold Filtering =====
+            # Filter out documents with scores above threshold (higher score = less similar in L2 distance)
+            filtered_docs = [
+                (doc, score, search_query, "single")
+                for doc, score in docs_with_scores
+                if score <= rag_settings.similarity_threshold
+            ]
+
+            # ===== Merge PersianWay web search docs with filtered_docs =====
+            if persianway_docs_for_rerank:
+                filtered_docs = filtered_docs + persianway_docs_for_rerank
+                logging.info(f"[KB Query] Merged {len(persianway_docs_for_rerank)} web search docs with {len(filtered_docs) - len(persianway_docs_for_rerank)} vector docs = {len(filtered_docs)} total for reranker")
+
+            if filtered_docs:
+                removed_count = len(docs_with_scores) - len(filtered_docs)
+                if removed_count > 0:
+                    logging.info(
+                        f"[KB Query] Filtered out {removed_count} documents below similarity threshold ({rag_settings.similarity_threshold})"
+                    )
+            else:
+                # If all filtered out, keep best ones anyway (graceful degradation)
+                logging.warning(
+                    f"[KB Query] All documents below threshold, keeping top {rag_settings.top_k_results} anyway"
+                )
+                filtered_docs = [(doc, score, search_query, "single") for doc, score in docs_with_scores]
+
+            # === FIX: Duplicate Reranking Removed ===
+            # NOTE: hybrid_retrieve() already returns reranked documents with
+            # metadata["rerank_position"] set. Running reranker again here was
+            # redundant and added ~2.5s latency per query.
+            # See PIPELINE_PERFORMANCE_REPORT.md for full analysis.
+            kb_timings['reranking'] = 0.0  # Already done in hybrid_retrieve()
+            logging.info(f"[PERF_KB] step=reranking elapsed=0.000s (SKIPPED - already done in hybrid_retrieve)")
+
+            # ===== IMPROVEMENT 3: Deduplication with Source Tracking =====
+            def _get_doc_hash(doc) -> str:
+                import hashlib
+                content_sample = doc.page_content[:300].strip()
+                content_sample = ' '.join(content_sample.split())
+                source = doc.metadata.get('source', '')
+                page = doc.metadata.get('page', 0)
+                metadata_str = f"{source}|{page}"
+                combined = f"{content_sample}|{metadata_str}"
+                return hashlib.md5(combined.encode('utf-8')).hexdigest()
+
+            seen_hashes = {}
+            deduplicated_docs = []
+            for doc, score, source_query, query_type in sorted(filtered_docs, key=lambda x: x[1]):
+                if not _validate_is_public(doc):
+                    continue
+                doc_hash = _get_doc_hash(doc)
+                if doc_hash in seen_hashes:
+                    existing_score = seen_hashes[doc_hash][1]
+                    if score < existing_score:
+                        deduplicated_docs = [item for item in deduplicated_docs if _get_doc_hash(item[0]) != doc_hash]
+                        deduplicated_docs.append((doc, score, source_query, query_type))
+                        seen_hashes[doc_hash] = (doc, score, source_query, query_type)
+                else:
+                    deduplicated_docs.append((doc, score, source_query, query_type))
+                    seen_hashes[doc_hash] = (doc, score, source_query, query_type)
+
+            unique_docs_with_scores = sorted(
+                [(doc, score) for doc, score, _, _ in deduplicated_docs],
+                key=lambda x: x[1]
+            )
+
+            # Take top K results
+            docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
+
+            kb_timings['deduplication'] = time.perf_counter() - t0
+            logging.info(f"[PERF_KB] step=deduplication elapsed={kb_timings['deduplication']:.3f}s")
+
+            logging.info(f"[KB Query] Final retrieval: {len(docs_with_scores)} unique documents (from {initial_count} initial candidates)")
+            if docs_with_scores:
+                logging.debug(f"[KB Query] Score range: {docs_with_scores[0][1]:.4f} (best) to {docs_with_scores[-1][1]:.4f} (worst)")
+
+            # === PERF: Document Chain & Response Generation Timing ===
+            t0 = time.perf_counter()
+
+            # Get document chain (no internal retrieval)
+            doc_chain = await self._get_document_chain()
+
+            # If document chain is not available, return a fallback message
+            if doc_chain is None:
+                logging.warning("QA chain not available. Cannot query knowledge base.")
+                await self.config_service._load_config()
+                rag_settings =await self.config_service.get_rag_settings()
+                return {
+                    "answer": rag_settings.human_referral_message,
+                    "confidence_score": 0.0,
+                    "source_type": "system",
+                    "requires_human_support": True,
+                    "query_id": str(uuid.uuid4()),
+                    "sources": [],
+                    "retrieval_method": "similarity_search"
+                }
+
+            # Prepare documents and manual context
+            docs = [doc for doc, score in docs_with_scores]
+
+            # Incorporate external context (e.g., web search results)
+            if external_context:
+                logging.info("[KB Query] Incorporating external context into response generation")
+                external_doc = Document(
+                    page_content=f"External Information (Web Search):\n{external_context}",
+                    metadata={
+                        "source": "Web Search",
+                        "source_type": "external_web_search",
+                        "title": "Web Search Results",
+                        "is_public": True
+                    }
+                )
+                docs.append(external_doc)
+
+            normalized_docs = self._normalize_documents_for_context(docs)
+            # summaries = await batch_condense(normalized_docs, rewritten_query)
+            # summary_docs = []
+            # for summary in summaries:
+            #         summary_docs.append(Document(
+            #         page_content=summary.get("summary", ""),
+            #         metadata={"source_id": summary.get("source_id", "unknown")}
+            # ))
+            result = doc_chain.invoke({"input": rewritten_query, "context": normalized_docs})
+            answer = result if isinstance(result, str) else result.get("answer") or result.get("result")
+            if answer is None:
+                raise KeyError("answer")
+            source_docs = normalized_docs
+
+            kb_timings['response_generation'] = time.perf_counter() - t0
+            logging.info(f"[PERF_KB] step=response_generation elapsed={kb_timings['response_generation']:.3f}s")
+
+            # ===== IMPROVEMENT 4: Multi-factor Confidence Calculation =====
+            # Calculate confidence based on multiple factors:
+            # - Best document score (60% weight)
+            # - Score consistency across top documents (30% weight)
+            # - Number of relevant documents found (10% weight)
+            if docs_with_scores:
+                confidence = self._calculate_confidence_score(docs_with_scores, top_n=3)
+                logging.info(f"[KB Query] Multi-factor confidence score: {confidence:.4f}")
+                logging.debug(f"[DEBUG] KB raw confidence: {confidence:.3f}")
+
+                # Log individual document scores for debugging
+                for i, (doc, score) in enumerate(docs_with_scores[:3]):
+                    logging.debug(f"[KB Query] Top doc {i+1} score: {score:.4f}")
+            else:
+                confidence = 0.0
+                logging.warning("[KB Query] No documents found, confidence = 0.0")
+
+            # Get dynamic configuration if not already loaded
+            if 'rag_settings' not in locals():
+                await self.config_service._load_config()
+                rag_settings =await self.config_service.get_rag_settings()
+
+            # Determine if human referral is needed based on confidence
+            requires_human = confidence < rag_settings.knowledge_base_confidence_threshold
+
+            # If confidence is too low, log for human review
+            if requires_human:
+                self._log_human_referral(query, answer, confidence)
+
+            # Prepare sources list
+            sources = []
+            if source_docs:
+                for doc in source_docs:
+                    sources.append({
+                        "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+                        "source": doc.metadata.get("source", "Unknown"),
+                        "page": doc.metadata.get("page", 1),
+                        "source_type": doc.metadata.get("source_type", "unknown"),
+                        "is_public": doc.metadata.get("is_public", False),
+                        "title": doc.metadata.get("title"),
+                        "question": doc.metadata.get("question"),
+                        "answer": doc.metadata.get("answer"),
+                        "meta_tags": doc.metadata.get("meta_tags")
+                    })
+
+            # Prepare response
+            source_type = "unknown"
+            if source_docs:
+                source_type = source_docs[0].metadata.get("source_type", "unknown")
+            if is_public and docs_with_scores:
+                public_count = sum(1 for doc, _ in docs_with_scores if doc.metadata.get("is_public") is True)
+                logging.info(f"[Filter] Final: {public_count}/{len(docs_with_scores)} have is_public=True")
+                if public_count != len(docs_with_scores):
+                    logging.error(f"[Filter] CRITICAL: Found {len(docs_with_scores) - public_count} invalid docs!")
+
+            response = {
+                "answer": answer,
+                "confidence_score": confidence,
+                "source_type": source_type,
+                "requires_human_support": requires_human,
+                "query_id": str(uuid.uuid4()) if requires_human else None,
+                "sources": sources,
+                "normalized_docs": normalized_docs,
+                "rewritten_query": rewritten_query,
+                "retrieval_method": "similarity_search"
+            }
+
+            # === PERF: KB Total Timing ===
+            kb_timings['total_kb_query'] = time.perf_counter() - t_kb_start
+            logging.info(f"[PERF_KB] KB_TIMING: {kb_timings}")
+
+            return response
+
+        except Exception as e:
+            logging.error(f"Error querying knowledge base: {str(e)}")
+            # Return a proper error response instead of None
+            try:
+                await self.config_service._load_config()
+                rag_settings = await self.config_service.get_rag_settings()
+                error_message = rag_settings.human_referral_message
+            except:
+                error_message = "متأسفانه، خطایی در سیستم رخ داده است. لطفاً دوباره تلاش کنید."
+
+            return {
+                "answer": error_message,
+                "confidence_score": 0.0,
+                "source_type": "system",
+                "requires_human_support": True,
+                "query_id": str(uuid.uuid4()),
+                "sources": [],
+                "retrieval_method": "similarity_search"
+            }
+
+    async def remove_knowledge_contribution(self, hash_id: str) -> Dict[str, Any]:
+        """Removes a knowledge entry from both the vector store and relational database.
+
+        Args:
+            hash_id: The unique hash_id of the entry to remove.
+
+        Returns:
+            A dictionary with the removal status and details.
+        """
+        try:
+            removed_count = 0
+            vector_removal_success = False
+            db_removal_success = False
+
+            # Get vector store
+            vector_store = self.document_processor.get_vector_store()
+
+            if vector_store is None:
+                logging.warning("Vector store is not available. Cannot remove documents from vector database.")
+            else:
+                # ChromaDB delete by metadata using where clause <mcreference link="https://github.com/langchain-ai/langchain/discussions/1690" index="5">5</mcreference>
+                try:
+                    # Access the underlying ChromaDB collection to delete by metadata
+                    collection = vector_store._collection
+
+                    # Get documents with the specified hash_id to count them before deletion
+                    existing_docs = collection.get(where={"hash_id": hash_id})
+
+                    # Safely get the count of documents
+                    if isinstance(existing_docs, dict) and 'ids' in existing_docs:
+                        removed_count = len(existing_docs['ids']) if existing_docs['ids'] else 0
+                    else:
+                        # Fallback: if the structure is unexpected, assume no documents found
+                        removed_count = 0
+                        logging.warning(f"Unexpected structure from collection.get(): {type(existing_docs)}")
+
+                    if removed_count > 0:
+                        # Delete documents by metadata <mcreference link="https://github.com/langchain-ai/langchain/discussions/1690" index="5">5</mcreference>
+                        collection.delete(where={"hash_id": hash_id})
+
+                        # # Persist changes to vector store
+                        # vector_store.persist()
+
+                        # Reset QA chain to reflect changes
+                        self._qa_chain = None
+
+                        vector_removal_success = True
+                        logging.info(f"Successfully removed {removed_count} documents from vector store with hash_id: {hash_id}")
+                    else:
+                        logging.info(f"No documents found in vector store with hash_id: {hash_id}")
+                        vector_removal_success = True  # Consider it successful if nothing to remove
+
+                except Exception as e:
+                    logging.error(f"Error removing documents from vector store: {str(e)}")
+                    # Try alternative method using LangChain's delete method if available <mcreference link="https://python.langchain.com/api_reference/chroma/vectorstores/langchain_chroma.vectorstores.Chroma.html" index="3">3</mcreference>
+                    try:
+                        # Get all documents and find IDs with matching hash_id
+                        all_docs = collection.get(include=['metadatas'])
+                        ids_to_delete = []
+
+                        # Safely handle the response structure
+                        if isinstance(all_docs, dict) and 'metadatas' in all_docs and 'ids' in all_docs:
+                            if all_docs['metadatas']:
+                                for i, metadata in enumerate(all_docs['metadatas']):
+                                    if metadata and metadata.get('hash_id') == hash_id:
+                                        ids_to_delete.append(all_docs['ids'][i])
+                        else:
+                            logging.warning(f"Unexpected structure from collection.get(include=['metadatas']): {type(all_docs)}")
+
+                        if ids_to_delete:
+                            # Use LangChain's delete method <mcreference link="https://github.com/langchain-ai/langchain/discussions/17797" index="1">1</mcreference>
+                            vector_store.delete(ids=ids_to_delete)
+                            removed_count = len(ids_to_delete)
+                            vector_removal_success = True
+
+                            # # Persist changes and reset QA chain
+                            # vector_store.persist()
+                            self._qa_chain = None
+
+                            logging.info(f"Successfully removed {removed_count} documents using alternative method with hash_id: {hash_id}")
+                        else:
+                            logging.info(f"No documents found with hash_id: {hash_id}")
+                            vector_removal_success = True
+
+                    except Exception as e2:
+                        logging.error(f"Alternative removal method also failed: {str(e2)}")
+                        vector_removal_success = False
+
+            # Update database document (mark as unsynced instead of deleting)
+            try:
+                from app.services.database import get_database_service
+                db_service = await get_database_service()
+
+                # If vector removal was successful, mark the document as unsynced
+                if vector_removal_success and removed_count > 0:
+                    try:
+                        db_update_success = await db_service.update_knowledge_document_sync_status(hash_id, synced=False)
+                        if db_update_success:
+                            db_removal_success = True
+                            logging.info(f"Successfully marked document as unsynced with hash_id: {hash_id}")
+                        else:
+                            db_removal_success = False
+                            logging.warning(f"No document found in database with hash_id: {hash_id}")
+                    except Exception as sync_error:
+                        logging.error(f"Failed to update sync status for hash_id {hash_id}: {str(sync_error)}")
+                        db_removal_success = False
+                else:
+                    # Even if vector removal failed, try to mark as unsynced
+                    try:
+                        db_update_success = await db_service.update_knowledge_document_sync_status(hash_id, synced=False)
+                        if db_update_success:
+                            db_removal_success = True
+                            logging.info(f"Marked document as unsynced (vector removal failed) with hash_id: {hash_id}")
+                        else:
+                            db_removal_success = False
+                            logging.warning(f"No document found in database with hash_id: {hash_id}")
+                    except Exception as sync_error:
+                        logging.error(f"Failed to update sync status for hash_id {hash_id}: {str(sync_error)}")
+                        db_removal_success = False
+
+            except Exception as e:
+                logging.error(f"Error updating document in database: {str(e)}")
+                db_removal_success = False
+
+            # Prepare response
+            overall_success = vector_removal_success and db_removal_success
+
+            response = {
+                "success": overall_success,
+                "hash_id": hash_id,
+                "removed_from_vector_store": vector_removal_success,
+                "removed_from_database": db_removal_success,
+                "documents_removed_count": removed_count,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            if overall_success:
+                logging.info(f"Successfully removed knowledge contribution with hash_id: {hash_id}")
+            else:
+                logging.warning(f"Partial or failed removal of knowledge contribution with hash_id: {hash_id}")
+
+            return response
+
+        except Exception as e:
+            logging.error(f"Error removing knowledge contribution: {str(e)}")
+            return {
+                "success": False,
+                "hash_id": hash_id,
+                "error": str(e),
+                "removed_from_vector_store": False,
+                "removed_from_database": False,
+                "documents_removed_count": 0,
+                "timestamp": datetime.now().isoformat()
+            }
+
+
+# Singleton instance
+_knowledge_base_service = None
+
+
+def get_knowledge_base_service() -> KnowledgeBaseService:
+    """Get the knowledge base service instance.
+
+    Returns:
+        A singleton instance of the KnowledgeBaseService
+    """
+    global _knowledge_base_service
+    if _knowledge_base_service is None:
+        _knowledge_base_service = KnowledgeBaseService()
+    return _knowledge_base_service

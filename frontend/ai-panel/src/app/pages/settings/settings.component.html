@@ -1,0 +1,232 @@
+<div class="settings-container">
+  <!-- Header Section -->
+  <mat-card class="header-card">
+    <mat-card-header>
+      <div mat-card-avatar class="header-icon">
+        <mat-icon>settings</mat-icon>
+      </div>
+      <mat-card-title>تنظیمات سیستم</mat-card-title>
+      <mat-card-subtitle>پیکربندی و مدیریت دستیار هوش مصنوعی پرشین‌وی</mat-card-subtitle>
+    </mat-card-header>
+  </mat-card>
+
+  <div class="content-grid">
+    <!-- App Configuration Settings -->
+    <mat-card class="app-config-card">
+      <mat-card-header>
+        <div mat-card-avatar class="config-icon">
+          <mat-icon>tune</mat-icon>
+        </div>
+        <mat-card-title>پیکربندی برنامه</mat-card-title>
+        <mat-card-subtitle>تنظیمات اصلی و پیکربندی سیستم</mat-card-subtitle>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <div class="app-config-form">
+          <!-- Project Name -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>نام پروژه</mat-label>
+            <input matInput [(ngModel)]="appSettings.project_name" placeholder="نام پروژه را وارد کنید">
+          </mat-form-field>
+
+          <!-- Project Description -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>توضیحات پروژه</mat-label>
+            <textarea matInput [(ngModel)]="appSettings.project_description" 
+                      placeholder="توضیحات پروژه را وارد کنید" rows="3"></textarea>
+          </mat-form-field>
+
+          <!-- Version -->
+          <mat-form-field appearance="outline" class="half-width">
+            <mat-label>نسخه</mat-label>
+            <input matInput [(ngModel)]="appSettings.version" placeholder="1.0.0">
+          </mat-form-field>
+
+          <!-- API Prefix -->
+          <mat-form-field appearance="outline" class="half-width">
+            <mat-label>پیشوند API</mat-label>
+            <input matInput [(ngModel)]="appSettings.api_prefix" placeholder="/api/v1">
+          </mat-form-field>
+
+          <!-- Host -->
+          <mat-form-field appearance="outline" class="half-width">
+            <mat-label>هاست</mat-label>
+            <input matInput [(ngModel)]="appSettings.host" placeholder="localhost">
+          </mat-form-field>
+
+          <!-- Port -->
+          <mat-form-field appearance="outline" class="half-width">
+            <mat-label>پورت</mat-label>
+            <input matInput type="number" [(ngModel)]="appSettings.port" 
+                   min="1" max="65535" placeholder="8000">
+          </mat-form-field>
+
+          <!-- Allowed Hosts -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>هاست‌های مجاز</mat-label>
+            <input matInput [(ngModel)]="allowedHostsString" 
+                   placeholder="localhost, 127.0.0.1, example.com">
+            <mat-hint>هاست‌ها را با کاما جدا کنید</mat-hint>
+          </mat-form-field>
+
+          <!-- Debug Mode -->
+          <div class="toggle-item">
+            <div class="toggle-info">
+              <h4>حالت دیباگ</h4>
+              <p>فعال‌سازی حالت توسعه و دیباگ</p>
+            </div>
+            <mat-slide-toggle [(ngModel)]="appSettings.debug"></mat-slide-toggle>
+          </div>
+
+          <mat-divider></mat-divider>
+
+          <!-- App Config Action Buttons -->
+          <div class="config-actions">
+            <button mat-raised-button color="primary" 
+                    (click)="updateAppConfig()"
+                    [disabled]="isUpdatingConfig"
+                    class="primary-action">
+              <mat-icon>{{ isUpdatingConfig ? 'sync' : 'save' }}</mat-icon>
+              {{ isUpdatingConfig ? 'در حال بروزرسانی...' : 'ذخیره تغییرات' }}
+            </button>
+            
+            <button mat-stroked-button 
+                    (click)="resetAppConfig()"
+                    class="secondary-action">
+              <mat-icon>refresh</mat-icon>
+              بازگردانی به پیش‌فرض
+            </button>
+          </div>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+   
+
+  </div>
+
+  <!-- System Information -->
+  <mat-card class="system-info-card">
+    <mat-card-header>
+      <div mat-card-avatar class="system-icon">
+        <mat-icon>dashboard</mat-icon>
+      </div>
+      <mat-card-title>داشبورد سیستم</mat-card-title>
+      <mat-card-subtitle>نمای کلی از وضعیت و عملکرد سیستم</mat-card-subtitle>
+    </mat-card-header>
+    
+    <mat-card-content>
+      <div class="system-grid">
+        <div class="info-item">
+          <mat-icon>code</mat-icon>
+          <div>
+            <h4>نسخه سیستم</h4>
+            <p>{{ systemInfo.version }}</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>update</mat-icon>
+          <div>
+            <h4>آخرین بروزرسانی</h4>
+            <p>{{ systemInfo.lastUpdate }}</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>library_books</mat-icon>
+          <div>
+            <h4>مجموع اسناد</h4>
+            <p>{{ systemInfo.totalKnowledge }} مورد</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>description</mat-icon>
+          <div>
+            <h4>نام پروژه</h4>
+            <p>{{ systemInfo.projectName || 'Persian Way AI Bot' }}</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>people</mat-icon>
+          <div>
+            <h4>کاربران فعال</h4>
+            <p>{{ systemInfo.activeUsers }} نفر</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>health_and_safety</mat-icon>
+          <div>
+            <h4>وضعیت سیستم</h4>
+            <p [class]="systemInfo.systemStatus === 'فعال' ? 'status-active' : 'status-inactive'">{{ systemInfo.systemStatus }}</p>
+          </div>
+        </div>
+        
+        <div class="info-item">
+          <mat-icon>api</mat-icon>
+          <div>
+            <h4>وضعیت API</h4>
+            <p [class]="systemInfo.apiStatus === 'متصل' ? 'status-active' : 'status-inactive'">{{ systemInfo.apiStatus || 'در حال بررسی...' }}</p>
+          </div>
+        </div>
+      </div>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Action Buttons -->
+  <mat-card class="actions-card">
+    <mat-card-header>
+      <div mat-card-avatar class="actions-icon">
+        <mat-icon>construction</mat-icon>
+      </div>
+      <mat-card-title>ابزارها و عملیات</mat-card-title>
+      <mat-card-subtitle>مدیریت تنظیمات و داده‌های سیستم</mat-card-subtitle>
+    </mat-card-header>
+    
+    <mat-card-content>
+      <div class="actions-grid">
+        <button mat-raised-button color="primary" 
+                (click)="saveSettings()"
+                [disabled]="isSaving"
+                class="action-button primary">
+          <mat-icon>{{ isSaving ? 'sync' : 'save' }}</mat-icon>
+          {{ isSaving ? 'در حال ذخیره...' : 'ذخیره تنظیمات' }}
+        </button>
+        
+        <button mat-raised-button color="warn" 
+                (click)="resetSettings()"
+                class="action-button warning">
+          <mat-icon>restore</mat-icon>
+          بازگردانی کامل
+        </button>
+        
+        <button mat-raised-button color="accent" 
+                (click)="exportSettings()"
+                class="action-button accent">
+          <mat-icon>file_download</mat-icon>
+          دانلود تنظیمات
+        </button>
+        
+        <label for="importFile" class="import-button action-button">
+          <input type="file" id="importFile" 
+                 (change)="importSettings($event)"
+                 accept=".json" style="display: none;">
+          <button mat-raised-button type="button" class="secondary">
+            <mat-icon>file_upload</mat-icon>
+            بارگذاری تنظیمات
+          </button>
+        </label>
+        
+        <button mat-stroked-button 
+                (click)="clearCache()"
+                class="action-button secondary">
+          <mat-icon>cleaning_services</mat-icon>
+          پاکسازی کش
+        </button>
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>

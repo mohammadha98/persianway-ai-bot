@@ -1,0 +1,110 @@
+.permissions-dialog-container {
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif;
+  direction: rtl;
+  padding: 0 16px;
+  max-width: 500px;
+}
+
+.dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #2c3e50;
+  font-weight: 600;
+  margin-bottom: 24px;
+  
+  mat-icon {
+    color: #667eea;
+  }
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 16px;
+  background-color: rgba(102, 126, 234, 0.05);
+  border-radius: 12px;
+  
+  .user-avatar {
+    .avatar-circle {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      font-size: 1.2rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+  }
+  
+  .user-details {
+    h3 {
+      margin: 0 0 8px 0;
+      font-size: 1.2rem;
+      color: #2c3e50;
+    }
+    
+    p {
+      margin: 0 0 4px 0;
+      color: #7f8c8d;
+      font-size: 0.9rem;
+    }
+  }
+}
+
+.permissions-section {
+  h2 {
+    font-size: 1.2rem;
+    color: #2c3e50;
+    margin-bottom: 8px;
+  }
+  
+  .description {
+    color: #7f8c8d;
+    margin-bottom: 16px;
+  }
+  
+  .permissions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+    
+    .permission-checkbox {
+      font-size: 1rem;
+    }
+  }
+}
+
+.dialog-actions {
+  margin-top: 24px;
+  padding: 16px 0;
+  
+  button {
+    min-width: 100px;
+    
+    &:first-child {
+      margin-left: 12px;
+    }
+  }
+  
+  .button-spinner {
+    margin: 0 auto;
+  }
+}
+
+// Material Checkbox Customization
+::ng-deep .mat-mdc-checkbox {
+  .mdc-checkbox__background {
+    border-color: #667eea;
+  }
+  
+  &.mat-mdc-checkbox-checked .mdc-checkbox__background {
+    background-color: #667eea;
+  }
+}

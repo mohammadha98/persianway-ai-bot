@@ -1,0 +1,80 @@
+:host {
+  display: block;
+  direction: rtl;
+  font-family: 'Vazirmatn', 'Shabnam', 'Noto Sans Arabic', sans-serif;
+}
+
+.user-dialog-container {
+  .dialog-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #2c3e50;
+    padding: 24px 24px 16px;
+    border-bottom: 1px solid #e0e0e0;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+
+    mat-icon {
+      color: #667eea;
+    }
+  }
+
+  mat-dialog-content {
+    padding: 24px;
+
+    .dialog-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+
+      .form-row {
+        display: flex;
+        gap: 20px;
+
+        &.single-row {
+          justify-content: flex-start;
+        }
+
+        .form-field {
+          flex: 1;
+        }
+      }
+
+      mat-slide-toggle {
+        margin-top: 8px;
+        font-weight: 500;
+      }
+    }
+  }
+
+  .dialog-actions {
+    padding: 16px 24px;
+    border-top: 1px solid #e0e0e0;
+    background-color: #f8f9fa;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+
+    button {
+      min-width: 100px;
+      border-radius: 20px;
+      font-weight: 600;
+
+      mat-icon {
+        margin-left: 6px;
+      }
+    }
+  }
+}
+
+// Responsive adjustments
+@media (max-width: 600px) {
+  .dialog-form {
+    .form-row {
+      flex-direction: column;
+      gap: 0;
+    }
+  }
+}

@@ -1,0 +1,76 @@
+<h2 mat-dialog-title class="feedback-title">
+  <mat-icon class="warning-icon" *ngIf="isReportMode">report_problem</mat-icon>
+  <mat-icon class="edit-icon" *ngIf="isEditMode">edit</mat-icon>
+  <span *ngIf="isReportMode">گزارش مشکل در پاسخ</span>
+  <span *ngIf="isEditMode">ویرایش پاسخ</span>
+</h2>
+
+<mat-dialog-content class="feedback-content">
+  <!-- Show the AI response that user is reporting/editing -->
+  <div class="message-preview">
+    <div class="preview-label">سوال شما:</div>
+    <div class="preview-content user-preview">{{ data.question }}</div>
+    
+    <div class="preview-label">
+      <span *ngIf="isReportMode">پاسخ هوش مصنوعی:</span>
+      <span *ngIf="isEditMode">پاسخ فعلی (قابل ویرایش):</span>
+    </div>
+    
+    <!-- Report mode: read-only display -->
+    <div *ngIf="isReportMode" class="preview-content ai-preview">{{ data.messageContent }}</div>
+    
+    <!-- Edit mode: editable textarea -->
+    <mat-form-field *ngIf="isEditMode" appearance="outline" class="edit-field">
+      <textarea 
+        matInput 
+        [(ngModel)]="editedAnswer"
+        rows="6"
+        placeholder="پاسخ اصلاح شده را اینجا بنویسید...">
+      </textarea>
+    </mat-form-field>
+  </div>
+
+  <!-- Report Mode: Category selection -->
+  <div *ngIf="isReportMode" class="form-section">
+    <label class="section-label">دسته‌بندی مشکل:</label>
+    <div class="category-buttons">
+      <button 
+        *ngFor="let cat of categories"
+        type="button"
+        class="category-btn"
+        [class.active]="selectedCategory === cat.value"
+        (click)="selectedCategory = cat.value">
+        {{ cat.label }}
+      </button>
+    </div>
+  </div>
+
+  <!-- Comment (Required for both modes) -->
+  <div class="form-section">
+    <mat-form-field appearance="outline" class="comment-field">
+      <mat-label>توضیحات تکمیلی (الزامی)</mat-label>
+      <textarea 
+        matInput 
+        [(ngModel)]="comment"
+        rows="3"
+        [placeholder]="isEditMode ? 'چه تغییراتی اعمال کردید و چرا؟' : 'لطفاً توضیح دهید که چه مشکلی در این پاسخ وجود دارد...'"
+        maxlength="1000">
+      </textarea>
+      <mat-hint align="end">{{ comment.length }}/1000</mat-hint>
+    </mat-form-field>
+  </div>
+</mat-dialog-content>
+
+<mat-dialog-actions class="feedback-actions" align="end">
+  <button mat-button (click)="onCancel()">انصراف</button>
+  <button 
+    mat-raised-button 
+    [color]="isReportMode ? 'warn' : 'primary'" 
+    [disabled]="!comment.trim() || (isEditMode && !editedAnswer.trim())"
+    (click)="onSubmit()">
+    <mat-icon *ngIf="isReportMode">send</mat-icon>
+    <mat-icon *ngIf="isEditMode">save</mat-icon>
+    <span *ngIf="isReportMode">ارسال گزارش</span>
+    <span *ngIf="isEditMode">ذخیره ویرایش</span>
+  </button>
+</mat-dialog-actions>

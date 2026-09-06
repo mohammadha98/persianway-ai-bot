@@ -1,0 +1,212 @@
+<div class="rag-settings-container">
+  <!-- Header Section -->
+  <mat-card class="header-card">
+    <mat-card-header>
+      <div mat-card-avatar class="header-icon">
+        <mat-icon>auto_awesome</mat-icon>
+      </div>
+      <mat-card-title>تنظیمات RAG</mat-card-title>
+      <mat-card-subtitle>تنظیمات سیستم بازیابی و تولید پاسخ</mat-card-subtitle>
+    </mat-card-header>
+  </mat-card>
+
+  <div class="content-grid" *ngIf="!isLoading">
+    <!-- Confidence Settings -->
+    <mat-card class="settings-card">
+      <mat-card-header>
+        <div mat-card-avatar class="settings-icon">
+          <mat-icon>trending_up</mat-icon>
+        </div>
+        <mat-card-title>تنظیمات اعتماد</mat-card-title>
+        <mat-card-subtitle>آستانه‌های اطمینان برای پاسخ‌دهی</mat-card-subtitle>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <div class="settings-form">
+          <!-- Knowledge Base Confidence Threshold -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>آستانه اطمینان پایگاه دانش</mat-label>
+            <input matInput type="number" 
+                   [(ngModel)]="ragSettings.knowledge_base_confidence_threshold" 
+                   min="0" max="1" step="0.1">
+            <mat-hint>حداقل میزان اطمینان برای استفاده از پایگاه دانش (0-1)</mat-hint>
+          </mat-form-field>
+
+          <!-- QA Match Threshold -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>آستانه تطبیق سوال و جواب</mat-label>
+            <input matInput type="number" 
+                   [(ngModel)]="ragSettings.qa_match_threshold" 
+                   min="0" max="1" step="0.1">
+            <mat-hint>حداقل میزان تطبیق برای سوالات و جوابات (0-1)</mat-hint>
+          </mat-form-field>
+
+          <!-- QA Priority Factor -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>ضریب اولویت سوال و جواب</mat-label>
+            <input matInput type="number" 
+                   [(ngModel)]="ragSettings.qa_priority_factor" 
+                   min="1" max="5" step="0.1">
+            <mat-hint>ضریب اولویت‌بندی برای سوالات و جوابات</mat-hint>
+          </mat-form-field>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+    <!-- Search Settings -->
+    <mat-card class="advanced-card">
+      <mat-card-header>
+        <div mat-card-avatar class="advanced-icon">
+          <mat-icon>search</mat-icon>
+        </div>
+        <mat-card-title>تنظیمات جستجو</mat-card-title>
+        <mat-card-subtitle>پیکربندی الگوریتم جستجو</mat-card-subtitle>
+      </mat-card-header>
+      
+      <mat-card-content>
+        <div class="advanced-form">
+          <!-- Search Type -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>نوع جستجو</mat-label>
+            <mat-select [(ngModel)]="ragSettings.search_type">
+              <mat-option *ngFor="let type of searchTypes" [value]="type.value">
+                {{ type.label }}
+              </mat-option>
+            </mat-select>
+            <mat-hint>الگوریتم جستجو در پایگاه دانش</mat-hint>
+          </mat-form-field>
+
+          <!-- Top K Results -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>تعداد نتایج برتر</mat-label>
+            <input matInput type="number" 
+                   [(ngModel)]="ragSettings.top_k_results" 
+                   min="1" max="20">
+            <mat-hint>تعداد نتایج برتر برای در نظر گیری</mat-hint>
+          </mat-form-field>
+
+          <!-- Temperature -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>دما (Temperature)</mat-label>
+            <input matInput type="number" 
+                   [(ngModel)]="ragSettings.temperature" 
+                   min="0" max="2" step="0.1">
+            <mat-hint>میزان خلاقیت در تولید پاسخ (0-2)</mat-hint>
+          </mat-form-field>
+
+          <!-- Excel QA Path -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>مسیر فایل‌های Excel</mat-label>
+            <input matInput [(ngModel)]="ragSettings.excel_qa_path">
+            <mat-hint>مسیر پوشه حاوی فایل‌های Excel</mat-hint>
+          </mat-form-field>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </div>
+
+  <!-- Message Settings -->
+  <mat-card class="message-card" *ngIf="!isLoading">
+    <mat-card-header>
+      <div mat-card-avatar class="message-icon">
+        <mat-icon>message</mat-icon>
+      </div>
+      <mat-card-title>تنظیمات پیام‌ها</mat-card-title>
+      <mat-card-subtitle>پیام‌های سیستم و قالب‌ها</mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      <mat-accordion class="prompts-accordion" multi>
+        <!-- Human Referral Message -->
+        <mat-expansion-panel expanded>
+          <mat-expansion-panel-header>
+            <mat-panel-title>
+              <mat-icon>support_agent</mat-icon>
+              پیام ارجاع به کارشناس
+            </mat-panel-title>
+            <mat-panel-description>
+              پیام نمایش داده شده هنگام نیاز به ارجاع
+            </mat-panel-description>
+          </mat-expansion-panel-header>
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>متن پیام</mat-label>
+            <textarea matInput [(ngModel)]="ragSettings.human_referral_message" rows="4"
+              placeholder="متأسفانه، اطلاعات کافی برای پاسخ به این سؤال وجود ندارد..."></textarea>
+          </mat-form-field>
+        </mat-expansion-panel>
+
+        <!-- Prompt Template -->
+        <mat-expansion-panel>
+          <mat-expansion-panel-header>
+            <mat-panel-title>
+              <mat-icon>code</mat-icon>
+              قالب پرامپت
+            </mat-panel-title>
+            <mat-panel-description>
+              قالب مورد استفاده برای تولید پاسخ‌ها
+            </mat-panel-description>
+          </mat-expansion-panel-header>
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>قالب</mat-label>
+            <textarea matInput [(ngModel)]="ragSettings.prompt_template" rows="6"
+              placeholder="با استفاده از اطلاعات زیر به سوال پاسخ دهید..."></textarea>
+          </mat-form-field>
+        </mat-expansion-panel>
+
+        <!-- System Prompt -->
+        <mat-expansion-panel>
+          <mat-expansion-panel-header>
+            <mat-panel-title>
+              <mat-icon>tune</mat-icon>
+              پرامپت سیستم
+            </mat-panel-title>
+            <mat-panel-description>
+              دستورالعمل‌های کلی و رفتار سیستم
+            </mat-panel-description>
+          </mat-expansion-panel-header>
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>دستورالعمل</mat-label>
+            <textarea matInput [(ngModel)]="ragSettings.system_prompt" rows="10"
+              placeholder="شما یک دستیار هوشمند هستید..."></textarea>
+          </mat-form-field>
+        </mat-expansion-panel>
+      </mat-accordion>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Loading State -->
+  <mat-card class="loading-card" *ngIf="isLoading">
+    <mat-card-content>
+      <div class="loading-content">
+        <mat-icon class="loading-icon">hourglass_empty</mat-icon>
+        <p>در حال بارگذاری تنظیمات...</p>
+      </div>
+    </mat-card-content>
+  </mat-card>
+
+  <!-- Action Buttons -->
+  <mat-card class="actions-card" *ngIf="!isLoading">
+    <mat-card-header>
+      <div mat-card-avatar class="actions-icon">
+        <mat-icon>build</mat-icon>
+      </div>
+      <mat-card-title>عملیات</mat-card-title>
+    </mat-card-header>
+    
+    <mat-card-content>
+      <div class="actions-grid">
+        <button mat-raised-button color="primary" 
+                (click)="saveSettings()"
+                [disabled]="isSaving">
+          <mat-icon>save</mat-icon>
+          {{ isSaving ? 'در حال ذخیره...' : 'ذخیره تنظیمات' }}
+        </button>
+        
+        <button mat-raised-button color="warn" 
+                (click)="resetSettings()">
+          <mat-icon>restore</mat-icon>
+          بازگردانی به پیش‌فرض
+        </button>
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>
