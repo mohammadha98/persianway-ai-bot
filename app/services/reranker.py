@@ -26,6 +26,11 @@ except Exception:
     _HAS_SKLEARN = False
 
 
+# Worst possible pseudo-distance (smaller = better). Shared with
+# `app.services.hybrid_retrieval` so the score contract stays in one place.
+DEFAULT_PSEUDO_DISTANCE = 1.0
+
+
 class _BoundedCache:
     """Thread-safe LRU cache with a hard size cap (prevents unbounded growth)."""
 
@@ -77,7 +82,7 @@ class EmbeddingReranker:
         """
         scores = list(scores or [])
         if len(scores) < n:
-            scores = scores + [1.0] * (n - len(scores))
+            scores = scores + [DEFAULT_PSEUDO_DISTANCE] * (n - len(scores))
         elif len(scores) > n:
             scores = scores[:n]
         return scores
@@ -149,7 +154,9 @@ class EmbeddingReranker:
         out: List[Tuple[Any, float, Dict[str, Any]]] = []
         for i, doc in enumerate(documents):
             dist = float(scores[i])
-            sim = 1.0 - max(0.0, min(1.0, dist))  # pseudo-distance -> similarity
+            # pseudo-distance -> similarity. Clamped so an out-of-contract input
+            # (distance > 1.0) can never yield a negative, contract-breaking score.
+            sim = DEFAULT_PSEUDO_DISTANCE - max(0.0, min(1.0, dist))
             out.append(
                 (
                     doc,

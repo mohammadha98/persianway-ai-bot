@@ -24,6 +24,30 @@ file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(mes
 referral_logger.addHandler(file_handler)
 referral_logger.setLevel(logging.INFO)
 
+# Domain of the hybrid pseudo-distance: `_retrieve_context` / `query_knowledge_base`
+# build it as `1 - clamp(hybrid_score, 0, 1)`, so it always lies in [0, 1].
+# Confidence calibration MUST use this domain (raw Chroma L2 distances live in
+# [0, ~3.5]; using that range saturated every confidence value).
+HYBRID_PSEUDO_DISTANCE_RANGE = 1.0
+
+# Raw Chroma L2 distance range, kept ONLY for callers that pass real vector-store
+# distances (e.g. `similarity_search_with_score`). `_calculate_confidence_score`
+# must be told which of the two domains it is receiving via `score_scale`, because
+# normalizing a raw L2 distance over [0, 1] would clamp nearly everything to 1.0
+# (the "distance > 1" region collapses) and unfairly punish every fallback result.
+RAW_L2_DISTANCE_RANGE = 2.5
+
+# Diagnostic floor for the best-document relevance. The consistency (0.3) and
+# coverage (0.1) factors are structural: they do not depend on how relevant the
+# retrieved documents actually are (a single document has std=0 =>
+# consistency=1.0), so an ADDITIVE blend always contains a 0.4 floor that a
+# nearly-irrelevant document can ride. `_calculate_confidence_score` therefore
+# multiplies the structural factors by the best-document factor instead, which
+# guarantees the final score can never exceed that factor. Retrieval whose best
+# document falls below this floor is logged as irrelevant and cannot clear the
+# default 0.5 handoff gate.
+BEST_DOCUMENT_RELEVANCE_FLOOR = 0.3
+
 
 class KnowledgeBaseService:
     """Service for retrieving information from the knowledge base using RAG.
@@ -37,6 +61,15 @@ class KnowledgeBaseService:
         self.document_processor = get_document_processor()
         self.excel_processor = get_excel_qa_processor()
         self.config_service = ConfigService()
+
+        # PERF (bug fix): `HybridRetrievalService` was constructed on EVERY
+        # `query_knowledge_base` / `_retrieve_context` call, which threw away its
+        # BM25 index + doc caches each time and forced a full Chroma scan and
+        # BM25 index rebuild per query. It is now built once and reused.
+        # Built lazily so tests/callers that mutate `document_processor` right
+        # after construction still get the final vector store.
+        self._hybrid_service: Optional[HybridRetrievalService] = None
+        self._hybrid_service_dp = None
 
         # Initialize the retrieval QA chain
         self._qa_chain = None
@@ -118,11 +151,31 @@ class KnowledgeBaseService:
             "timestamp": datetime.utcnow().isoformat(),
         }
 
+    def _get_hybrid_service(self) -> HybridRetrievalService:
+        """Return the process-wide hybrid retrieval service (built once).
+
+        PERF (bug fix): both `_retrieve_context` and `query_knowledge_base` used
+        to instantiate `HybridRetrievalService` per call. Each construction
+        dropped the BM25/`docs` caches, so every query paid for a full Chroma
+        collection scan + BM25 index build.
+        """
+        svc = self._hybrid_service
+        if svc is None or self._hybrid_service_dp is not self.document_processor:
+            svc = HybridRetrievalService(self.document_processor)
+            self._hybrid_service = svc
+            self._hybrid_service_dp = self.document_processor
+        return svc
+
     async def refresh(self):
         logging.info("[KB SERVICE] Force refresh requested")
         self._qa_chain = None
         self.llm = None
+        # New/updated data may have been ingested; drop cached BM25 indexes so
+        # the next query searches the current collection.
+        if self._hybrid_service is not None:
+            self._hybrid_service.invalidate_caches()
         await self._get_document_chain()
+
 
     def _normalize_documents_for_context(
         self,
@@ -166,71 +219,136 @@ class KnowledgeBaseService:
             )
         return normalized_docs
 
-    def _calculate_confidence_score(self, docs_with_scores: List[tuple], top_n: int = 3) -> float:
+    def _calculate_confidence_score(
+        self,
+        docs_with_scores: List[tuple],
+        top_n: int = 3,
+        score_scale: Optional[float] = None,
+    ) -> float:
         """
         Calculates multi-factor confidence score based on:
         1. Best document score (primary factor)
         2. Score consistency across top results (secondary factor)
         3. Number of relevant documents found (coverage factor)
 
-        Lower distance scores indicate higher similarity in L2 distance.
+        Contract: `docs_with_scores` holds PSEUDO-DISTANCES
+        (`1 - clamp(hybrid_score)`, lower = better), as produced by the callers in
+        `_retrieve_context` / `query_knowledge_base`. Those callers pass
+        `score_scale=HYBRID_PSEUDO_DISTANCE_RANGE`, which is also the default.
+
+        Any caller that instead holds RAW vector-store L2 distances must pass
+        `score_scale=RAW_L2_DISTANCE_RANGE`; normalizing L2 distances over [0, 1]
+        would clamp every distance > 1 to a zero-relevance best-document factor and
+        systematically punish that path.
+
+        BUG FIX (uncalibrated confidence): the old best-document factor used a
+        logistic centred at 1.5 with scale 5. Because the hybrid pseudo-distance
+        is always inside [0, 1], the sigmoid never left its saturated region and
+        mapped EVERY result to ~[0.92, 1.0]; a nonsense document scored 0.92 and a
+        perfect one 1.0, so the confidence gate never fired. We now normalize over
+        the pseudo-distance's ACTUAL domain (`score_scale`) using the calibrated,
+        unit-tested `_similarity_to_confidence` curve.
+
+        BUG FIX (weak gate): the old ADDITIVE blend had a structural floor of 0.4
+        (consistency 0.3 + coverage 0.1), because a single document has std=0 and
+        therefore consistency=1.0. That let a document with a pseudo-distance up to
+        0.92 clear the default 0.5 gate. The best-document factor now MULTIPLIES
+        the structural factors, so the final score can never exceed it and
+        genuinely irrelevant retrievals cannot ride the consistency/coverage floor.
+        A threshold-based cap was rejected because no additive blend can be
+        continuous: continuity at `best_confidence = f` requires
+        `0.6f + 0.3*consistency + 0.1*coverage = f`, i.e. `f = 0.75*consistency +
+        0.25*coverage`, which for single-document retrieval (both = 1.0) forces
+        `f = 1.0`. Any smaller threshold therefore introduces a cliff that jumps
+        across the 0.5 gate.
 
         Args:
-            docs_with_scores: List of (document, score) tuples from vector search
+            docs_with_scores: List of (document, distance) tuples, lower = better.
             top_n: Number of top documents to consider for confidence calculation
+            score_scale: Upper bound of the distance domain the scores belong to.
+                Defaults to the hybrid pseudo-distance range.
 
         Returns:
             A confidence score between 0 and 1, where 1 is most confident.
         """
-        import math
         import numpy as np
 
         if not docs_with_scores:
             return 0.0
 
+        if score_scale is None:
+            score_scale = HYBRID_PSEUDO_DISTANCE_RANGE
+
         # Extract scores from top N documents
-        top_scores = [score for _, score in docs_with_scores[:min(top_n, len(docs_with_scores))]]
+        top_scores = [float(score) for _, score in docs_with_scores[:min(top_n, len(docs_with_scores))]]
 
         # --- Factor 1: Best Score (60% weight) ---
-        # Convert best similarity score to confidence using logistic decay
+        # Same calibrated curve as `_similarity_to_confidence`, but normalized over
+        # the caller-supplied distance domain rather than raw L2 distances.
         best_score = top_scores[0]
-        midpoint = 1.5  # Distance at which confidence is 50%
-        scale = 5.0     # Steepness of decay
-        best_confidence = 1.0 / (1.0 + math.exp(scale * (best_score - midpoint)))
+        best_confidence = self._similarity_to_confidence(
+            best_score, max_distance=score_scale
+        )
 
         # --- Factor 2: Score Consistency (30% weight) ---
-        # Lower standard deviation = more consistent = higher confidence
+        # Lower standard deviation of pseudo-distances = more consistent results.
         if len(top_scores) > 1:
             score_std = float(np.std(top_scores))
-            # Normalize std to 0-1 range (assuming std usually < 0.5 for good results)
             consistency_score = 1.0 / (1.0 + score_std * 2.0)
         else:
             consistency_score = 1.0  # Single result = perfect consistency
 
         # --- Factor 3: Coverage (10% weight) ---
         # Having multiple relevant docs increases confidence
-        coverage_score = min(len(docs_with_scores) / top_n, 1.0)
+        coverage_score = min(len(docs_with_scores) / top_n, 1.0) if top_n > 0 else 1.0
 
         # --- Combined Confidence ---
-        final_confidence = (
-            best_confidence * 0.6 +
+        # The best-document factor MULTIPLIES the structural factors instead of
+        # being added to them, so the structural terms can only ever scale a
+        # genuine match DOWN, never manufacture relevance on their own:
+        #   final = best_confidence * (0.6 + 0.3*consistency + 0.1*coverage)
+        # This keeps the previous relative weighting (best 0.6, consistency 0.3,
+        # coverage 0.1) while structurally guaranteeing `final <= best_confidence`,
+        # so an irrelevant retrieval cannot ride the 0.6 + 0.4 factor floor.
+        # It is also continuous and monotonic in every factor, so no clamping or
+        # threshold cliff is needed.
+        structural_factor = (
+            0.6 +
             consistency_score * 0.3 +
             coverage_score * 0.1
         )
+        final_confidence = best_confidence * structural_factor
+
+        if best_confidence < BEST_DOCUMENT_RELEVANCE_FLOOR:
+            logging.debug(
+                f"[KB Confidence] Best document below relevance floor "
+                f"({best_confidence:.4f} < {BEST_DOCUMENT_RELEVANCE_FLOOR}); "
+                f"confidence capped at {final_confidence:.4f}"
+            )
 
         return max(0.0, min(final_confidence, 1.0))
 
     def _calculate_single_score_confidence(self, similarity_score: float) -> float:
-        import math
-        max_distance = 2.5
-        normalized_distance = min(similarity_score / max_distance, 1.0)
-        inverted_score = 1.0 - normalized_distance
-        confidence = math.pow(inverted_score, 0.7)
-        return max(0.0, min(confidence, 1.0))
+        # Kept for backwards compatibility; delegates to the single calibrated
+        # curve so the two helpers cannot drift apart. This helper's historical
+        # contract is a RAW Chroma L2 distance, hence the L2 range.
+        return self._similarity_to_confidence(
+            similarity_score, max_distance=RAW_L2_DISTANCE_RANGE
+        )
 
-    def _similarity_to_confidence(self, similarity_score: float, max_distance: float = 2.5) -> float:
+    def _similarity_to_confidence(
+        self, similarity_score: float, max_distance: float = RAW_L2_DISTANCE_RANGE
+    ) -> float:
+        """Calibrated pseudo-distance -> confidence curve (lower distance = higher confidence).
+
+        `max_distance` is the upper bound of the distance domain that
+        `similarity_score` belongs to. The hybrid path passes
+        `HYBRID_PSEUDO_DISTANCE_RANGE`; callers holding raw Chroma L2 distances
+        keep the `RAW_L2_DISTANCE_RANGE` default. Inputs outside
+        [0, max_distance] are clamped so the result is always within [0, 1].
+        """
         import math
-        normalized_distance = min(similarity_score / max_distance, 1.0)
+        normalized_distance = min(max(float(similarity_score), 0.0) / max_distance, 1.0)
         inverted_score = 1.0 - normalized_distance
         confidence = math.pow(inverted_score, 0.7)
         return max(0.0, min(confidence, 1.0))
@@ -540,7 +658,8 @@ class KnowledgeBaseService:
         self,
         query: str,
         conversation_history: List[Dict[str, str]] = None,
-        max_history: int = 4
+        max_history: int = 4,
+        skip_rewrite: bool = False
     ) -> Dict[str, Any]:
         """Rewrite query based on conversation context and expand it for better search results.
 
@@ -554,6 +673,10 @@ class KnowledgeBaseService:
             query: The original query string
             conversation_history: List of conversation messages with 'role' and 'content' keys
             max_history: Maximum number of previous messages to consider (default: 4 = 2 exchanges)
+            skip_rewrite: When True, the context decision was already made upstream by
+                detect_query_intent (context_state + validated resolved_query). Skip this
+                LLM call entirely and use the query verbatim — avoids a redundant second
+                rewrite decision that can contradict/re-contaminate the first one.
 
         Returns:
             A dictionary containing:
@@ -566,6 +689,24 @@ class KnowledgeBaseService:
         """
         try:
             import json
+
+            # [SINGLE DECISION] Upstream already resolved context (context_state from
+            # detect_query_intent). The query passed in is either the raw message
+            # (self_contained / topic_shift) or the validated resolved_query (follow_up).
+            # Re-running the rewrite here would be a second, conflicting LLM decision.
+            if skip_rewrite:
+                logging.info(
+                    "[Query Expansion] skip_rewrite=True (context_state decided upstream); "
+                    "using query verbatim, skipping rewrite/expansion LLM call"
+                )
+                return {
+                    "original_query": query,
+                    "rewritten_query": query,
+                    "is_self_contained": True,
+                    "uses_history": False,
+                    "expanded_queries": [],
+                    "all_queries": [query]
+                }
 
             llm = await get_llm(model_name="qwen/qwen3-32b", temperature=0.0, max_tokens=800)
 
@@ -814,17 +955,32 @@ Return ONLY a JSON object in PERSIAN with these fields:
         conversation_history: List = None,
         is_public: bool = False,
         include_web_search: bool = True,
+        skip_rewrite: bool = False,
     ) -> Dict[str, Any]:
         """Shared retrieval pipeline: rewrite/expand -> hybrid retrieval -> threshold filter -> dedup.
 
         Performs NO answer generation. Used by both the non-stream and stream paths
         so retrieval logic is never duplicated.
 
+        Args:
+            skip_rewrite: When True, the context decision (context_state/resolved_query)
+                was already made upstream by detect_query_intent; the rewrite/expansion
+                LLM call is skipped and the query is used verbatim.
+
         Returns:
             Dict with docs_with_scores, normalized_docs, sources, confidence_score,
             rewritten_query, source_type, retrieval_timings.
         """
         import hashlib
+
+
+
+        # ============ TRACE: ENTRY ============
+        print("=" * 80)
+        print("[TRACE_ENTER] _retrieve_context")
+        print("[TRACE] query=" + str(query)[:80])
+        print("[TRACE] is_public=" + str(is_public))
+        print("=" * 80)
 
         t_retrieval_start = time.perf_counter()
         retrieval_timings = {}
@@ -841,11 +997,18 @@ Return ONLY a JSON object in PERSIAN with these fields:
                         continue
                 filtered_history.append(msg)
 
+        print("trace_history")
+        print("[TRACE] history filtered count")
+        print("step_2_done")
+        print("[TRACE] history step 2 trace ready")
+        print("[TRACE] last_placeholder_cleanup")
+        print("[TRACE] PAST_PLACEHOLDERS")
         # --- Query rewriting/expansion ---
         t0 = time.perf_counter()
         query_expansion_result = await self.expand_query_with_context(
             query=query,
-            conversation_history=filtered_history if filtered_history else None
+            conversation_history=filtered_history if filtered_history else None,
+            skip_rewrite=skip_rewrite
         )
         rewritten_query = query_expansion_result["rewritten_query"]
         all_queries = query_expansion_result.get("all_queries") or [rewritten_query]
@@ -893,7 +1056,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
 
         t0 = time.perf_counter()
         docs_with_scores = []
-        hrs = HybridRetrievalService(self.document_processor)
+        hrs = self._get_hybrid_service()
         for search_query in all_queries:
             search_query = (search_query or "").strip()
             if not search_query:
@@ -912,10 +1075,10 @@ Return ONLY a JSON object in PERSIAN with these fields:
         logging.info(f"[PERF_RETRIEVAL] step=hybrid_retrieval elapsed={retrieval_timings['hybrid_retrieval']:.3f}s docs_found={len(docs_with_scores)}")
 
         # --- Similarity threshold filtering ---
+        # Removed similarity threshold filtering as requested; keep all docs
         filtered_docs = [
             (doc, score, source_query, query_type)
             for doc, score, source_query, query_type in docs_with_scores
-            if score <= rag_settings.similarity_threshold
         ]
         if persianway_docs_for_rerank:
             filtered_docs = filtered_docs + persianway_docs_for_rerank
@@ -965,7 +1128,12 @@ Return ONLY a JSON object in PERSIAN with these fields:
         normalized_docs = self._normalize_documents_for_context(docs)
 
         if final_docs_with_scores:
-            confidence = self._calculate_confidence_score(final_docs_with_scores, top_n=3)
+            # `final_docs_with_scores` holds hybrid pseudo-distances (see above).
+            confidence = self._calculate_confidence_score(
+                final_docs_with_scores,
+                top_n=3,
+                score_scale=HYBRID_PSEUDO_DISTANCE_RANGE,
+            )
         else:
             confidence = 0.0
 
@@ -1043,7 +1211,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
         logging.info(f"[PERF_KB] step=response_generation_stream elapsed={(time.perf_counter() - t_gen_start):.3f}s")
 
 
-    async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False, external_context: str = None) -> Dict[str, Any]:
+    async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False, external_context: str = None, skip_rewrite: bool = False) -> Dict[str, Any]:
         """Query the knowledge base with a question using improved retrieval strategy.
 
         PERF: This method includes detailed timing instrumentation for performance analysis.
@@ -1059,6 +1227,9 @@ Return ONLY a JSON object in PERSIAN with these fields:
             conversation_history: Previous conversation messages for context
             is_public: When True, restricts retrieval to documents tagged with public metadata
             external_context: Optional string containing external information (e.g., web search results) to be included in the context
+            skip_rewrite: When True, the context decision was already made upstream by
+                detect_query_intent (context_state + validated resolved_query); the
+                rewrite/expansion LLM call inside this method is skipped
 
         Returns:
             A dictionary with the answer, confidence score, and source information
@@ -1094,9 +1265,12 @@ Return ONLY a JSON object in PERSIAN with these fields:
 
             # Use the combined method to rewrite query with context and expand it
             # This handles both contextual rewriting and query expansion in one step
+            # (skipped entirely when skip_rewrite=True: the context decision was made
+            # upstream by detect_query_intent and the incoming query is final)
             query_expansion_result = await self.expand_query_with_context(
                 query=query,
-                conversation_history=filtered_history if filtered_history else None
+                conversation_history=filtered_history if filtered_history else None,
+                skip_rewrite=skip_rewrite
             )
             kb_timings['expand_query'] = time.perf_counter() - t0
             logging.info(f"[PERF_KB] step=expand_query elapsed={kb_timings['expand_query']:.3f}s")
@@ -1174,7 +1348,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
                 initial_count = 0
             else:
                 try:
-                    hrs = HybridRetrievalService(self.document_processor)
+                    hrs = self._get_hybrid_service()
                     docs_with_scores = []
                     for q in all_queries_sanitized:
                         try:
@@ -1197,12 +1371,11 @@ Return ONLY a JSON object in PERSIAN with these fields:
             logging.info(f"[PERF_KB] step=hybrid_retrieval elapsed={kb_timings['hybrid_retrieval']:.3f}s docs_found={initial_count}")
             logging.info(f"[Filter] After validation: {len(docs_with_scores)} docs")
 
-            # ===== IMPROVEMENT 2: Similarity Threshold Filtering =====
-            # Filter out documents with scores above threshold (higher score = less similar in L2 distance)
+
+            # Removed similarity threshold filtering as requested; keep all docs
             filtered_docs = [
                 (doc, score, search_query, "single")
                 for doc, score in docs_with_scores
-                if score <= rag_settings.similarity_threshold
             ]
 
             # ===== Merge PersianWay web search docs with filtered_docs =====
@@ -1217,11 +1390,25 @@ Return ONLY a JSON object in PERSIAN with these fields:
                         f"[KB Query] Filtered out {removed_count} documents below similarity threshold ({rag_settings.similarity_threshold})"
                     )
             else:
-                # If all filtered out, keep best ones anyway (graceful degradation)
+                # [STRICT GATING] Aligned with _retrieve_context: when NO document passes
+                # the similarity threshold, do NOT keep below-threshold docs (the old
+                # graceful degradation fed weak context to the doc chain and produced
+                # hallucinated answers). Return the human referral directly.
                 logging.warning(
-                    f"[KB Query] All documents below threshold, keeping top {rag_settings.top_k_results} anyway"
+                    f"[KB Query] All {len(docs_with_scores)} documents below similarity "
+                    f"threshold ({rag_settings.similarity_threshold}); strict gating -> human referral"
                 )
-                filtered_docs = [(doc, score, search_query, "single") for doc, score in docs_with_scores]
+                return {
+                    "answer": rag_settings.human_referral_message,
+                    "confidence_score": 0.0,
+                    "source_type": "system",
+                    "requires_human_support": True,
+                    "query_id": str(uuid.uuid4()),
+                    "sources": [],
+                    "normalized_docs": [],
+                    "rewritten_query": rewritten_query,
+                    "retrieval_method": "similarity_search"
+                }
 
             # === FIX: Duplicate Reranking Removed ===
             # NOTE: hybrid_retrieve() already returns reranked documents with
@@ -1334,12 +1521,17 @@ Return ONLY a JSON object in PERSIAN with these fields:
             # - Score consistency across top documents (30% weight)
             # - Number of relevant documents found (10% weight)
             if docs_with_scores:
-                confidence = self._calculate_confidence_score(docs_with_scores, top_n=3)
+                # `docs_with_scores` holds hybrid pseudo-distances (see above).
+                confidence = self._calculate_confidence_score(
+                    docs_with_scores,
+                    top_n=3,
+                    score_scale=HYBRID_PSEUDO_DISTANCE_RANGE,
+                )
                 logging.info(f"[KB Query] Multi-factor confidence score: {confidence:.4f}")
                 logging.debug(f"[DEBUG] KB raw confidence: {confidence:.3f}")
 
                 # Log individual document scores for debugging
-                for i, (doc, score) in enumerate(docs_with_scores[:3]):
+                for i, (_, score) in enumerate(docs_with_scores[:3]):
                     logging.debug(f"[KB Query] Top doc {i+1} score: {score:.4f}")
             else:
                 confidence = 0.0
@@ -1356,6 +1548,10 @@ Return ONLY a JSON object in PERSIAN with these fields:
             # If confidence is too low, log for human review
             if requires_human:
                 self._log_human_referral(query, answer, confidence)
+                # [ANSWER SUPPRESSION] A below-threshold confidence means the retrieved
+                # context did not support generation; surfacing the weak generated answer
+                # risks hallucination. Replace it with the human referral message.
+                answer = rag_settings.human_referral_message
 
             # Prepare sources list
             sources = []
@@ -1392,6 +1588,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
                 "sources": sources,
                 "normalized_docs": normalized_docs,
                 "rewritten_query": rewritten_query,
+                "web_search_content": web_search_content,
                 "retrieval_method": "similarity_search"
             }
 

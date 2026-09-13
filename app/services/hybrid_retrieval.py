@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from collections import defaultdict
 from typing import List, Dict, Tuple, Optional, Any
@@ -16,6 +17,11 @@ except Exception:
 
 
 logger = logging.getLogger(__name__)
+
+# Pseudo-distance used by callers for "worst possible relevance"
+# (`_rerank_async`: `1 - hybrid_score`). Shared here so the score contract stays
+# in one place (also used by `app.services.reranker`).
+DEFAULT_PSEUDO_DISTANCE = 1.0
 
 def _ensure_nltk():
     if _nltk is None:
@@ -46,6 +52,17 @@ def _tokenize(text: str) -> List[str]:
     except Exception:
         return re.findall(r"[\w\u0600-\u06FF]+", text)
 
+
+def _bm25_invoke(retriever: BM25Retriever, query: str) -> List[Document]:
+    """Run a retriever through the modern Runnable API.
+
+    BUG FIX (deprecation): `BaseRetriever.get_relevant_documents` is deprecated
+    and slated for removal in LangChain 1.0. `invoke(query)` is the supported
+    entry point and still returns `List[Document]` (no dict wrapping).
+    """
+    return list(retriever.invoke(query))
+
+
 class HybridRetrievalService:
     _MAX_CACHE_ENTRIES = 128
     def __init__(self, document_processor):
@@ -54,6 +71,13 @@ class HybridRetrievalService:
         self._bm25_cache: Dict[str, Tuple[Optional[BM25Retriever], float]] = {}
         self._docs_cache: Dict[str, Tuple[List[Document], float]] = {}
         self._cache_ttl_seconds = 3600
+        # Last observed collection size; used by `_refresh_caches_if_collection_changed`.
+        self._collection_count: Optional[int] = None
+        # Guards every read-modify-write of the caches. `_get_bm25` /
+        # `_get_docs_for_filter` are executed via `asyncio.to_thread`, and
+        # `_bm25_parallel_async` runs 3 branches concurrently, so cache
+        # mutations could otherwise race and corrupt the eviction bookkeeping.
+        self._cache_lock = threading.Lock()
         self.reranker = None
 
         try:
@@ -67,18 +91,69 @@ class HybridRetrievalService:
 
 
     def _store_cache(self, cache: dict, key: str, value) -> None:
-        """درج در کش با سقف اندازه (حذف قدیمی‌ترین ورودی‌ها به‌صورت FIFO ساده)."""
-        cache[key] = value
-        if len(cache) > self._MAX_CACHE_ENTRIES:
-            # قدیمی‌ترین‌ها بر اساس timestamp حذف می‌شوند (value = (obj, ts))
-            for old_key in sorted(cache, key=lambda k: cache[k][1])[: len(cache) - self._MAX_CACHE_ENTRIES]:
-                cache.pop(old_key, None)
+        """درج در کش با سقف اندازه (حذف قدیمی‌ترین ورودی‌ها به‌صورت FIFO ساده).
+
+        Thread-safe: the write and the eviction pass happen under one lock so a
+        concurrent branch cannot observe a half-evicted cache.
+        """
+        with self._cache_lock:
+            cache[key] = value
+            if len(cache) > self._MAX_CACHE_ENTRIES:
+                # قدیمی‌ترین‌ها بر اساس timestamp حذف می‌شوند (value = (obj, ts))
+                for old_key in sorted(cache, key=lambda k: cache[k][1])[: len(cache) - self._MAX_CACHE_ENTRIES]:
+                    cache.pop(old_key, None)
+
+    def _get_cached_entry(self, cache: dict, key: str):
+        """Thread-safe cache lookup that enforces the TTL.
+
+        Returns the stored `(value, timestamp)` tuple when it is still fresh,
+        otherwise None. Returning the raw tuple (instead of only `value`) keeps
+        negative-cache entries (`(None, ts)`) meaningful for callers.
+        """
+        with self._cache_lock:
+            cached = cache.get(key)
+            if cached is None:
+                return None
+            _, timestamp = cached
+        return cached if self._is_cache_valid(timestamp) else None
 
     def invalidate_caches(self) -> None:
         """پس از ingestion داده‌های جدید فراخوانی شود تا کش BM25/docs بازسازی شود."""
-        self._bm25_cache.clear()
-        self._docs_cache.clear()
+        with self._cache_lock:
+            self._bm25_cache.clear()
+            self._docs_cache.clear()
         logger.info("[HYBRID] Caches invalidated (call this after new-data ingestion)")
+
+    def _refresh_caches_if_collection_changed(self) -> None:
+        """Drop stale caches when the underlying Chroma collection changed.
+
+        BUG FIX (stale BM25): `knowledge_base.add_knowledge_contribution` and the
+        upload routes write straight into the vector store
+        (`vector_store.add_documents`), but nothing calls `invalidate_caches()`.
+        A long-lived `HybridRetrievalService` therefore kept serving a BM25 index
+        built from the old documents for up to `_cache_ttl_seconds` (1h). We now
+        compare the collection count and rebuild when it differs.
+        """
+        coll = getattr(self.vector_store, "_collection", None)
+        if coll is None:
+            return
+        try:
+            count = int(coll.count())
+        except Exception as e:
+            logger.debug(f"[HYBRID] Collection count unavailable, skipping cache check: {e}")
+            return
+
+        with self._cache_lock:
+            previous = self._collection_count
+            self._collection_count = count
+            stale = previous is not None and previous != count
+            if stale:
+                self._bm25_cache.clear()
+                self._docs_cache.clear()
+        if stale:
+            logger.info(
+                f"[HYBRID] Collection changed ({previous} -> {count} docs); caches invalidated"
+            )
 
     def _is_cache_valid(self, timestamp: float) -> bool:
         return (time.time() - timestamp) <= self._cache_ttl_seconds
@@ -93,8 +168,8 @@ class HybridRetrievalService:
 
     def _get_docs_for_filter(self, filt: Dict) -> List[Document]:
         cache_key = json.dumps(filt, sort_keys=True, ensure_ascii=False)
-        cached = self._docs_cache.get(cache_key)
-        if cached and self._is_cache_valid(cached[1]):
+        cached = self._get_cached_entry(self._docs_cache, cache_key)
+        if cached is not None:
             return cached[0]
 
         coll = getattr(self.vector_store, "_collection", None)
@@ -122,8 +197,8 @@ class HybridRetrievalService:
 
     def _get_bm25(self, key: str, filt: Dict, is_public: bool = False, k: int = 15) -> Optional[BM25Retriever]:
         cache_key = f"{key}_k{k}_public_{is_public}"
-        cached = self._bm25_cache.get(cache_key)
-        if cached and self._is_cache_valid(cached[1]):
+        cached = self._get_cached_entry(self._bm25_cache, cache_key)
+        if cached is not None:
             return cached[0]
 
         docs = self._get_docs_for_filter(filt)
@@ -136,6 +211,29 @@ class HybridRetrievalService:
         self._store_cache(self._bm25_cache, cache_key, (retr, time.time()))
         return retr
 
+    def _resolve_relevance_score_fn(self, vs):
+        """Return the metric-aware DISTANCE -> RELEVANCE converter for `vs`.
+
+        Chroma's `*_with_relevance_scores` APIs are misnamed: despite returning
+        "relevance scores", they actually return raw DISTANCES (lower = better).
+        LangChain's `_select_relevance_score_fn()` reads `hnsw:space` from the
+        collection metadata and returns the correct converter for the actual
+        metric (`l2`, `cosine`, `ip`), so we reuse it instead of hardcoding
+        `1 - distance` (which is only valid for cosine space).
+
+        Returns None when the vector store does not expose a converter; callers
+        then fall back to a conservative `1 - distance`.
+        """
+        selector = getattr(vs, "_select_relevance_score_fn", None)
+        if selector is None:
+            return None
+        try:
+            fn = selector()
+            return fn if callable(fn) else None
+        except Exception as e:
+            logger.warning(f"[DENSE] Could not resolve relevance-score fn (using 1-distance fallback): {e}")
+            return None
+
     async def _dense_similarity_search(
         self,
         vs,
@@ -145,25 +243,52 @@ class HybridRetrievalService:
     ) -> List[Tuple[Document, float]]:
         """Run a dense branch and return REAL relevance scores (bigger = better).
 
-        Critical fix: `asimilarity_search_by_vector` returns no score, so we used to
-        assign a flat 1.0 to every doc, which made dense ranking completely flat.
-        Prefer score-returning APIs; fall back to rank-based scoring.
+        BUG FIX (Chroma score inversion):
+        `similarity_search_by_vector_with_relevance_scores` returns DISTANCES
+        (lower = better), NOT relevance. Feeding those values straight into
+        min-max normalization gave the *closest* document the *lowest* weight.
+        We now convert every raw score through LangChain's metric-aware
+        distance->similarity function before returning.
+
+        Note: `asimilarity_search_by_vector` returns no score at all, so the
+        final fallback uses rank-based scoring (higher = better).
         """
-        # 1) Async score-returning API (higher = more relevant)
+        to_relevance = self._resolve_relevance_score_fn(vs)
+
+        def _as_relevance(raw_score: float) -> float:
+            """Convert a raw Chroma DISTANCE into a relevance score (bigger = better).
+
+            BUG FIX (negative relevance): the previous `1 - distance` fallback is
+            only valid for cosine space. For the production l2 space a distance
+            can exceed 1.0, which produced NEGATIVE relevance and silently
+            inverted the ranking after min-max normalization. The fallback is now
+            clamped to [0, 1] so it can never become "worse than worst".
+            """
+            raw_score = float(raw_score)
+            if to_relevance is not None:
+                try:
+                    return float(to_relevance(raw_score))
+                except Exception as e:
+                    logger.warning(f"[DENSE] relevance conversion failed ({e}); using 1-distance")
+            # Conservative fallback for cosine-like spaces / unknown metrics.
+            return max(0.0, min(1.0, 1.0 - raw_score))
+
+        # 1) Async score-returning API (only present on some vector stores)
         scorer = getattr(vs, "asimilarity_search_by_vector_with_relevance_scores", None)
         if scorer is not None:
             try:
                 scored = await scorer(query_embedding, k=k, filter=filter_dict)
-                return [(doc, float(s)) for doc, s in scored]
+                return [(doc, _as_relevance(s)) for doc, s in scored]
             except Exception as e:
                 logger.warning(f"[DENSE] async relevance-score API failed, trying sync: {e}")
 
-        # 2) Sync score-returning API
+        # 2) Sync score-returning API (what langchain_community.Chroma provides)
+        #    IMPORTANT: returns DISTANCES -> converted via _as_relevance.
         sync_scorer = getattr(vs, "similarity_search_by_vector_with_relevance_scores", None)
         if sync_scorer is not None:
             try:
                 scored = await asyncio.to_thread(sync_scorer, query_embedding, k=k, filter=filter_dict)
-                return [(doc, float(s)) for doc, s in scored]
+                return [(doc, _as_relevance(s)) for doc, s in scored]
             except Exception as e:
                 logger.warning(f"[DENSE] sync relevance-score API failed, falling back to rank scoring: {e}")
 
@@ -280,7 +405,7 @@ class HybridRetrievalService:
             retr = self._get_bm25(key, f, is_public=is_public, k=k)
             if retr is None:
                 continue
-            docs = retr.get_relevant_documents(query)
+            docs = _bm25_invoke(retr, query)
             top = docs[:k]
             for i, d in enumerate(top):
                 score = 1.0 - (i / max(k - 1, 1))
@@ -329,7 +454,7 @@ class HybridRetrievalService:
                     retriever.k = k
                     self._store_cache(self._bm25_cache, cache_key, (retriever, time.time()))
 
-                results = await asyncio.to_thread(retriever.get_relevant_documents, query)
+                results = await asyncio.to_thread(_bm25_invoke, retriever, query)
                 scored_results: List[Tuple[Document, float]] = []
                 for i, doc in enumerate((results or [])[:k]):
                     score = 1.0 - (i / max(k - 1, 1))
@@ -354,37 +479,37 @@ class HybridRetrievalService:
         return self._bm25_parallel_old(query, k, is_public)
 
     def _normalize_dense(self, pairs: List[Tuple[Document, float]]) -> Dict[str, float]:
-        # NOTE: dense scores are now relevance scores (bigger = better), matching
-        # BM25 semantics, so we min-max normalize WITHOUT the old distance inversion.
-        if not pairs:
-            return {}
-        scores = [s for _, s in pairs]
-        mx = max(scores)
-        mn = min(scores)
-        if mx == mn:
-            norm = [1.0 for _ in scores]
-        else:
-            norm = [(s - mn) / (mx - mn) for s in scores]
-        res: Dict[str, float] = {}
-        for (doc, _), n in zip(pairs, norm):
-            key = self._make_doc_key(doc)
-            res[key] = n
-        return res
+        # CONTRACT: `pairs` scores MUST already be relevance scores (bigger = better),
+        # i.e. `_dense_similarity_search` has already converted Chroma DISTANCES via
+        # `_resolve_relevance_score_fn`. We therefore min-max normalize directly, in
+        # the same direction as BM25. Never pass raw Chroma distances here.
+        return self._min_max_normalize(pairs)
 
     def _normalize_bm25(self, pairs: List[Tuple[Document, float]]) -> Dict[str, float]:
+        # BM25 branch scores are already relevance-like (bigger = better).
+        return self._min_max_normalize(pairs)
+
+    def _min_max_normalize(self, pairs: List[Tuple[Document, float]]) -> Dict[str, float]:
+        """Shared min-max normalizer for relevance-scored `(doc, score)` pairs.
+
+        BUG FIX (duplication): `_normalize_dense` and `_normalize_bm25` were
+        byte-for-byte identical; keeping a single implementation prevents the two
+        branches from drifting apart (which would silently break the 0.6/0.4
+        hybrid weighting).
+        """
         if not pairs:
             return {}
-        scores = [s for _, s in pairs]
+        scores = [float(s) for _, s in pairs]
         mx = max(scores)
         mn = min(scores)
         if mx == mn:
             norm = [1.0 for _ in scores]
         else:
-            norm = [(s - mn) / (mx - mn) for s in scores]
+            span = mx - mn
+            norm = [(s - mn) / span for s in scores]
         res: Dict[str, float] = {}
         for (doc, _), n in zip(pairs, norm):
-            key = self._make_doc_key(doc)
-            res[key] = n
+            res[self._make_doc_key(doc)] = n
         return res
 
     async def _rerank_async(
@@ -402,7 +527,10 @@ class HybridRetrievalService:
 
         try:
             docs = [doc for doc, _ in doc_score_pairs]
-            original_scores = [1.0 - max(0.0, min(1.0, score)) for _, score in doc_score_pairs]
+            original_scores = [
+                DEFAULT_PSEUDO_DISTANCE - max(0.0, min(1.0, score))
+                for _, score in doc_score_pairs
+            ]
             reranked = await asyncio.to_thread(
                 self.reranker.rerank,
                 query,
@@ -426,6 +554,14 @@ class HybridRetrievalService:
         k = 15
         prefilter_k = 20
         overall_start = time.perf_counter()
+
+        # Self-healing cache: docs ingested after this service cached its BM25
+        # indexes change the collection count, so drop the stale caches instead
+        # of serving outdated retrieval results for up to the 1h TTL. Must run
+        # BEFORE the BM25 branches so they rebuild against fresh documents.
+        # (Explicit `invalidate_caches()` remains available for callers that know
+        # the collection changed.)
+        self._refresh_caches_if_collection_changed()
         
         # === PERF: Detailed Timing Tracking ===
         timings = {}
