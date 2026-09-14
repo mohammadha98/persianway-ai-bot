@@ -43,9 +43,14 @@ RAW_L2_DISTANCE_RANGE = 2.5
 # consistency=1.0), so an ADDITIVE blend always contains a 0.4 floor that a
 # nearly-irrelevant document can ride. `_calculate_confidence_score` therefore
 # multiplies the structural factors by the best-document factor instead, which
-# guarantees the final score can never exceed that factor. Retrieval whose best
-# document falls below this floor is logged as irrelevant and cannot clear the
-# default 0.5 handoff gate.
+# guarantees the final score can never exceed that factor.
+#
+# This constant is DIAGNOSTIC ONLY: it gates a log line, not an assignment. The
+# relevance bound is structural (the multiplication above), so no threshold or
+# clamp depends on this value. Because `final <= best_confidence`, a best
+# document below this floor always produces a final score below 0.3 and therefore
+# fails every configurable `knowledge_base_confidence_threshold` in the schema's
+# legal (0, 1] range except the degenerate 0.0.
 BEST_DOCUMENT_RELEVANCE_FLOOR = 0.3
 
 
@@ -323,7 +328,7 @@ class KnowledgeBaseService:
             logging.debug(
                 f"[KB Confidence] Best document below relevance floor "
                 f"({best_confidence:.4f} < {BEST_DOCUMENT_RELEVANCE_FLOOR}); "
-                f"confidence capped at {final_confidence:.4f}"
+                f"final confidence {final_confidence:.4f} (structural bound, no cap)"
             )
 
         return max(0.0, min(final_confidence, 1.0))

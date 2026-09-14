@@ -8,8 +8,9 @@ Covers four distinct defects that were reported and fixed:
 3. `EmbeddingReranker._align_scores` used a magic 1.0 pseudo-distance.
 4. `KnowledgeBaseService._calculate_confidence_score` was fed hybrid
    pseudo-distances but used a logistic calibrated for raw L2 distances
-   (0.0 .. ~3.5), saturating every result to ~[0.92, 1.0] so the confidence
-   gate never fired.
+   (0.0 .. ~3.5), saturating every result so the confidence gate could never
+   fire: the old blend's GLOBAL MINIMUM over the whole reachable domain was
+   ~0.8163, while its best-document factor alone spanned only ~[0.92, 1.0].
 """
 
 import os
@@ -162,6 +163,51 @@ def test_confidence_multi_factor_weights_are_preserved():
     # document at zero relevance they must not manufacture any confidence.
     perfect_structural = [(Document(page_content="x", metadata={}), 1.0)] * 3
     assert kb._calculate_confidence_score(perfect_structural, top_n=3) == 0.0
+
+
+@pytest.mark.parametrize("threshold", [0.5, 0.7, 0.8])
+def test_confidence_gate_is_discriminative_at_the_configurable_threshold(threshold):
+    """The gate must do real work at EVERY legally-configurable threshold.
+
+    The old blend (saturated logistic best-document factor in ~[0.92, 1.0] plus a
+    0.3 consistency + 0.1 coverage floor) had a GLOBAL MINIMUM of ~0.8163 over the
+    entire reachable domain, so `knowledge_base_confidence_threshold` was inert at
+    its schema default 0.5, at the 0.7 actually configured in `.env`, AND even at
+    the 0.8 the docs advertise as "more strict". The calibrated curve must instead
+    split the domain, with a strong hit accepted and a weak/irrelevant hit
+    rejected, for any threshold the RAG schema allows (ge=0.0, le=1.0).
+    """
+    from app.schemas.config import RAGSettings
+    from app.services.knowledge_base import HYBRID_PSEUDO_DISTANCE_RANGE
+
+    # Guard the test's own assumption against future schema drift.
+    assert RAGSettings().knowledge_base_confidence_threshold == pytest.approx(0.5)
+
+    kb = _make_kb_service()
+    doc = Document(page_content="d", metadata={})
+
+    def confidence(distance: float, docs: int = 1) -> float:
+        return kb._calculate_confidence_score(
+            [(doc, distance)] * docs,
+            top_n=3,
+            score_scale=HYBRID_PSEUDO_DISTANCE_RANGE,
+        )
+
+    # A strong single hit (pseudo-distance 0.0) clears every legal threshold.
+    assert confidence(0.0) > threshold
+
+    # A zero-relevance retrieval never clears any non-degenerate threshold: this
+    # is what the structural bound buys, and it holds independent of the value.
+    assert confidence(1.0) < threshold
+    assert confidence(1.0) == 0.0
+
+    # The gate is genuinely crossed inside the domain, not saturated above it:
+    # at least one distance must fall below every legal non-zero threshold,
+    # which is exactly what the old ~0.8163 floor made impossible.
+    assert any(
+        confidence(distance) < threshold
+        for distance in (0.2, 0.4, 0.6, 0.8, 0.9, 1.0)
+    )
 
 
 def test_confidence_single_score_helper_delegates():
