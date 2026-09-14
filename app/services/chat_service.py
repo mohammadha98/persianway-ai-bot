@@ -1299,10 +1299,33 @@ Title:"""
                             query_analysis["requires_human_referral"] = True
                             query_analysis["reasoning"] = f"General knowledge processing failed: {str(general_error)}"
                     else:
-                        # General answers are disabled - refer to human
-                        answer = HUMAN_REFERRAL_MESSAGE
+                        # General answers disabled as a fallback SOURCE — still let the
+                        # model itself phrase the handoff (system prompt + history) so the
+                        # user receives a natural, contextual response instead of the
+                        # static referral text.
                         query_analysis["requires_human_referral"] = True
-                        query_analysis["reasoning"] = "Low knowledge base confidence and general answers are disabled."
+                        query_analysis["knowledge_source"] = "none"
+                        query_analysis["reasoning"] = "Low knowledge base confidence and general answers are disabled — model-generated handoff response."
+                        handoff_history: List[Any] = []
+                        try:
+                            conversation = await self._get_or_create_session(user_id, model, parameters)
+                            history = self._message_history.get(user_id, [])
+                            if (intent_result.get("context_state") or ContextState.SELF_CONTAINED.value) == ContextState.TOPIC_SHIFT.value:
+                                # Context isolation: general chain must not see old-subject turns
+                                history = list(history[-2:])
+                            handoff_history = list(history)
+                            response = await conversation.ainvoke({"input": message, "history": history})
+                            response_content = getattr(response, "content", "")
+                            if isinstance(response_content, str) and response_content.strip():
+                                answer = response_content
+                            else:
+                                answer = HUMAN_REFERRAL_MESSAGE
+                        except Exception as handoff_error:
+                            logger.error(f"Model-generated handoff failed: {handoff_error}")
+                            answer = HUMAN_REFERRAL_MESSAGE
+                        prompt_snapshot = await self._build_general_snapshot(
+                            message, self._snapshot_history(handoff_history), response_parameters
+                        )
 
             # Add the final interaction to the conversation history.
             # The `conversation.predict` call above already adds the user message and the AI response to the memory
@@ -1747,9 +1770,14 @@ Title:"""
                         "prompt_snapshot": prompt_snapshot,
                     }
                 else:
-                    # General answers disabled - human handoff (no irrelevant streaming)
+                    # General answers disabled as a fallback SOURCE — still let the
+                    # model itself phrase the handoff (system prompt + history) so the
+                    # user receives a natural, contextual, streamed response instead
+                    # of the static referral text. Below-threshold docs are NEVER fed
+                    # to the LLM as context.
                     query_analysis["requires_human_referral"] = True
-                    query_analysis["reasoning"] = "Low knowledge base confidence and general answers are disabled."
+                    query_analysis["knowledge_source"] = "none"
+                    query_analysis["reasoning"] = "Low knowledge base confidence and general answers are disabled — model-generated handoff response."
 
                     yield {
                         "type": "metadata",
@@ -1759,15 +1787,49 @@ Title:"""
                         "response_parameters": response_parameters,
                     }
 
-                    yield {"type": "chunk", "content": HUMAN_REFERRAL_MESSAGE}
+                    conversation = await self._get_or_create_session(user_id, model, parameters)
+                    history = list(self._message_history.get(user_id, []))
+                    if (intent_result.get("context_state") or ContextState.SELF_CONTAINED.value) == ContextState.TOPIC_SHIFT.value:
+                        # Context isolation: general chain must not see old-subject turns
+                        history = history[-2:]
+                    history_before_append = self._snapshot_history(history)
+
+                    # Real token streaming of the model's own handoff phrasing;
+                    # raises on failure -> static referral fallback below
+                    handoff_answer = ""
+                    try:
+                        async for chunk in conversation.astream({"input": message, "history": history}):
+                            chunk_content = getattr(chunk, "content", None)
+                            if not chunk_content:
+                                continue  # skip chunks without valid content
+                            handoff_answer += chunk_content
+                            full_answer += chunk_content
+                            yield {"type": "chunk", "content": chunk_content}
+                    except Exception as handoff_error:
+                        logger.error(f"Model-generated handoff streaming failed: {handoff_error}")
+                        handoff_answer = ""
+
+                    if not handoff_answer.strip():
+                        # LLM produced nothing or failed — fall back to the static
+                        # referral message (already partially streamed content, if
+                        # any, is replaced by the canonical handoff text in `done`)
+                        full_answer = HUMAN_REFERRAL_MESSAGE
+                        yield {"type": "chunk", "content": HUMAN_REFERRAL_MESSAGE}
+                    else:
+                        full_answer = handoff_answer
+
+                    self._append_history(user_id, message, full_answer)
+                    prompt_snapshot = await self._build_general_snapshot(
+                        message, history_before_append, response_parameters
+                    )
+
                     yield {
                         "type": "done",
-                        "answer": HUMAN_REFERRAL_MESSAGE,
+                        "answer": full_answer,
                         "query_analysis": query_analysis,
                         "normalized_sources": normalized_sources,
+                        "prompt_snapshot": prompt_snapshot,
                     }
-                    await self._get_or_create_session(user_id, model, parameters)
-                    self._append_history(user_id, message, HUMAN_REFERRAL_MESSAGE)
 
             # === PERF: Total Pipeline Timing ===
             timings['total_pipeline'] = time.perf_counter() - t_pipeline_start
