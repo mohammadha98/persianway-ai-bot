@@ -889,7 +889,7 @@ Title:"""
                     ]
             
             # Validate intent
-            if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC", "GREETING", "FAREWELL", "SMALL_TALK", "HELP_CAPABILITIES"]:
+            if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC", "GREETING", "FAREWELL", "SMALL_TALK"]:
                 logger.warning(f"Invalid intent '{intent}', defaulting to PRIVATE")
                 intent = "PRIVATE"
             
@@ -1135,31 +1135,7 @@ Title:"""
                         "normalized_sources": normalized_sources,
                         "prompt_snapshot": prompt_snapshot
                     }
-                if intent_result["intent"] == "HELP_CAPABILITIES":
-                    answer =  (
-                        "من دستیار هوشمند پرشین وی هستم 🤖\nمی‌تونم در این حوزه‌ها کمک کنم:\n\n"
-                        "🌱 کشاورزی: کوددهی، آبیاری، آفات، روش‌های کشت\n"
-                        "💊 سلامت: دوز مکمل‌ها، تداخل‌ها، تغذیه علمی\n"
-                        "💄 زیبایی: روتین‌ها، ترکیبات، درمان‌های پوستی\n"
-                        "🏢 اطلاعات شرکت: ثبت‌نام، پورسانت، قوانین، سفارش\n\n"
-                        "کافیه سوالتون رو همین‌جا بپرسید تا راهنمایی کنم."
-                    )
-                    query_analysis["confidence_score"] = 0.6
-                    query_analysis["knowledge_source"] = "help_capabilities"
-                    query_analysis["requires_human_referral"] = False
-                    query_analysis["reasoning"] = "User asked for assistant capabilities."
-                    response_parameters["temperature"] = 0.2
-                    prompt_snapshot = await self._build_static_snapshot(message, intent_result["intent"], response_parameters)
-                    await self._get_or_create_session(user_id, model, parameters)
-                    self._append_history(user_id, message, answer)
-                    return {
-                        "query_analysis": query_analysis,
-                        "response_parameters": response_parameters,
-                        "answer": answer,
-                        "normalized_sources": normalized_sources,
-                        "prompt_snapshot": prompt_snapshot
-                    }
-                
+            
            
                 # Proceed with knowledge base query
                 # Web search decision and execution is now handled inside query_knowledge_base
@@ -1578,43 +1554,7 @@ Title:"""
                 self._append_history(user_id, message, small_talk_msg)
                 return
             
-            # Handle HELP_CAPABILITIES
-            if intent_result["intent"] == "HELP_CAPABILITIES":
-                help_msg = (
-                    "من دستیار هوشمند پرشین وی هستم 🤖\nمی‌تونم در این حوزه‌ها کمک کنم:\n\n"
-                    "🌱 کشاورزی: کوددهی، آبیاری، آفات، روش‌های کشت\n"
-                    "💊 سلامت: دوز مکمل‌ها، تداخل‌ها، تغذیه علمی\n"
-                    "💄 زیبایی: روتین‌ها، ترکیبات، درمان‌های پوستی\n"
-                    "🏢 اطلاعات شرکت: ثبت‌نام، پورسانت، قوانین، سفارش\n\n"
-                    "کافیه سوالتون رو همین‌جا بپرسید تا راهنمایی کنم."
-                )
-                
-                query_analysis["confidence_score"] = 0.6
-                query_analysis["knowledge_source"] = "help_capabilities"
-                query_analysis["requires_human_referral"] = False
-                query_analysis["reasoning"] = "User asked for assistant capabilities."
-                response_parameters["temperature"] = 0.2
-                prompt_snapshot = await self._build_static_snapshot(message, intent_result["intent"], response_parameters)
-                
-                yield {
-                    "type": "metadata",
-                    "query_analysis": query_analysis,
-                    "normalized_sources": normalized_sources,
-                    "response_parameters": response_parameters
-                }
-                
-                yield {"type": "chunk", "content": help_msg}
-                yield {
-                    "type": "done",
-                    "answer": help_msg,
-                    "query_analysis": query_analysis,
-                    "normalized_sources": normalized_sources,
-                    "prompt_snapshot": prompt_snapshot,
-                }
-                await self._get_or_create_session(user_id, model, parameters)
-                self._append_history(user_id, message, help_msg)
-                return
-            
+        
             # === Proceed with Knowledge Base Query ===
             is_public = intent_result["is_public"]
 
