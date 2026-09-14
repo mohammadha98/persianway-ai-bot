@@ -3,6 +3,7 @@ import json
 import re
 import time
 from datetime import datetime
+from enum import Enum
 from langchain_openai import ChatOpenAI
 import logging
 from loguru import logger
@@ -108,6 +109,24 @@ from app.services.knowledge_base import get_knowledge_base_service
 from app.services.config_service import ConfigService
 
 
+class ContextState(str, Enum):
+    """Unified context decision for retrieval history & query rewriting.
+
+    Produced ONCE by detect_query_intent (single LLM decision) and consumed by
+    both the streaming and non-streaming pipelines:
+      - SELF_CONTAINED: the message is fully explicit; history adds nothing and
+        is dropped for retrieval (no rewrite step needed).
+      - FOLLOW_UP: the message contains implicit references that were resolved
+        into resolved_query; history is KEPT (the resolution derives from it).
+      - TOPIC_SHIFT: the message starts a new subject; old history would
+        contaminate retrieval and is dropped entirely.
+    """
+
+    SELF_CONTAINED = "self_contained"
+    FOLLOW_UP = "follow_up"
+    TOPIC_SHIFT = "topic_shift"
+
+
 class ChatService:
     """Service for managing chat interactions with various language models.
     
@@ -211,9 +230,39 @@ class ChatService:
             if isinstance(item, dict):
                 role = item.get("role")
                 content = item.get("content")
+            elif role is None:
+                # LangChain messages (HumanMessage/AIMessage) have no `.role`
+                # attribute — only `.type` ("human"/"ai"). Map them to the same
+                # roles used by get_conversation_history so internal history
+                # (self._message_history) snapshots correctly instead of
+                # silently producing an empty list.
+                msg_type = getattr(item, "type", None)
+                if msg_type == "human":
+                    role = "user"
+                elif msg_type == "ai":
+                    role = "assistant"
             if role and content is not None:
                 result.append({"role": str(role), "content": str(content)})
         return result
+
+    @staticmethod
+    def _prune_history_for_topic_shift(history: Optional[Any]) -> Optional[Any]:
+        """Prune conversation history to the most recent exchange after a topic shift.
+
+        When detect_query_intent signals topic_shift=True, older turns belong to a
+        different subject and would contaminate downstream retrieval/answering
+        (context contamination, feedback B1). This helper keeps ONLY the last
+        exchange (the final user + assistant message) so the pipeline stays on
+        the new subject. Supported inputs: ConversationResponse-like objects,
+        lists of such objects, or plain lists of messages (dicts or objects).
+        """
+        if hasattr(history, "messages"):
+            return list(history.messages[-2:])
+        if isinstance(history, list) and history:
+            if hasattr(history[0], "messages"):
+                return list(history[-1].messages[-2:])
+            return list(history[-2:])
+        return history
 
     async def _build_static_snapshot(self, message, intent, response_parameters):
         return {
@@ -484,17 +533,33 @@ Title:"""
         
         Returns:
             A dictionary with:
-                - intent: One of "PUBLIC", "PRIVATE", or "OFF_TOPIC"
+                - intent: One of "PUBLIC", "PRIVATE", "OFF_TOPIC", "GREETING", "FAREWELL", "SMALL_TALK", or "NEEDS_CLARIFICATION"
                 - is_public: Boolean indicating if it's a public query (for backward compatibility)
                 - explanation: Reason for the classification
                 - off_topic_message: Optional message to redirect user (for OFF_TOPIC)
+                - context_state: One of "self_contained" | "follow_up" | "topic_shift" — the
+                  SINGLE context decision consumed downstream (history retention + whether
+                  the rewrite step is needed). This method does NOT prune history itself.
+                - resolved_query: The message with implicit references replaced by explicit
+                  entity names (validated; equals the raw message when no substitution is
+                  needed or when validation fails)
+                - referenced_entities: Explicit entity names substituted from history
+                - topic_shift: Derived backward-compat boolean (context_state == "topic_shift")
+                - context_decided: True only when the LLM classification parsed successfully
+                  (a genuine three-way context decision). False on every fallback path —
+                  consumers must keep the legacy rewrite/expansion behavior in that case.
         """
         if not message or not message.strip():
             return {
                 "intent": "NEEDS_CLARIFICATION",
                 "is_public": False,
                 "explanation": "Empty message",
-                "clarification_prompt": "لطفاً سوال یا درخواست خود را مشخص کنید."
+                "clarification_prompt": "لطفاً سوال یا درخواست خود را مشخص کنید.",
+                "topic_shift": False,
+                "context_state": ContextState.SELF_CONTAINED.value,
+                "resolved_query": message or "",
+                "referenced_entities": [],
+                "context_decided": False,
             }
 
         formatted_history: List[str] = []
@@ -540,6 +605,15 @@ Title:"""
             logger.debug(f"Intent detection extracted {len(formatted_history)} messages from conversation history")
         
         history_block = "\n".join(formatted_history) if formatted_history else "No prior conversation."
+
+        # [TOPIC SHIFT] Extract the last 2 user turns so the classifier can compare
+        # the latest message against the immediately preceding subject. This only
+        # FEEDS the classifier; history pruning/isolation happens downstream.
+        recent_user_msgs = [
+            m for m in formatted_history
+            if m.lower().startswith("human:") or m.lower().startswith("user:")
+        ][-2:]
+        recent_topics_block = "\n".join(recent_user_msgs) if recent_user_msgs else "No prior user turns."
 
         classifier_prompt = (
     "You are an intent classifier for PersianWay (پرشین وی) customer support.\n\n"
@@ -589,7 +663,9 @@ Title:"""
     "   ONLY specialized technical questions requiring EXPERT advice:\n"
     "   \n"
     "   🌾 Agriculture (کشاورزی):\n"
-    "   • Technical farming instructions\n"
+    "   • Technical farming instructions (planting, propagation, pruning)\n"
+    "   • Propagation methods: stem cutting (برش ساقه), layering, seed propagation\n"
+    "   • Second crop / successive cultivation techniques, soil preparation\n"
     "   • Dosage of fertilizers for specific crops\n"
     "   • Treating plant diseases\n"
     "   \n"
@@ -605,6 +681,7 @@ Title:"""
     "   \n"
     "   Examples:\n"
     "   ✓ 'بهترین کود برای گندم چیه؟' (agriculture)\n"
+    "   ✓ 'کشت دوم از طریق برش ساقه چطور انجام میشه؟' (cultivation technique → PRIVATE)\n"
     "   ✓ 'کامبوچا برای دیابت خوبه؟' (health advice → PRIVATE)\n"
     "   ✓ 'گابری گلدن رو چند بار در روز بخورم؟' (dosage/usage → PRIVATE)\n"
     "   ✓ 'برای پوست خشک چی پیشنهاد میدی؟' (beauty advice)\n"
@@ -658,15 +735,33 @@ Title:"""
     
     f"Conversation History:\n{history_block}\n\n"
     
+    f"Recent user turns (for context_state comparison):\n{recent_topics_block}\n\n"
+
+    "📌 CONTEXT STATE & QUERY RESOLUTION (single decision; no separate rewrite step downstream):\n"
+    "Compare the latest user message with the recent user turns shown above and set context_state:\n"
+    "- 'topic_shift': the message introduces a clearly different subject\n"
+    "  (e.g., switching from 'یبوست' to 'ترک قلیان', or from health advice to a farming technique).\n"
+    "- 'follow_up': the message contains referential/elliptical cues (pronouns, 'بعدی', 'دیگه',\n"
+    "  'همون', 'اون یکی', 'قبلی', 'ادامه بده') or is incomplete without the previous turn.\n"
+    "- 'self_contained': the message is fully explicit and needs no history.\n"
+    "\n"
+    "resolved_query rule: ONLY replace pronouns and incomplete references with the explicit\n"
+    "entity names they refer to. Do NOT add any new information from the history. If the message\n"
+    "is already explicit, resolved_query MUST be the message verbatim.\n"
+    "referenced_entities: the explicit entity names you substituted (empty list if none).\n\n"
+
     "Respond with valid JSON only:\n"
     "{\n"
     "  \"intent\": \"PUBLIC\" | \"PRIVATE\" | \"OFF_TOPIC\" | \"GREETING\" | \"FAREWELL\" | \"SMALL_TALK\",\n"
     "  \"category\": \"company_info\" | \"mlm_business\" | \"product_info\" | \"agriculture\" | \"health\" | \"beauty\" | \"unrelated\",\n"
     "  \"confidence\": 0.0-1.0,\n"
+    "  \"context_state\": \"self_contained\" | \"follow_up\" | \"topic_shift\",\n"
+    "  \"resolved_query\": \"message with implicit references replaced by explicit names\",\n"
+    "  \"referenced_entities\": [\"explicit entity names substituted from history\"],\n"
     "  \"explanation\": \"brief reason in English\",\n"
-    "  \"off_topic_message\": \"optional: redirect message in Persian if OFF_TOPIC\"\n"
-    "  \"greeting_message\": \"optional: greeting in Persian if GREETING\"\n"
-    "  \"farewell_message\": \"optional: farewell in Persian if FAREWELL\"\n"
+    "  \"off_topic_message\": \"optional: redirect message in Persian if OFF_TOPIC\",\n"
+    "  \"greeting_message\": \"optional: greeting in Persian if GREETING\",\n"
+    "  \"farewell_message\": \"optional: farewell in Persian if FAREWELL\",\n"
     "  \"small_talk_message\": \"optional: small talk reply in Persian if SMALL_TALK\"\n"
     "}")
 
@@ -682,7 +777,12 @@ Title:"""
                 "intent": "PRIVATE",
                 "is_public": False,
                 "explanation": f"Failed to initialize LLM: {str(e)}",
-                "clarification_prompt": None
+                "clarification_prompt": None,
+                "topic_shift": False,
+                "context_state": ContextState.SELF_CONTAINED.value,
+                "resolved_query": message,
+                "referenced_entities": [],
+                "context_decided": False,
             }
 
         try:
@@ -690,7 +790,9 @@ Title:"""
                 SystemMessage(content=classifier_prompt),
                 HumanMessage(
                     content=(
-                        f"Conversation history:\n{history_block}\n\n"
+                        # NOTE: conversation history (and recent user turns) is already
+                        # embedded in the system prompt above; repeating it here would
+                        # double the token cost without adding information.
                         f"Latest user message:\n{message}\n\n"
                         "Classify the intent now."
                     )
@@ -702,7 +804,12 @@ Title:"""
                 "intent": "PRIVATE",
                 "is_public": False,
                 "explanation": f"Error during classification: {str(e)}",
-                "clarification_prompt": None
+                "clarification_prompt": None,
+                "topic_shift": False,
+                "context_state": ContextState.SELF_CONTAINED.value,
+                "resolved_query": message,
+                "referenced_entities": [],
+                "context_decided": False,
             }
 
         content = (getattr(response, "content", "") or "").strip()
@@ -712,7 +819,12 @@ Title:"""
                 "intent": "PRIVATE",
                 "is_public": False,
                 "explanation": "Empty response from classifier",
-                "clarification_prompt": None
+                "clarification_prompt": None,
+                "topic_shift": False,
+                "context_state": ContextState.SELF_CONTAINED.value,
+                "resolved_query": message,
+                "referenced_entities": [],
+                "context_decided": False,
             }
 
         # Parse JSON response
@@ -734,7 +846,47 @@ Title:"""
             greeting_message = payload.get("greeting_message")
             farewell_message = payload.get("farewell_message")
             small_talk_message = payload.get("small_talk_message")
-  
+            # [CONTEXT STATE] Single unified decision from the LLM
+            context_state_raw = str(payload.get("context_state", "") or "").strip().lower()
+            if context_state_raw not in {s.value for s in ContextState}:
+                # Robust coercion for legacy/Boolean responses: derive from topic_shift
+                topic_shift_raw = payload.get("topic_shift", False)
+                if isinstance(topic_shift_raw, str):
+                    topic_shift = topic_shift_raw.strip().lower() in {"true", "1", "yes"}
+                else:
+                    topic_shift = bool(topic_shift_raw)
+                context_state = ContextState.TOPIC_SHIFT.value if topic_shift else ContextState.SELF_CONTAINED.value
+                if context_state_raw:
+                    logger.warning(
+                        f"Invalid context_state '{context_state_raw}' from classifier, "
+                        f"derived '{context_state}' from topic_shift"
+                    )
+            else:
+                context_state = context_state_raw
+                topic_shift = (context_state == ContextState.TOPIC_SHIFT.value)
+
+            # [RESOLVED QUERY] Substitution-only resolution, validated before use
+            resolved_query = payload.get("resolved_query")
+            referenced_entities = payload.get("referenced_entities") or []
+            if not isinstance(resolved_query, str) or not resolved_query.strip():
+                resolved_query = message
+                referenced_entities = []
+            else:
+                resolved_query = resolved_query.strip()
+                if not (0.3 <= len(resolved_query) / max(len(message), 1) <= 3.0):
+                    logger.warning(
+                        f"resolved_query length ratio out of bounds for message='{message[:50]}...' "
+                        f"({len(resolved_query)}/{len(message)}); falling back to raw message"
+                    )
+                    resolved_query = message
+                    referenced_entities = []
+                elif not isinstance(referenced_entities, list):
+                    referenced_entities = []
+                else:
+                    referenced_entities = [
+                        str(e) for e in referenced_entities
+                        if isinstance(e, str) and e.strip()
+                    ]
             
             # Validate intent
             if intent not in ["PUBLIC", "PRIVATE", "OFF_TOPIC", "GREETING", "FAREWELL", "SMALL_TALK", "HELP_CAPABILITIES"]:
@@ -759,6 +911,11 @@ Title:"""
                 "greeting_message": greeting_message,
                 "farewell_message": farewell_message,
                 "small_talk_message": small_talk_message,
+                "topic_shift": topic_shift,
+                "context_state": context_state,
+                "resolved_query": resolved_query,
+                "referenced_entities": referenced_entities,
+                "context_decided": True,
             
             }
 
@@ -772,7 +929,7 @@ Title:"""
                 is_public = value
             elif isinstance(value, str):
                 normalized_value = value.strip().lower()
-                is_public = normalized_value in {"true", "yes", "public", "public_data"}
+                is_public = normalized_value in {"true", "yes", "public"}
             elif isinstance(value, (int, float)):
                 is_public = bool(value)
             
@@ -782,7 +939,12 @@ Title:"""
                 "intent": "PUBLIC" if is_public else "PRIVATE",
                 "is_public": is_public,
                 "explanation": explanation,
-                "clarification_prompt": None
+                "clarification_prompt": None,
+                "topic_shift": False,
+                "context_state": ContextState.SELF_CONTAINED.value,
+                "resolved_query": message,
+                "referenced_entities": [],
+                "context_decided": False,
             }
 
         # Ultimate fallback
@@ -791,7 +953,12 @@ Title:"""
             "intent": "PRIVATE",
             "is_public": False,
             "explanation": "Failed to parse classifier response",
-            "clarification_prompt": None
+            "clarification_prompt": None,
+            "topic_shift": False,
+            "context_state": ContextState.SELF_CONTAINED.value,
+            "resolved_query": message,
+            "referenced_entities": [],
+            "context_decided": False,
         }
 
     async def process_message(self, user_id: str, message: str, conversation_history: List = None, model: str = None, parameters: dict = None) -> Dict[str, Any]:
@@ -1003,7 +1170,27 @@ Title:"""
                 kb_result = None
                 try:
                     kb_service = get_knowledge_base_service()
-                    kb_result = await kb_service.query_knowledge_base(message, conversation_history, is_public)
+                    # [SINGLE CONTEXT DECISION / B1] Consume context_state from
+                    # detect_query_intent. On a genuine classification (context_decided)
+                    # the rewrite decision was already made upstream — pass
+                    # skip_rewrite so query_knowledge_base does not run a second,
+                    # potentially conflicting rewrite LLM call. On topic_shift prune
+                    # history; on follow_up retrieve with the validated resolved_query.
+                    context_decided = intent_result.get("context_decided", False)
+                    context_state = intent_result.get("context_state") or ContextState.SELF_CONTAINED.value
+                    if context_state == ContextState.TOPIC_SHIFT.value:
+                        logger.info("[CONTEXT] Topic shift detected — pruning history for downstream retrieval")
+                        conversation_history = self._prune_history_for_topic_shift(conversation_history)
+                    kb_query = message
+                    if context_decided and context_state == ContextState.FOLLOW_UP.value:
+                        kb_query = intent_result.get("resolved_query") or message
+                        logger.info(f"[CONTEXT] Follow-up: retrieving with resolved query '{kb_query[:60]}...'")
+                    kb_result = await kb_service.query_knowledge_base(
+                        kb_query,
+                        conversation_history,
+                        is_public,
+                        skip_rewrite=context_decided,
+                    )
                     kb_confidence = kb_result.get("confidence_score", 0) if kb_result else 0
                     logger.debug(f"[DEBUG] KB raw confidence: {kb_confidence:.3f}")
                 except RuntimeError as kb_error:
@@ -1084,6 +1271,9 @@ Title:"""
                             # Use general conversation chain for low confidence cases
                             conversation = await self._get_or_create_session(user_id, model, parameters)
                             history = self._message_history.get(user_id, [])
+                            if (intent_result.get("context_state") or ContextState.SELF_CONTAINED.value) == ContextState.TOPIC_SHIFT.value:
+                                # Context isolation: general chain must not see old-subject turns
+                                history = list(history[-2:])
                             response = await conversation.ainvoke({"input": message, "history": history})
                             response_content = getattr(response, "content", str(response))
 
@@ -1405,6 +1595,24 @@ Title:"""
             # === Proceed with Knowledge Base Query ===
             is_public = intent_result["is_public"]
 
+            # [SINGLE CONTEXT DECISION / B1] Consume context_state from
+            # detect_query_intent. On a genuine classification (context_decided) the
+            # rewrite decision was already made upstream — pass skip_rewrite so
+            # _retrieve_context does not run a second, potentially conflicting rewrite
+            # LLM call. On topic_shift prune history (older turns belong to a different
+            # subject and would contaminate retrieval and the answering prompt); on
+            # follow_up retrieve with the validated resolved_query.
+            context_decided = intent_result.get("context_decided", False)
+            context_state = intent_result.get("context_state") or ContextState.SELF_CONTAINED.value
+            if context_state == ContextState.TOPIC_SHIFT.value:
+                logger.info("[CONTEXT] Topic shift detected — pruning history for downstream retrieval")
+                conversation_history = self._prune_history_for_topic_shift(conversation_history)
+                history_before_append = self._snapshot_history(conversation_history)
+            retrieval_query = message
+            if context_decided and context_state == ContextState.FOLLOW_UP.value:
+                retrieval_query = intent_result.get("resolved_query") or message
+                logger.info(f"[CONTEXT] Follow-up: retrieving with resolved query '{retrieval_query[:60]}...'")
+
             # Referral indicators
             referral_indicators = [
                 "\u0645\u062a\u0627\u0633\u0641\u0627\u0646\u0647 \u0627\u0637\u0644\u0627\u0639\u0627\u062a",
@@ -1423,7 +1631,10 @@ Title:"""
             # handler below turns it into one structured error event.
             t0 = time.perf_counter()
             kb_service = get_knowledge_base_service()
-            retrieval = await kb_service._retrieve_context(message, conversation_history, is_public)
+            retrieval = await kb_service._retrieve_context(
+                retrieval_query, conversation_history, is_public,
+                skip_rewrite=context_decided,
+            )
             timings['retrieval'] = time.perf_counter() - t0
             logger.info(
                 f"[PERF] step=retrieval elapsed={timings['retrieval']:.3f}s "
@@ -1500,6 +1711,9 @@ Title:"""
 
                     conversation = await self._get_or_create_session(user_id, model, parameters)
                     history = list(self._message_history.get(user_id, []))
+                    if (intent_result.get("context_state") or ContextState.SELF_CONTAINED.value) == ContextState.TOPIC_SHIFT.value:
+                        # Context isolation: general chain must not see old-subject turns
+                        history = history[-2:]
                     history_before_append = self._snapshot_history(history)
 
                     # Real token streaming; raises on failure -> top-level handler
