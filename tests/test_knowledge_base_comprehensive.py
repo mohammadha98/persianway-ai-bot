@@ -1,12 +1,17 @@
 """
-Comprehensive test script for knowledge base system operations.
+Integration tests for knowledge base removal handling.
 
-This test script performs the following operations:
-1. Test Setup: Initialize knowledge base system with clean test environment
-2. Test Case Implementation: Add and verify test data with complete metadata
-3. Cleanup Verification: Remove test data and verify cleanup
-4. Assertions: All operations complete without errors with explicit assertions
-5. Reporting: Detailed logging and performance metrics
+The add/verify/performance scenarios that used to live here tested an expired
+contract: they assumed ``add_knowledge_contribution`` wrote to the vectordb
+synchronously, whereas that write now happens exclusively in
+``process_knowledge_contribution_background``. Those scenarios were removed and
+are superseded by ``tests/test_knowledge_contribution_flows.py``.
+
+What remains here:
+
+1. Test Setup: Initialize the knowledge base service with a clean test environment
+2. Removal Handling: ``remove_knowledge_contribution`` tolerates an unknown hash_id
+3. Reporting: Detailed logging and performance metrics
 
 Author: AI Assistant
 Created: 2024
@@ -19,7 +24,6 @@ import time
 import uuid
 import os
 import sys
-from datetime import datetime
 from typing import Dict, Any, List
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -338,282 +342,10 @@ def mock_knowledge_base_service():
                     return service
 
 
-@pytest.fixture
-def test_data():
-    """Fixture to provide test data for knowledge base operations."""
-    unique_id = str(uuid.uuid4())
-    timestamp = datetime.now().isoformat()
-    
-    return {
-        "hash_id": unique_id,
-        "title": f"Test Knowledge Entry {unique_id[:8]}",
-        "content": f"This is test content for knowledge base testing. Unique ID: {unique_id}. Created at: {timestamp}",
-        "source": "Test Suite",
-        "meta_tags": ["test", "automation", "knowledge_base"],
-        "author_name": "Test Author",
-        "additional_references": "https://test.example.com",
-        "timestamp": timestamp
-    }
-
-
 @pytest.mark.asyncio
 class TestKnowledgeBaseComprehensive:
     """Comprehensive test class for knowledge base operations."""
     
-    async def test_complete_knowledge_base_workflow(self, mock_knowledge_base_service, test_data, test_metrics):
-        """
-        Test the complete workflow of adding and removing knowledge contributions.
-        
-        This test performs:
-        1. Add new test data to the knowledge base
-        2. Verify the data was successfully added
-        3. Remove the test data
-        4. Verify successful removal
-        """
-        logger.info("=" * 80)
-        logger.info("STARTING COMPREHENSIVE KNOWLEDGE BASE TEST")
-        logger.info("=" * 80)
-        
-        service = mock_knowledge_base_service
-        
-        # Mock database service
-        mock_db_service = MockDatabaseService()
-        
-        with patch('app.services.database.get_database_service', return_value=mock_db_service):
-            
-            # PHASE 1: ADD KNOWLEDGE CONTRIBUTION
-            logger.info("PHASE 1: Adding knowledge contribution")
-            test_metrics.start_timer("add_knowledge_contribution")
-            
-            try:
-                result = await service.add_knowledge_contribution(
-                    title=test_data["title"],
-                    content=test_data["content"],
-                    source=test_data["source"],
-                    meta_tags=test_data["meta_tags"],
-                    author_name=test_data["author_name"],
-                    additional_references=test_data["additional_references"]
-                )
-                
-                add_duration = test_metrics.end_timer("add_knowledge_contribution")
-                
-                # Assertions for successful addition
-                assert result is not None, "Add operation should return a result"
-                assert "id" in result, "Result should contain an ID"
-                assert result["title"] == test_data["title"], "Title should match input"
-                assert result["source"] == test_data["source"], "Source should match input"
-                assert result["meta_tags"] == test_data["meta_tags"], "Meta tags should match input"
-                assert result["author_name"] == test_data["author_name"], "Author name should match input"
-                assert result["is_public"] is False, "Default contributions should not be public unless specified"
-                assert "db_id" in result, "Result should contain database ID"
-                
-                hash_id = result["id"]
-                logger.info(f"✓ Successfully added knowledge contribution with hash_id: {hash_id}")
-                logger.info(f"✓ Addition completed in {add_duration:.3f} seconds")
-                
-            except Exception as e:
-                logger.error(f"✗ Failed to add knowledge contribution: {str(e)}")
-                pytest.fail(f"Add operation failed: {str(e)}")
-            
-            # PHASE 2: VERIFY DATA WAS ADDED
-            logger.info("PHASE 2: Verifying data was successfully added")
-            test_metrics.start_timer("verify_addition")
-            
-            try:
-                # Get vector store and check if documents were added
-                vector_store = service.document_processor.get_vector_store()
-                assert vector_store is not None, "Vector store should be available"
-                
-                # Perform similarity search to find the added document
-                search_results = vector_store.similarity_search_with_score(test_data["title"], k=5)
-                
-                verify_duration = test_metrics.end_timer("verify_addition")
-                
-                # Assertions for successful verification
-                assert len(search_results) > 0, "Search should return results for added document"
-                
-                found_document = False
-                for doc, score in search_results:
-                    if doc.metadata.get("hash_id") == hash_id:
-                        found_document = True
-                        assert doc.metadata.get("title") == test_data["title"], "Document title should match"
-                        assert doc.metadata.get("source") == test_data["source"], "Document source should match"
-                        assert doc.metadata.get("author_name") == test_data["author_name"], "Document author should match"
-                        assert doc.metadata.get("is_public") is False, "Document metadata should reflect public flag"
-                        assert test_data["title"] in doc.page_content, "Document content should contain title"
-                        break
-                
-                assert found_document, f"Document with hash_id {hash_id} should be found in search results"
-                
-                logger.info(f"✓ Successfully verified document addition with {len(search_results)} search results")
-                logger.info(f"✓ Verification completed in {verify_duration:.3f} seconds")
-                
-            except Exception as e:
-                logger.error(f"✗ Failed to verify document addition: {str(e)}")
-                pytest.fail(f"Verification failed: {str(e)}")
-            
-            # PHASE 3: REMOVE KNOWLEDGE CONTRIBUTION
-            logger.info("PHASE 3: Removing knowledge contribution")
-            test_metrics.start_timer("remove_knowledge_contribution")
-            
-            try:
-                removal_result = await service.remove_knowledge_contribution(hash_id)
-                
-                remove_duration = test_metrics.end_timer("remove_knowledge_contribution")
-                
-                # Assertions for successful removal
-                assert removal_result is not None, "Remove operation should return a result"
-                assert "success" in removal_result, "Result should contain success status"
-                assert removal_result["hash_id"] == hash_id, "Result should contain correct hash_id"
-                assert "removed_from_vector_store" in removal_result, "Result should contain vector store removal status"
-                assert "removed_from_database" in removal_result, "Result should contain database removal status"
-                assert "documents_removed_count" in removal_result, "Result should contain removed documents count"
-                assert "timestamp" in removal_result, "Result should contain timestamp"
-                
-                logger.info(f"✓ Successfully initiated removal for hash_id: {hash_id}")
-                logger.info(f"✓ Vector store removal: {removal_result['removed_from_vector_store']}")
-                logger.info(f"✓ Database removal: {removal_result['removed_from_database']}")
-                logger.info(f"✓ Documents removed: {removal_result['documents_removed_count']}")
-                logger.info(f"✓ Removal completed in {remove_duration:.3f} seconds")
-                
-                # Verify sync status was updated before document deletion
-                # Since the document is deleted after sync status update, we can't verify the sync status directly
-                # But we can verify that the sync status update method was called by checking our mock logs
-                logger.info("✓ Sync status update should have been called during removal process")
-                
-            except Exception as e:
-                logger.error(f"✗ Failed to remove knowledge contribution: {str(e)}")
-                pytest.fail(f"Remove operation failed: {str(e)}")
-            
-            # PHASE 4: VERIFY CLEANUP
-            logger.info("PHASE 4: Verifying successful cleanup")
-            test_metrics.start_timer("verify_cleanup")
-            
-            try:
-                # Perform the same search query to verify no results are returned
-                cleanup_search_results = vector_store.similarity_search_with_score(test_data["title"], k=5)
-                
-                verify_cleanup_duration = test_metrics.end_timer("verify_cleanup")
-                
-                # Check that the specific document is no longer found
-                document_still_exists = False
-                for doc, score in cleanup_search_results:
-                    if doc.metadata.get("hash_id") == hash_id:
-                        document_still_exists = True
-                        break
-                
-                assert not document_still_exists, f"Document with hash_id {hash_id} should not be found after removal"
-                
-                # Verify database cleanup - document should still exist but be marked as unsynced
-                db_document_exists = hash_id in [doc.get('hash_id') for doc in mock_db_service.documents.values()]
-                assert db_document_exists, f"Document with hash_id {hash_id} should still exist in database after removal"
-                
-                # Verify the document is marked as unsynced
-                db_document = None
-                for doc in mock_db_service.documents.values():
-                    if doc.get('hash_id') == hash_id:
-                        db_document = doc
-                        break
-                
-                assert db_document is not None, f"Document with hash_id {hash_id} should be found in database"
-                assert db_document.get('synced') == False, f"Document with hash_id {hash_id} should be marked as unsynced"
-                
-                logger.info(f"✓ Successfully verified cleanup - document no longer found in vector store")
-                logger.info(f"✓ Database cleanup verified - document marked as unsynced in database")
-                logger.info(f"✓ Cleanup verification completed in {verify_cleanup_duration:.3f} seconds")
-                
-            except Exception as e:
-                logger.error(f"✗ Failed to verify cleanup: {str(e)}")
-                pytest.fail(f"Cleanup verification failed: {str(e)}")
-        
-        # PHASE 5: GENERATE TEST REPORT
-        logger.info("PHASE 5: Generating test report")
-        
-        performance_report = test_metrics.get_report()
-        
-        logger.info("=" * 80)
-        logger.info("TEST COMPLETION REPORT")
-        logger.info("=" * 80)
-        logger.info(f"✓ All test phases completed successfully")
-        logger.info(f"✓ Total execution time: {performance_report['total_execution_time']:.3f} seconds")
-        logger.info(f"✓ Average operation time: {performance_report['average_operation_time']:.3f} seconds")
-        logger.info("✓ Performance metrics:")
-        
-        for operation, duration in performance_report['operation_metrics'].items():
-            logger.info(f"  - {operation}: {duration:.3f} seconds")
-        
-        logger.info("✓ Knowledge base left in original state")
-        logger.info("=" * 80)
-        
-        # Final assertions
-        assert performance_report['total_execution_time'] > 0, "Test should have measurable execution time"
-        assert len(performance_report['operation_metrics']) == 4, "Should have metrics for all 4 operations"
-        
-        logger.info("🎉 COMPREHENSIVE KNOWLEDGE BASE TEST COMPLETED SUCCESSFULLY! 🎉")
-
-
-    async def test_add_knowledge_contribution_with_metadata_validation(self, mock_knowledge_base_service, test_metrics):
-        """Test adding knowledge contribution with comprehensive metadata validation."""
-        logger.info("Testing knowledge contribution addition with metadata validation")
-        
-        service = mock_knowledge_base_service
-        mock_db_service = MockDatabaseService()
-        
-        test_metrics.start_timer("metadata_validation_test")
-        
-        with patch('app.services.database.get_database_service', return_value=mock_db_service):
-            
-            # Test data with comprehensive metadata
-            test_data = {
-                "title": "Metadata Validation Test Entry",
-                "content": "This entry tests comprehensive metadata validation in the knowledge base system.",
-                "source": "Automated Test Suite",
-                "meta_tags": ["validation", "metadata", "testing", "automation"],
-                "author_name": "Test Automation System",
-                "additional_references": "https://test.validation.com, https://metadata.test.org"
-            }
-            
-            try:
-                result = await service.add_knowledge_contribution(**test_data)
-                
-                # Validate all metadata fields are preserved
-                assert result["title"] == test_data["title"]
-                assert result["source"] == test_data["source"]
-                assert result["meta_tags"] == test_data["meta_tags"]
-                assert result["author_name"] == test_data["author_name"]
-                assert result["additional_references"] == test_data["additional_references"]
-                assert result["is_public"] is False
-                assert "submitted_at" in result
-                assert "id" in result
-                assert "db_id" in result
-                
-                # Verify document in vector store has correct metadata
-                vector_store = service.document_processor.get_vector_store()
-                search_results = vector_store.similarity_search_with_score(test_data["title"], k=1)
-                
-                assert len(search_results) > 0
-                doc, score = search_results[0]
-                
-                assert doc.metadata["title"] == test_data["title"]
-                assert doc.metadata["source"] == test_data["source"]
-                assert doc.metadata["author_name"] == test_data["author_name"]
-                assert doc.metadata["entry_type"] == "user_contribution"
-                assert doc.metadata["source_type"] == "qa_contribution"
-                assert doc.metadata["is_public"] is False
-                assert "hash_id" in doc.metadata
-                assert "submission_timestamp" in doc.metadata
-                
-                test_duration = test_metrics.end_timer("metadata_validation_test")
-                logger.info(f"✓ Metadata validation test completed in {test_duration:.3f} seconds")
-                
-                # Cleanup
-                await service.remove_knowledge_contribution(result["id"])
-                
-            except Exception as e:
-                logger.error(f"✗ Metadata validation test failed: {str(e)}")
-                pytest.fail(f"Metadata validation failed: {str(e)}")
-
-
     async def test_remove_nonexistent_contribution(self, mock_knowledge_base_service, test_metrics):
         """Test removing a non-existent knowledge contribution."""
         logger.info("Testing removal of non-existent knowledge contribution")
@@ -646,81 +378,3 @@ class TestKnowledgeBaseComprehensive:
             except Exception as e:
                 logger.error(f"✗ Non-existent removal test failed: {str(e)}")
                 pytest.fail(f"Non-existent removal test failed: {str(e)}")
-
-
-    async def test_performance_benchmarks(self, mock_knowledge_base_service, test_metrics):
-        """Test performance benchmarks for knowledge base operations."""
-        logger.info("Running performance benchmark tests")
-        
-        service = mock_knowledge_base_service
-        mock_db_service = MockDatabaseService()
-        
-        with patch('app.services.database.get_database_service', return_value=mock_db_service):
-            
-            # Performance thresholds (in seconds)
-            ADD_THRESHOLD = 2.0
-            SEARCH_THRESHOLD = 1.0
-            REMOVE_THRESHOLD = 1.0
-            
-            # Test data
-            test_entries = []
-            for i in range(3):  # Test with multiple entries
-                test_entries.append({
-                    "title": f"Performance Test Entry {i+1}",
-                    "content": f"This is performance test content for entry {i+1}. " * 10,  # Longer content
-                    "source": f"Performance Test {i+1}",
-                    "meta_tags": ["performance", "benchmark", f"test{i+1}"],
-                    "author_name": "Performance Tester",
-                    "additional_references": f"https://performance.test{i+1}.com"
-                })
-            
-            added_ids = []
-            
-            try:
-                # Benchmark addition operations
-                for i, entry in enumerate(test_entries):
-                    test_metrics.start_timer(f"add_performance_{i+1}")
-                    result = await service.add_knowledge_contribution(**entry)
-                    add_duration = test_metrics.end_timer(f"add_performance_{i+1}")
-                    
-                    added_ids.append(result["id"])
-                    assert add_duration < ADD_THRESHOLD, f"Add operation {i+1} took {add_duration:.3f}s, exceeding threshold of {ADD_THRESHOLD}s"
-                    logger.info(f"✓ Add operation {i+1} completed in {add_duration:.3f}s (threshold: {ADD_THRESHOLD}s)")
-                
-                # Benchmark search operations
-                vector_store = service.document_processor.get_vector_store()
-                for i, entry in enumerate(test_entries):
-                    test_metrics.start_timer(f"search_performance_{i+1}")
-                    search_results = vector_store.similarity_search_with_score(entry["title"], k=5)
-                    search_duration = test_metrics.end_timer(f"search_performance_{i+1}")
-                    
-                    assert search_duration < SEARCH_THRESHOLD, f"Search operation {i+1} took {search_duration:.3f}s, exceeding threshold of {SEARCH_THRESHOLD}s"
-                    assert len(search_results) > 0, f"Search operation {i+1} should return results"
-                    logger.info(f"✓ Search operation {i+1} completed in {search_duration:.3f}s (threshold: {SEARCH_THRESHOLD}s)")
-                
-                # Benchmark removal operations
-                for i, hash_id in enumerate(added_ids):
-                    test_metrics.start_timer(f"remove_performance_{i+1}")
-                    result = await service.remove_knowledge_contribution(hash_id)
-                    remove_duration = test_metrics.end_timer(f"remove_performance_{i+1}")
-                    
-                    assert remove_duration < REMOVE_THRESHOLD, f"Remove operation {i+1} took {remove_duration:.3f}s, exceeding threshold of {REMOVE_THRESHOLD}s"
-                    logger.info(f"✓ Remove operation {i+1} completed in {remove_duration:.3f}s (threshold: {REMOVE_THRESHOLD}s)")
-                
-                logger.info("✓ All performance benchmarks passed successfully")
-                
-            except Exception as e:
-                # Cleanup any remaining entries
-                for hash_id in added_ids:
-                    try:
-                        await service.remove_knowledge_contribution(hash_id)
-                    except:
-                        pass
-                
-                logger.error(f"✗ Performance benchmark test failed: {str(e)}")
-                pytest.fail(f"Performance benchmark failed: {str(e)}")
-
-
-if __name__ == "__main__":
-    # Run the tests when script is executed directly
-    pytest.main([__file__, "-v", "--tb=short"])
