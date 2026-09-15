@@ -5,16 +5,32 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
+logger = logging.getLogger(__name__)
+
+# The Angular bundle is a build artifact, not source: `.gitignore` excludes
+# `dist/`, so a deployment that only pulls from git starts without it. In that
+# case `/` used to answer FastAPI's bare 404 (which is indistinguishable from a
+# routing bug), so the missing-bundle case now returns an explicit 503.
+ANGULAR_BUNDLE_MISSING_MESSAGE = {
+    "detail": (
+        "Angular frontend bundle not found. Build it on the host with "
+        "`cd frontend/ai-panel && npm ci && npm run build` (or copy an existing "
+        "`dist/ai-panel/browser` directory into place) and restart the server, "
+        "because main.py registers the SPA routes at import time."
+    )
+}
 
 # Must run before any dependency that still references aliases removed in
 # NumPy 2.0 (ChromaDB < 0.5.0 used np.float_ at import time, which crashed
@@ -157,6 +173,32 @@ def create_application() -> FastAPI:
             if os.path.exists(index_file):
                 return FileResponse(index_file)
             return {"detail": "Angular frontend not built"}
+    else:
+        # No bundle on disk: the SPA routes above are not registered at all, so
+        # without the handlers below FastAPI would answer a bare 404 on `/` and
+        # the failure would look like a routing bug instead of a missing build.
+        logger.warning(
+            "[Frontend] Angular bundle not found at '%s'; the SPA will not be "
+            "served. Run `cd frontend/ai-panel && npm ci && npm run build` on "
+            "this host (or copy a build there) and restart the server.",
+            angular_dist_path,
+        )
+
+        @application.get("/", include_in_schema=False)
+        async def angular_bundle_missing_root():
+            return JSONResponse(
+                status_code=503, content=ANGULAR_BUNDLE_MISSING_MESSAGE
+            )
+
+        @application.get("/{file_path:path}", include_in_schema=False)
+        async def angular_bundle_missing_fallback(file_path: str):
+            # Only the SPA routes are unavailable; API, docs, health and the
+            # mounted /static files must keep behaving exactly as before.
+            if file_path.startswith(("api/", "docs", "health", "ui/", "static/")):
+                raise HTTPException(status_code=404, detail="Not found")
+            return JSONResponse(
+                status_code=503, content=ANGULAR_BUNDLE_MISSING_MESSAGE
+            )
 
     return application
 

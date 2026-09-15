@@ -90,7 +90,6 @@ $RECYCLE.BIN/
 
 # === Frontend / Angular ===
 node_modules/
-dist/
 .angular/
 *.js.map
 

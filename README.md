@@ -137,6 +137,10 @@ ng build --configuration production
 
 When `frontend/ai-panel/dist/ai-panel/browser` exists, FastAPI automatically serves the Angular SPA at `/` and `/ui/...`.
 
+> **Deployment caveat.** The bundle is a build artifact, and `.gitignore` excludes `dist/`, so it is *not* part of the repository. On a host deployed from git you must build it there (`cd frontend/ai-panel && npm ci && npm run build`, requires Node.js) or copy an existing `dist/ai-panel/browser` directory into place, **then restart the backend** — `main.py` registers the SPA routes at import time. If the bundle is missing, `/` answers `503` with a JSON hint instead of silently returning `404`.
+>
+> Also note that `git clean -fd` / `git reset --hard` during a deploy deletes the untracked bundle; either re-run the build afterwards or exclude the path (`git clean -fd -e frontend/ai-panel/dist`).
+
 ## Configuration
 
 Environment variables are loaded from `.env` (see `.env.example` for the full list).
