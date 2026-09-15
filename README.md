@@ -25,7 +25,7 @@ A production-oriented **RAG (Retrieval-Augmented Generation)** chatbot and admin
 |---|---|
 | API framework | FastAPI (Python 3.8+, tested on 3.12/3.13) |
 | LLM orchestration | LangChain (`0.3.x`) + OpenAI / OpenRouter |
-| Vector database | ChromaDB (`0.4.x`) |
+| Vector database | ChromaDB (`1.x`, NumPy 2 compatible) |
 | Document database | MongoDB (Motor / PyMongo) |
 | Frontend | Angular 19 + Angular Material + SCSS |
 | Search | Tavily + BM25 (`rank_bm25`) |

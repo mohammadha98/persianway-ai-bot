@@ -1,5 +1,10 @@
 from typing import List, Dict, Any
 import os
+
+# ChromaDB reads the aliases removed in NumPy 2.0 while being imported, so the
+# compatibility shim has to be applied first (see app/core/numpy_compat.py).
+from app.core import numpy_compat  # noqa: F401  (imported for its side effects)
+
 import chromadb
 import logging
 import re

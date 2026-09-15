@@ -15,6 +15,12 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
+# Must run before any dependency that still references aliases removed in
+# NumPy 2.0 (ChromaDB < 0.5.0 used np.float_ at import time, which crashed
+# every gunicorn worker with "Worker failed to boot" and caused nginx 502s).
+from app.core import numpy_compat  # noqa: F401  (imported for its side effects)
+
 from app.api.routes import router as api_router
 from app.api.routes import ui_router
 from app.core.config import settings
