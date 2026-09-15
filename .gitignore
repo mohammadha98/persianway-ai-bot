@@ -115,5 +115,8 @@ scripts/python*.exe
 /debug_template*.py
 /verify_*.py
 
+# === E2E harness run artifacts (results are environment-specific) ===
+/e2e_runs/
+
 
 
