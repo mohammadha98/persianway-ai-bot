@@ -1,6 +1,6 @@
 export const environment = {
   production: true,
-  apiUrl: 'http://localhost:8000',
+ // apiUrl: 'http://localhost:8000',
   //apiUrl: 'https://pwiran.runflare.run',
-  //  apiUrl: 'https://crm.persianway.ir'
+    apiUrl: 'https://crm.persianway.ir'
 };
