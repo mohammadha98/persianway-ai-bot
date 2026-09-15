@@ -768,7 +768,7 @@ Title:"""
 
         try:
             classifier_llm = llm or await get_llm(
-                model_name="openai/gpt-4o-mini",
+                model_name="google/gemini-3.1-pro-preview",
                 temperature=0.0,
             )
         except Exception as e:
