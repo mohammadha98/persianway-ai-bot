@@ -14,6 +14,7 @@ from app.services.hybrid_retrieval import HybridRetrievalService
 from app.services.excel_processor import get_excel_qa_processor
 from app.services.config_service import ConfigService
 from app.services.context_condenser import batch_condense
+from app.services.text_sanitizer import sanitize_documents
 from app.services.utility import search_persianway
 from langchain_core.documents import Document
 from app.services.task_service import TaskStatus
@@ -217,6 +218,13 @@ class KnowledgeBaseService:
             clean_content = base_content
             total_chars += len(clean_content)
             normalized_docs.append(Document(page_content=clean_content, metadata=clean_metadata))
+        # [BOILERPLATE STRIPPING] Last step before the docs become prompt context,
+        # so BOTH consumers are covered: the non-streaming answer path and
+        # `stream_answer_from_context` (which `chat_service` feeds from
+        # `_retrieve_context`'s `normalized_docs`). Excel Q&A chunks open with a
+        # trainer greeting and close with a CTA/referral that the LLM otherwise
+        # reproduces verbatim. Metadata, order and scores are untouched.
+        normalized_docs = sanitize_documents(normalized_docs)
         if total_original_chars > 0:
             reduction_pct = ((total_original_chars - total_chars) / total_original_chars * 100)
             logging.info(
