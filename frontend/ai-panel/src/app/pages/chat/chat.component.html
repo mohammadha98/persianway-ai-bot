@@ -57,7 +57,7 @@
               matTooltip="تاریخچه مکالمات">
               <mat-icon>menu</mat-icon>
             </button>
-            <button mat-icon-button (click)="toggleAnalysisDetails()" class="analysis-toggle"
+            <button mat-icon-button *ngIf="canViewAnalysis" (click)="toggleAnalysisDetails()" class="analysis-toggle"
               [class.active]="showAnalysisDetails" matTooltip="نمایش جزئیات تحلیل">
               <mat-icon>analytics</mat-icon>
             </button>
@@ -106,8 +106,9 @@
             <div class="message-content">
               <p>{{ message.content }}</p>
 
-              <!-- Enhanced data for assistant messages -->
-              <div *ngIf="!message.isUser && message.queryAnalysis && showAnalysisDetails" class="message-analysis">
+              <!-- Enhanced data for assistant messages (requires 'Analysis' permission) -->
+              <div *ngIf="canViewAnalysis && !message.isUser && message.queryAnalysis && showAnalysisDetails"
+                class="message-analysis">
                 <mat-expansion-panel class="analysis-panel">
                   <mat-expansion-panel-header>
                     <mat-panel-title>

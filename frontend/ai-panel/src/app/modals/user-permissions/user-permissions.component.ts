@@ -45,7 +45,8 @@ export class UserPermissionsComponent implements OnInit {
     { value: 'Chat', label: 'چت' },
     { value: 'Guide', label: 'راهنما' },
     { value: 'Settings', label: 'تنظیمات' },
-    { value: 'Docs', label: 'اسناد' }
+    { value: 'Docs', label: 'اسناد' },
+    { value: 'Analysis', label: 'تحلیل پیام و بازخورد' }
   ];
 
   constructor(

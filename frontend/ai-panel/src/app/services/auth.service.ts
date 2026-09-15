@@ -13,7 +13,8 @@ export enum PermissionType {
   Chat = 'Chat',
   Guide = 'Guide',
   Settings = 'Settings',
-  Docs = 'Docs'
+  Docs = 'Docs',
+  Analysis = 'Analysis'
 }
 
 export interface Permission {

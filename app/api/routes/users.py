@@ -11,7 +11,8 @@ from app.schemas.user import (
     LoginRequest,
     LoginResponse,
     PasswordChangeRequest,
-    UserPermissionUpdate
+    UserPermissionUpdate,
+    PermissionType
 )
 from app.services.user_service import get_user_service, UserService
 
@@ -70,6 +71,35 @@ async def get_admin_user(
             detail="Admin access required"
         )
     return current_user
+
+
+def require_permission(permission_type: PermissionType):
+    """Dependency factory that ensures the current user holds a granted permission.
+
+    Admins bypass the check and always pass. Usage:
+        current_user: UserResponse = Depends(require_permission(PermissionType.ANALYSIS))
+    """
+
+    async def _check_permission(
+        current_user: UserResponse = Depends(get_current_user)
+    ) -> UserResponse:
+        if current_user.role == UserRole.ADMIN:
+            return current_user
+
+        has_permission = any(
+            permission.permission_type == permission_type and permission.granted
+            for permission in (current_user.permissions or [])
+        )
+
+        if not has_permission:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission '{permission_type.value}' required"
+            )
+
+        return current_user
+
+    return _check_permission
 
 
 @router.post("/login", response_model=LoginResponse)

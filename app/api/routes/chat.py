@@ -14,7 +14,8 @@ from app.services.chat_service import get_chat_service
 from app.services.conversation_service import get_conversation_service
 from app.services.feedback_service import get_feedback_service
 from app.services.spell_corrector import get_spell_corrector
-from app.api.routes.users import get_admin_user
+from app.api.routes.users import get_admin_user, require_permission
+from app.schemas.user import PermissionType, UserResponse
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +50,16 @@ def _format_feedback(fb: Dict[str, Any]) -> FeedbackDetail:
 # ==================== Feedback Endpoints ====================
 
 @router.post("/feedback", response_model=FeedbackResponse)
-async def submit_feedback(feedback_request: FeedbackRequest):
+async def submit_feedback(
+    feedback_request: FeedbackRequest,
+    current_user: UserResponse = Depends(require_permission(PermissionType.ANALYSIS))
+):
     """
     Submit feedback (approve, report, edit, or add_to_kb) for an AI message.
-    
+
+    Requires the 'Analysis' permission (admins always allowed). Users without it
+    can only chat and cannot send AI-trainer feedback.
+
     The feedback is stored in MongoDB with a relationship to both the message_id
     and conversation_id, allowing easy navigation between feedbacks and their
     source conversations.

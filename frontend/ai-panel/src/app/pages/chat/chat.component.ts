@@ -24,6 +24,7 @@ import { FeedbackDialogComponent } from '../../modals/feedback-dialog/feedback-d
 import { SourcesDialogComponent } from '../../modals/sources-dialog/sources-dialog.component';
 import { ContextDialogComponent } from '../../modals/context-dialog/context-dialog.component';
 import { BreakpointObserver, Breakpoints } from '@angular/cdk/layout';
+import { AuthService, PermissionType } from '../../services/auth.service';
 
 interface Message {
   id: string;
@@ -78,6 +79,9 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
   isLoading = false;
   userId = '';
   showAnalysisDetails = false;
+  // Requires the 'Analysis' permission (admins always allowed).
+  // Without it the user can only chat: analysis panel and feedback are hidden.
+  canViewAnalysis = false;
 
   // Conversation history properties
   conversationHistory: ConversationResponse[] = [];
@@ -92,7 +96,8 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
     private dialog: MatDialog,
     private snackBar: MatSnackBar,
     private breakpointObserver: BreakpointObserver,
-    private ngZone: NgZone
+    private ngZone: NgZone,
+    private authService: AuthService
   ) { }
 
   ngOnInit() {
@@ -100,6 +105,10 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
       .subscribe(result => {
         this.isMobile = result.matches;
       });
+    // Analysis panel and AI-trainer feedback are only available with the
+    // 'Analysis' permission (admins always have access).
+    this.canViewAnalysis = this.authService.hasRole('admin')
+      || this.authService.hasPermission(PermissionType.Analysis);
     // Initialize userId from user data
     const user = this.chatService.getUserFromStorage();
     if (user?.email) {
@@ -367,6 +376,10 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
   }
 
   toggleAnalysisDetails() {
+    if (!this.canViewAnalysis) {
+      return;
+    }
+
     this.showAnalysisDetails = !this.showAnalysisDetails;
   }
 
@@ -582,6 +595,10 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
    * @param message - The AI message to inspect
    */
   viewSources(message: Message): void {
+    if (!this.canViewAnalysis) {
+      return;
+    }
+
     // Use server-side message_id (fallback to client ID if not available)
     const messageId = message.message_id || message.id;
 
@@ -630,6 +647,10 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
    * @param message - The AI message to inspect
    */
   viewContext(message: Message): void {
+    if (!this.canViewAnalysis) {
+      return;
+    }
+
     // Use server-side message_id (fallback to client ID if not available)
     const messageId = message.message_id || message.id;
 
@@ -681,6 +702,10 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
    * @param message - The AI message to approve
    */
   approveMessage(message: Message): void {
+    if (!this.canViewAnalysis) {
+      return;
+    }
+
     if (message.feedbackStatus === 'approved' || message.submittingFeedback) {
       return;
     }
@@ -737,6 +762,10 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
    * @param message - The AI message to report
    */
   reportMessage(message: Message): void {
+    if (!this.canViewAnalysis) {
+      return;
+    }
+
     if (message.feedbackStatus === 'reported' || message.submittingFeedback) {
       return;
     }

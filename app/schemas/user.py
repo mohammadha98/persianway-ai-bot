@@ -14,6 +14,7 @@ class PermissionType(str, Enum):
     GUIDE = "Guide"
     SETTINGS = "Settings"
     DOCS = "Docs"
+    ANALYSIS = "Analysis"
 
 
 class UserRole(str, Enum):
