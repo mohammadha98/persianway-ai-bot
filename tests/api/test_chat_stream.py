@@ -82,12 +82,20 @@ async def _stream_parts(chat_service):
 
 
 def _data_frames(parts):
-    """Parse the JSON payloads of the `data:` frames, ignoring comment frames."""
+    """Parse the JSON payloads of the `data:` frames.
+
+    Comment frames (`: ping`) carry no payload and the terminal `data: [DONE]`
+    marker is deliberately not JSON, so both are skipped here.
+    """
     frames = []
     for part in parts:
         for frame in part.split("\n\n"):
-            if frame.startswith("data:"):
-                frames.append(json.loads(frame[5:].strip()))
+            if not frame.startswith("data:"):
+                continue
+            payload = frame[5:].strip()
+            if payload == "[DONE]":
+                continue
+            frames.append(json.loads(payload))
     return frames
 
 
@@ -107,6 +115,9 @@ async def test_stream_opens_with_a_frame_before_any_slow_work():
     parts = await _stream_parts(_FakeChatService(_STREAM_EVENTS, delay=0.05))
 
     assert parts[0] == chat_module.SSE_STREAM_OPEN_FRAME
+    # ... and the stream is closed with the explicit marker rather than by the
+    # connection dropping.
+    assert parts[-1] == chat_module.SSE_DONE_FRAME
 
     # The injected open frame must not disturb the event sequence the frontend
     # relies on: metadata -> chunks -> done, with the final answer preserved.
@@ -127,9 +138,14 @@ async def test_heartbeats_keep_the_connection_alive_while_waiting(monkeypatch):
 
     assert chat_module.SSE_HEARTBEAT_FRAME in parts
     first_data_index = next(i for i, part in enumerate(parts) if part.startswith("data:"))
+    # Skip the open frame: it is the same keep-alive comment as the periodic
+    # heartbeat, so the first *periodic* heartbeat is the one that matters here.
+    periodic_heartbeat_index = next(
+        i for i, part in enumerate(parts[1:], start=1) if part == chat_module.SSE_HEARTBEAT_FRAME
+    )
     # At least one heartbeat precedes the first data frame, so a proxy with an
     # idle timeout no longer sees an idle connection during retrieval.
-    assert 0 < parts.index(chat_module.SSE_HEARTBEAT_FRAME) < first_data_index
+    assert 0 < periodic_heartbeat_index < first_data_index
     # ... and the heartbeat frames stay invisible to the frontend parser.
     assert [frame["type"] for frame in _data_frames(parts)] == [
         "metadata", "chunk", "chunk", "done",
@@ -311,7 +327,11 @@ async def test_http_layer_flushes_bytes_before_the_answer_is_ready(monkeypatch):
 
     heartbeat = chat_module.SSE_HEARTBEAT_FRAME.encode()
     first_data_index = next(i for i, (_, body) in enumerate(bodies) if body.startswith(b"data:"))
-    heartbeat_index = next(i for i, (_, body) in enumerate(bodies) if body == heartbeat)
+    # Index 0 is the open frame, which is the same comment as a heartbeat: look for
+    # the first *periodic* heartbeat after it.
+    heartbeat_index = next(
+        i for i, (_, body) in enumerate(bodies[1:], start=1) if body == heartbeat
+    )
     # Heartbeats arrive before the first real token, so a proxy idle timeout
     # never fires while retrieval + the first LLM round trip are running.
     assert 0 < heartbeat_index < first_data_index

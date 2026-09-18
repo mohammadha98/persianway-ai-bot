@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
+import asyncio
 import logging
 import uuid
 from pymongo import DESCENDING
@@ -16,6 +17,11 @@ from app.services.database import get_database_service
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# How long the (non-essential) conversation-title LLM call may take before the
+# fallback title is used. The call happens inside `store_conversation`, which the
+# streaming chat route awaits after the last token -- see the comment there.
+TITLE_GENERATION_TIMEOUT_SECONDS = 15.0
 
 # Maximum length for sources_used string previews
 SOURCES_PREVIEW_MAX_LENGTH = 200
@@ -226,7 +232,20 @@ class ConversationService:
                 # Generate conversation title using ChatService
                 from app.services.chat_service import ChatService
                 chat_service = ChatService()
-                generated_title = await chat_service.generate_conversation_title(user_message.content)
+                # Bounded: this runs *inside* the streaming request, after the last
+                # token and before the route can emit its `done` event, so an
+                # unresponsive title provider would hold the client's connection
+                # open with nothing being written. `generate_conversation_title`
+                # falls back on errors but has no timeout of its own; the stream
+                # route applies the same bound to its own title call.
+                try:
+                    generated_title = await asyncio.wait_for(
+                        chat_service.generate_conversation_title(user_message.content),
+                        timeout=TITLE_GENERATION_TIMEOUT_SECONDS,
+                    )
+                except Exception as title_error:
+                    logger.warning(f"Conversation title not generated: {title_error}")
+                    generated_title = "New Conversation"
                 
                 # Generate a unique string conversation_id for feedback linkage
                 new_conversation_id = f"conv_{uuid.uuid4().hex[:16]}"

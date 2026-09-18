@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional, Any, TYPE_CHECKING, AsyncGenerator
+import asyncio
 import json
 import re
 import time
@@ -1778,6 +1779,18 @@ Title:"""
             timings['total_pipeline'] = time.perf_counter() - t_pipeline_start
             logger.info(f"[PERF] Pipeline timings: {timings}")
             
+        except asyncio.CancelledError:
+            # Client disconnected (or the server is shutting down) mid-answer.
+            # Starlette cancels this generator at its current suspension point,
+            # so there is no consumer left to receive a structured error event;
+            # yielding one here would be silently discarded and the log would
+            # look like a real failure. Re-raise: cancellation must propagate.
+            logger.info(
+                "[STREAM] Generation cancelled (client disconnected) after "
+                f"{len(full_answer)} chars in {time.perf_counter() - t_pipeline_start:.3f}s"
+            )
+            raise
+
         except Exception as e:
             # Top-level generator is the ONLY place exceptions are caught.
             # Single structured error event: no metadata re-emission after failure,

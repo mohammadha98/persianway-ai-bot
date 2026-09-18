@@ -8,6 +8,7 @@ if sys.platform == "win32":
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,9 +46,29 @@ from app.services.config_service import get_config_service, get_dynamic_app_sett
 from app.services.database import close_database_connection, get_database_service
 
 
+async def _warm_up_retrieval() -> None:
+    """Build the retrieval stack (Chroma, hybrid service, BM25 indexes) off-loop.
+
+    Runs as a background task from the app lifespan; see `lifespan` for why the
+    work must not stay on the first request's path.
+    """
+    # Imported locally: `main` is imported by tooling that must not require the
+    # full retrieval stack (langchain/chroma) to be importable.
+    from app.services.knowledge_base import get_knowledge_base_service
+
+    try:
+        await get_knowledge_base_service().warm_up()
+    except asyncio.CancelledError:
+        logger.info("[WARMUP] Retrieval warm-up cancelled (shutdown)")
+        raise
+    except Exception as e:  # pragma: no cover - defensive, warm_up logs its own
+        logger.error("[WARMUP] Retrieval warm-up failed: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
+    retrieval_warmup: Optional[asyncio.Task] = None
     # Startup: Initialize database, config, and middleware
     try:
         await get_database_service()
@@ -69,9 +90,27 @@ async def lifespan(app: FastAPI):
         # If database fails, the app will run with static settings
         print("Running with static configuration")
 
+    # Build the retrieval stack (Chroma client + collection, hybrid service, BM25
+    # branch indexes) in the background, off the event loop. Doing this lazily in
+    # the first streaming request is what made a cold worker look like a hung
+    # stream in production: the blocking Chroma/BM25 work froze the loop, gunicorn
+    # stopped receiving heartbeats and killed the worker (`WORKER TIMEOUT ...
+    # SIGABRT`) while the client was still waiting for its first byte.
+    # Fire-and-forget on purpose: the worker must report itself booted
+    # immediately, and scheduling the work as a background task is what keeps boot
+    # latency unchanged.
+    try:
+        retrieval_warmup = asyncio.create_task(
+            _warm_up_retrieval(), name="retrieval-warmup"
+        )
+    except Exception as e:  # pragma: no cover - defensive
+        print(f"Retrieval warm-up could not be scheduled: {e}")
+
     yield
 
-    # Shutdown: Close database connection
+    # Shutdown: stop the warm-up if it is still running, then close the database.
+    if retrieval_warmup is not None and not retrieval_warmup.done():
+        retrieval_warmup.cancel()
     await close_database_connection()
     print("Database connection closed")
 

@@ -1,5 +1,6 @@
 from typing import List, Dict, Any
 import os
+import time
 
 # ChromaDB reads the aliases removed in NumPy 2.0 while being imported, so the
 # compatibility shim has to be applied first (see app/core/numpy_compat.py).
@@ -55,6 +56,13 @@ from app.core.config import settings
 # client, `WORKER TIMEOUT` in the logs).
 EMBEDDING_REQUEST_TIMEOUT_SECONDS = 30.0
 EMBEDDING_MAX_RETRIES = 1
+
+# ... and even a *bounded* probe is 30s long. `_ensure_embeddings` was written to
+# "retry next request" after a failure, which means every single request paid
+# that 30s before it could do any retrieval -- for a user waiting on a stream,
+# indistinguishable from a dead server. A failed probe now backs off for this
+# long; the retry still happens, just not on the critical path of every request.
+EMBEDDING_PROBE_RETRY_INTERVAL_SECONDS = 60.0
 
 
 class OpenRouterEmbeddings:
@@ -173,6 +181,9 @@ class DocumentProcessor:
         self._provider = "none"
         self._model_name = "none"
         self._dim = 0
+        # Monotonic timestamp of the last FAILED embedding probe; see
+        # `_ensure_embeddings` (backs off instead of re-probing on every request).
+        self._last_probe_failure_at = 0.0
 
         # Initialize text splitter for chunking documents
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -236,16 +247,30 @@ class DocumentProcessor:
         self._build_embeddings()
         if self.embeddings is None:
             return False
+        # Backoff after a failure: the probe below is a blocking HTTP call with a
+        # 30s timeout, and this method sits inside the streaming request path
+        # (`get_vector_store`). Retrying on *every* request turned a broken
+        # embeddings endpoint into a 30s stall per message.
+        if self._last_probe_failure_at:
+            since_failure = time.monotonic() - self._last_probe_failure_at
+            if since_failure < EMBEDDING_PROBE_RETRY_INTERVAL_SECONDS:
+                logging.debug(
+                    "Embedding probe in backoff (%.1fs of %.1fs); skipping this request",
+                    since_failure, EMBEDDING_PROBE_RETRY_INTERVAL_SECONDS,
+                )
+                return False
         try:
             probe = self.embeddings.embed_query("probe")
             if isinstance(probe, (list, tuple)) and probe:
                 self._dim = len(probe)
             self.embeddings_available = True
+            self._last_probe_failure_at = 0.0
             logging.info(f"Embeddings ready: {self._provider}/{self._model_name} dim={self._dim}")
             return True
         except Exception as e:
             # مهم: self.embeddings را None نکن تا درخواست بعدی دوباره تلاش کند
-            logging.error(f"Embedding probe failed (will retry next request): {e}")
+            self._last_probe_failure_at = time.monotonic()
+            logging.error(f"Embedding probe failed (next retry in {EMBEDDING_PROBE_RETRY_INTERVAL_SECONDS:.0f}s): {e}")
             return False
 
     @property

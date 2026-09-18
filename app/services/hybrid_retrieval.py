@@ -133,6 +133,9 @@ class HybridRetrievalService:
         A long-lived `HybridRetrievalService` therefore kept serving a BM25 index
         built from the old documents for up to `_cache_ttl_seconds` (1h). We now
         compare the collection count and rebuild when it differs.
+
+        Blocking. Never call this from a coroutine on the event loop -- use
+        `refresh_caches_if_collection_changed_async()` from async code.
         """
         coll = getattr(self.vector_store, "_collection", None)
         if coll is None:
@@ -386,20 +389,7 @@ class HybridRetrievalService:
         if not query.strip():
             return []
         # Create filters with is_public metadata filtering
-        filters = {
-            "contrib": {"$and": [
-                {"entry_type": {"$in": ["user_contribution"]}},
-                {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
-            ]},
-            "docx": {"$and": [
-                {"entry_type": {"$in": ["user_contribution_docx"]}},
-                {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
-            ]},
-            "excel": {"$and": [
-                {"entry_type": {"$in": ["user_contribution_excel"]}},
-                {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
-            ]},
-        }
+        filters = self._bm25_branch_filters(is_public)
         combined: List[Tuple[Document, float]] = []
         for key, f in filters.items():
             retr = self._get_bm25(key, f, is_public=is_public, k=k)
@@ -412,47 +402,84 @@ class HybridRetrievalService:
                 combined.append((d, float(score)))
         return combined
 
+    async def refresh_caches_if_collection_changed_async(self) -> None:
+        """Run the collection-count probe without blocking the event loop.
+
+        `coll.count()` talks to Chroma (SQLite read + query planning on the
+        ~91 MB local store, or a round trip when `USE_REMOTE_CHROMADB` is set) and
+        `hybrid_retrieve` runs it on *every* query, on the event loop. A slow
+        count therefore freezes the whole worker -- gunicorn's heartbeat stops and
+        the worker is killed with `WORKER TIMEOUT ... SIGABRT` while the client is
+        still waiting for its answer.
+        """
+        await asyncio.to_thread(self._refresh_caches_if_collection_changed)
+
+    def _bm25_branch_filters(self, is_public: bool) -> Dict[str, Dict[str, Any]]:
+        """The three metadata visibility filters searched by the BM25 branches.
+
+        Shared by the sync and async BM25 paths (and by `prewarm`) so the filter
+        definitions can never drift apart -- they are part of the cache keys.
+        """
+        visibility = {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}}
+        return {
+            "contrib": {"$and": [{"entry_type": {"$in": ["user_contribution"]}}, dict(visibility)]},
+            "docx": {"$and": [{"entry_type": {"$in": ["user_contribution_docx"]}}, dict(visibility)]},
+            "excel": {"$and": [{"entry_type": {"$in": ["user_contribution_excel"]}}, dict(visibility)]},
+        }
+
+    async def _get_or_build_bm25_async(
+        self, key: str, filt: Dict, is_public: bool, k: int
+    ) -> Optional[BM25Retriever]:
+        """Return the cached BM25 retriever for one branch, building it off-loop.
+
+        Requires a *non-blocking* fresh cache entry: the negative cache
+        (`(None, ts)`) is returned as-is so a branch with no documents is not
+        re-scanned on every query.
+        """
+        cache_key = f"{key}_k{k}_public_{is_public}"
+        cached = self._get_cached_entry(self._bm25_cache, cache_key)
+        if cached is not None:
+            return cached[0]
+        # `_get_bm25` fetches the whole branch from Chroma and builds the index in
+        # pure Python: both are far too expensive for the event loop.
+        return await asyncio.to_thread(self._get_bm25, key, filt, is_public, k)
+
+    async def prewarm(self, is_public: bool = False, k: int = 15) -> int:
+        """Build the BM25 indexes for `is_public` ahead of the first query.
+
+        Cold-start cost (full Chroma collection fetch + tokenisation + BM25 index
+        build per branch) used to land inside the first streaming request of every
+        worker, which is exactly the window where the worker heartbeat matters
+        most. Called from the app lifespan instead, so the first user request only
+        pays for the retrieval itself.
+
+        Returns the number of branch indexes that are ready to serve.
+        """
+        filters = self._bm25_branch_filters(is_public)
+        ready = 0
+        for key, filt in filters.items():
+            try:
+                retriever = await self._get_or_build_bm25_async(key, filt, is_public, k)
+            except Exception as e:  # a warm-up failure must never break startup
+                logger.warning(f"[HYBRID] BM25 prewarm failed for {key}: {e}")
+                continue
+            if retriever is not None:
+                ready += 1
+        logger.info(f"[HYBRID] BM25 prewarm done (is_public={is_public}, ready={ready})")
+        return ready
+
     async def _bm25_parallel_async(self, query: str, k: int, is_public: bool = False) -> List[Tuple[Document, float]]:
         """Parallel BM25 retrieval for 3 branches with async thread offloading."""
         if not query or not query.strip():
             return []
 
-        filters = {
-            "contrib": {
-                "$and": [
-                    {"entry_type": {"$in": ["user_contribution"]}},
-                    {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}},
-                ]
-            },
-            "docx": {
-                "$and": [
-                    {"entry_type": {"$in": ["user_contribution_docx"]}},
-                    {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}},
-                ]
-            },
-            "excel": {
-                "$and": [
-                    {"entry_type": {"$in": ["user_contribution_excel"]}},
-                    {"is_public": {"$eq": True}} if is_public else {"is_public": {"$ne": True}},
-                ]
-            },
-        }
+        filters = self._bm25_branch_filters(is_public)
 
         async def run_one_bm25(key: str, filt: Dict[str, Any]) -> List[Tuple[Document, float]]:
             try:
-                cache_key = f"{key}_k{k}_public_{is_public}"
-                cached = self._bm25_cache.get(cache_key)
-                retriever = cached[0] if (cached and self._is_cache_valid(cached[1])) else None
-
+                retriever = await self._get_or_build_bm25_async(key, filt, is_public, k)
                 if retriever is None:
-                    docs = await asyncio.to_thread(self._get_docs_for_filter, filt)
-                    if not docs:
-                        self._store_cache(self._bm25_cache, cache_key, (None, time.time()))
-                        return []
-
-                    retriever = await asyncio.to_thread(BM25Retriever.from_documents, docs, preprocess_func=_tokenize)
-                    retriever.k = k
-                    self._store_cache(self._bm25_cache, cache_key, (retriever, time.time()))
+                    return []
 
                 results = await asyncio.to_thread(_bm25_invoke, retriever, query)
                 scored_results: List[Tuple[Document, float]] = []
@@ -561,7 +588,9 @@ class HybridRetrievalService:
         # BEFORE the BM25 branches so they rebuild against fresh documents.
         # (Explicit `invalidate_caches()` remains available for callers that know
         # the collection changed.)
-        self._refresh_caches_if_collection_changed()
+        # Off the event loop: `coll.count()` is a blocking Chroma call and this
+        # line runs on every query.
+        await self.refresh_caches_if_collection_changed_async()
         
         # === PERF: Detailed Timing Tracking ===
         timings = {}

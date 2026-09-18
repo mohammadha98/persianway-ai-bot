@@ -204,6 +204,46 @@ class KnowledgeBaseService:
             self._hybrid_service.invalidate_caches()
         await self._get_document_chain()
 
+    async def warm_up(self) -> None:
+        """Pay the retrieval cold-start cost at boot instead of inside a request.
+
+        Two expensive, blocking steps used to run inside the first streaming
+        request served by each worker:
+
+        1. ``DocumentProcessor.get_vector_store()`` -- opens the Chroma client,
+           resolves/creates the collection and builds the LangChain wrapper over
+           the local store (tens of MB on the reference deployment).
+        2. ``HybridRetrievalService`` construction plus its BM25 branch indexes --
+           a full collection fetch, tokenisation and a pure-Python BM25 build per
+           branch.
+
+        Both are executed here, away from the event loop and before any user
+        request arrives, so a cold worker can never look like a hung stream to the
+        client (and to gunicorn, which kills a worker whose heartbeat stops). The
+        work is identical to what the first query used to do; only its timing
+        moves.
+
+        Best-effort: any failure is logged and swallowed, because a broken vector
+        store must not stop the app from booting (the first request then pays the
+        cold cost exactly as before).
+        """
+        started = time.perf_counter()
+        try:
+            vector_store = await self._get_vector_store_async()
+            if vector_store is None:
+                logging.warning(
+                    "[KB WARMUP] Vector store unavailable (embeddings not ready); "
+                    "retrieval will keep retrying per request"
+                )
+                return
+            hybrid = await self._get_hybrid_service_async()
+            await hybrid.prewarm()
+            logging.info(f"[KB WARMUP] Retrieval ready in {time.perf_counter() - started:.3f}s")
+        except Exception as e:
+            logging.error(
+                f"[KB WARMUP] Failed after {time.perf_counter() - started:.3f}s: {e}"
+            )
+
 
     def _normalize_documents_for_context(
         self,
@@ -1019,11 +1059,12 @@ Return ONLY a JSON object in PERSIAN with these fields:
 
 
         # ============ TRACE: ENTRY ============
-        print("=" * 80)
-        print("[TRACE_ENTER] _retrieve_context")
-        print("[TRACE] query=" + str(query)[:80])
-        print("[TRACE] is_public=" + str(is_public))
-        print("=" * 80)
+        # (The request-path `print()` calls that used to live here wrote to stdout
+        # on every retrieval -- synchronously, inside the streaming request. They
+        # are replaced by a debug log that is off unless explicitly enabled.)
+        logging.debug(
+            "[TRACE] _retrieve_context query=%s is_public=%s", str(query)[:80], is_public
+        )
 
         t_retrieval_start = time.perf_counter()
         retrieval_timings = {}
@@ -1040,12 +1081,6 @@ Return ONLY a JSON object in PERSIAN with these fields:
                         continue
                 filtered_history.append(msg)
 
-        print("trace_history")
-        print("[TRACE] history filtered count")
-        print("step_2_done")
-        print("[TRACE] history step 2 trace ready")
-        print("[TRACE] last_placeholder_cleanup")
-        print("[TRACE] PAST_PLACEHOLDERS")
         # --- Query rewriting/expansion ---
         t0 = time.perf_counter()
         query_expansion_result = await self.expand_query_with_context(

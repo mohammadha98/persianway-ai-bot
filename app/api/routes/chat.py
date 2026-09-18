@@ -42,12 +42,33 @@ SSE_HEARTBEAT_INTERVAL_SECONDS = 10.0
 # Bounded so an unresponsive provider can never delay the response headers.
 TITLE_GENERATION_TIMEOUT_SECONDS = 15.0
 
-# Emitted as the first frame of every stream: flushes the status line + headers
-# immediately, so `fetch()` resolves and every proxy starts forwarding data.
-SSE_STREAM_OPEN_FRAME = ": stream-open\n\n"
-
-# Emitted while waiting for the next chunk of the answer.
+# Emitted while waiting for the next chunk of the answer. A comment frame, i.e.
+# it carries no `data:` line, so the frontend parser (chat.service.ts ->
+# processFrame) ignores it while nginx/HTTP2 see real bytes on the wire.
 SSE_HEARTBEAT_FRAME = ": ping\n\n"
+
+# Emitted as the first frame of every stream: same keep-alive comment as the
+# periodic heartbeat, written before any slow work runs, so the status line and
+# the headers are flushed immediately (a real byte on the wire), `fetch()`
+# resolves right away and every proxy starts forwarding data.
+SSE_STREAM_OPEN_FRAME = SSE_HEARTBEAT_FRAME
+
+# Explicit end-of-stream marker, written after the JSON `done` / `error` event so
+# a client never has to infer the end of the stream from a closed connection
+# (that inference is what turns a proxy hiccup into a truncated answer). It is
+# recognised and skipped by the frontend parser, see chat.service.ts.
+SSE_DONE_FRAME = "data: [DONE]\n\n"
+
+
+def _sse_data_frame(payload) -> str:
+    """Serialise one SSE event: `data: <json>\\n\\n`, UTF-8, never ASCII-escaped.
+
+    Every payload the route sends goes through here so the wire format stays
+    identical for metadata, tokens, errors and the final event.
+    """
+    if not isinstance(payload, str):
+        payload = json.dumps(payload, ensure_ascii=False)
+    return f"data: {payload}\n\n"
 
 
 class _SSEHeartbeat:
@@ -110,6 +131,36 @@ async def _with_sse_heartbeats(source):
         # never leave the producer running past the response it feeds.
         if not producer.done():
             producer.cancel()
+
+
+async def _await_with_sse_heartbeats(coro):
+    """Await `coro`, yielding heartbeat sentinels while it is still pending.
+
+    Yields `SSE_HEARTBEAT_SENTINEL` every `SSE_HEARTBEAT_INTERVAL_SECONDS`, then
+    the awaited result (re-raising its exception on the consuming side), then
+    stops.
+
+    Needed because `_with_sse_heartbeats` only covers the answer generator: the
+    route's post-processing (persisting the conversation, which itself may run a
+    title LLM round trip) happens *after* the last token and used to write nothing
+    at all, so the client waited for the `done` event in silence -- exactly the
+    silence that makes a proxy reset a finished-but-unterminated stream.
+    """
+    task = asyncio.ensure_future(coro)
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {task}, timeout=SSE_HEARTBEAT_INTERVAL_SECONDS
+            )
+            if done:
+                yield task.result()
+                return
+            yield SSE_HEARTBEAT_SENTINEL
+    finally:
+        # Client disconnected or an error was raised: never leave the coroutine
+        # running past the response it feeds.
+        if not task.done():
+            task.cancel()
 
 
 # Create router for chat endpoints
@@ -475,12 +526,19 @@ async def stream_chat(
     conversation_service=Depends(get_conversation_service)
 ):
     """Stream a chat message response using Server-Sent Events (SSE).
-    
+
     This endpoint processes a message and streams the response token-by-token
     as it's generated, enabling real-time UI updates on the client side.
-    
-    The response is formatted as Server-Sent Events (SSE) with JSON data.
-    
+
+    Wire format of the response (``text/event-stream``, never buffered):
+
+    * ``: ping`` -- comment frame written before any slow work, and then every
+      ``SSE_HEARTBEAT_INTERVAL_SECONDS`` while the answer is still being
+      produced, so no proxy mistakes a slow generation for an idle connection.
+    * ``data: {...}`` -- one JSON event per frame (``metadata``, ``chunk``,
+      ``done`` or ``error``), serialised through ``_sse_data_frame``.
+    * ``data: [DONE]`` -- explicit end-of-stream marker written last.
+
     Supports both GET (for EventSource) and POST methods.
     """
     try:
@@ -550,7 +608,7 @@ async def stream_chat(
                         response_parameters = chunk.get("response_parameters") or response_parameters
                         
                         # Send metadata to client
-                        yield f"data: {json.dumps({'type': 'metadata', 'data': chunk}, ensure_ascii=False)}\n\n"
+                        yield _sse_data_frame({'type': 'metadata', 'data': chunk})
                     
                     # Handle content chunks (incremental tokens)
                     elif event_type == "chunk":
@@ -558,7 +616,7 @@ async def stream_chat(
                         full_answer += content
                         
                         # Send content chunk to client
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': content}, ensure_ascii=False)}\n\n"
+                        yield _sse_data_frame({'type': 'chunk', 'content': content})
                     
                     # Handle service done event: authoritative final answer + final analysis.
                     # Not forwarded as-is; the route emits its own done event below with
@@ -585,7 +643,8 @@ async def stream_chat(
                         "message": stream_error.get("message") or "خطای غیرمنتظره رخ داد. لطفاً دوباره تلاش کنید.",
                         "code": stream_error.get("code", "stream_internal_error"),
                     }
-                    yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                    yield _sse_data_frame(error_data)
+                    yield SSE_DONE_FRAME
                     return
                 
                 if final_query_analysis is not None:
@@ -594,19 +653,29 @@ async def stream_chat(
                 # Calculate response time
                 response_time_ms = (time.time() - start_time) * 1000
                 
-                # Store the conversation in the database
-                store_result = await conversation_service.store_conversation(
-                    session_id=session_id,
-                    user_email=user_email,
-                    user_id=user_id,
-                    user_question=message,
-                    system_response=full_answer,
-                    query_analysis=query_analysis or {},
-                    response_parameters=response_parameters or {},
-                    sources_used=normalized_sources,
-                    response_time_ms=response_time_ms,
-                    prompt_snapshot=prompt_snapshot,
-                )
+                # Store the conversation in the database. Heartbeat-wrapped: the
+                # write (plus the title LLM call inside `store_conversation`) happens
+                # after the last token, and without a byte on the wire here the
+                # client waits for `done` in silence.
+                store_result = None
+                async for item in _await_with_sse_heartbeats(
+                    conversation_service.store_conversation(
+                        session_id=session_id,
+                        user_email=user_email,
+                        user_id=user_id,
+                        user_question=message,
+                        system_response=full_answer,
+                        query_analysis=query_analysis or {},
+                        response_parameters=response_parameters or {},
+                        sources_used=normalized_sources,
+                        response_time_ms=response_time_ms,
+                        prompt_snapshot=prompt_snapshot,
+                    )
+                ):
+                    if item is SSE_HEARTBEAT_SENTINEL:
+                        yield SSE_HEARTBEAT_FRAME
+                    else:
+                        store_result = item
                 
                 # Extract IDs. store_result is None when persistence failed:
                 # the answer still streams back, but message_id is None so the
@@ -639,8 +708,23 @@ async def stream_chat(
                         for msg in (conversation_history or [])
                     ]
                 }
-                yield f"data: {json.dumps(completion_data, ensure_ascii=False)}\n\n"
-                
+                yield _sse_data_frame(completion_data)
+                # Explicit end-of-stream marker: the client never has to infer the
+                # end of the answer from the connection being closed.
+                yield SSE_DONE_FRAME
+
+            except asyncio.CancelledError:
+                # The client went away (or the server is shutting down) while the
+                # answer was still being produced. There is nobody left to receive
+                # an SSE error frame, so this is a normal end of the request, not a
+                # failure. It must never be swallowed: re-raising lets the
+                # generator unwind and cancels the service stream instead of
+                # leaving a half-open producer behind.
+                logger.info(
+                    "Chat stream cancelled (client disconnected) for user_id=%s", user_id
+                )
+                raise
+
             except Exception as e:
                 # Structured error event: user-safe message + internal code, never raw details.
                 logger.error(f"Error in stream_generator: {str(e)}")
@@ -649,13 +733,20 @@ async def stream_chat(
                     "message": "خطای غیرمنتظره رخ داد. لطفاً دوباره تلاش کنید.",
                     "code": "stream_route_error",
                 }
-                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                yield _sse_data_frame(error_data)
+                yield SSE_DONE_FRAME
 
         return StreamingResponse(
             stream_generator(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
+                # Hop-by-hop, and therefore ignored under HTTP/2 (where nginx
+                # manages the connection itself), but explicit for HTTP/1.1
+                # clients and proxies that only look at this header.
+                "Connection": "keep-alive",
+                # Tells nginx not to buffer the stream: without it the heartbeats
+                # sit in proxy buffers and the client still sees silence.
                 "X-Accel-Buffering": "no",
                 "Content-Type": "text/event-stream; charset=utf-8"
             }
