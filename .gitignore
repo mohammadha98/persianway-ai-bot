@@ -116,6 +116,7 @@ scripts/python*.exe
 
 # === E2E harness run artifacts (results are environment-specific) ===
 /e2e_runs/
+/reports/
 
 
 
