@@ -174,6 +174,16 @@ export class ChatService {
               return;
             }
 
+            // Explicit end-of-stream marker written by the API after the JSON
+            // `done` event. It is deliberately not JSON, so it is recognised
+            // before parsing: `done` has already completed the observable, and
+            // this only confirms that the server closed the stream on purpose
+            // instead of dropping the connection mid-answer.
+            if (payload === '[DONE]') {
+              terminated = true;
+              return;
+            }
+
             let event: any;
             try {
               event = JSON.parse(payload);
