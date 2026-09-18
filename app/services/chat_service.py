@@ -22,11 +22,14 @@ async def get_llm(model_name: str = None, temperature: float = None, max_tokens:
     
     When using OpenAI directly, provider prefixes are automatically removed.
     """
-    from app.services.config_service import ConfigService
-    
-    # Get dynamic configuration
-    config_service = ConfigService()
-    await config_service._load_config()
+    from app.services.config_service import get_config_service
+
+    # Reuse the process-wide configuration singleton (initialized during app
+    # startup) instead of building a throwaway `ConfigService()` and calling
+    # `_load_config()` on it: that pair issued a MongoDB query on *every* LLM
+    # instantiation, and `get_llm` sits on the request path -- including once
+    # before `/chat/stream` is allowed to emit its first byte.
+    config_service = await get_config_service()
     llm_settings = await config_service.get_llm_settings()
     
     # Determine which API provider to use based on configuration

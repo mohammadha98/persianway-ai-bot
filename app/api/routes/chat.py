@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any, Union, Optional, List
+import asyncio
 import time
 import json
 import logging
@@ -18,6 +19,98 @@ from app.api.routes.users import get_admin_user, require_permission
 from app.schemas.user import PermissionType, UserResponse
 
 logger = logging.getLogger(__name__)
+
+# ==================== SSE keep-alive tuning ====================
+# Production symptom these guard against: `GET /api/chat/stream` answered 200
+# but the body never arrived -- nginx logged "upstream prematurely closed
+# connection while reading upstream" and the browser reported
+# `net::ERR_HTTP2_PROTOCOL_ERROR` (surfaced by the frontend as the structured
+# `stream_read_error` event). The route used to send nothing at all until intent
+# detection, retrieval and the first LLM round trip had finished, so a proxy
+# idle timeout (nginx `proxy_read_timeout` defaults to 60s) reset the HTTP/2
+# stream of a request that was still perfectly healthy.
+#
+# The stream now opens with a comment frame and emits one every
+# `SSE_HEARTBEAT_INTERVAL_SECONDS` while it waits for the next chunk. Comment
+# frames carry no `data:` line, so the frontend parser
+# (chat.service.ts -> processFrame) ignores them, while nginx/HTTP2 see real
+# bytes on the wire and keep the connection open.
+SSE_HEARTBEAT_INTERVAL_SECONDS = 10.0
+
+# `generate_conversation_title` is an LLM round trip executed *before* the
+# StreamingResponse is returned (i.e. before the client receives a single byte).
+# Bounded so an unresponsive provider can never delay the response headers.
+TITLE_GENERATION_TIMEOUT_SECONDS = 15.0
+
+# Emitted as the first frame of every stream: flushes the status line + headers
+# immediately, so `fetch()` resolves and every proxy starts forwarding data.
+SSE_STREAM_OPEN_FRAME = ": stream-open\n\n"
+
+# Emitted while waiting for the next chunk of the answer.
+SSE_HEARTBEAT_FRAME = ": ping\n\n"
+
+
+class _SSEHeartbeat:
+    """Sentinel yielded by `_with_sse_heartbeats` while `source` is silent.
+
+    A dedicated type (instead of a string) so the caller has to decide explicitly
+    how to serialise it, and so a heartbeat can never be mistaken for one of the
+    `dict` events coming out of `ChatService.process_message_stream`.
+    """
+
+
+SSE_HEARTBEAT_SENTINEL = _SSEHeartbeat()
+
+
+async def _with_sse_heartbeats(source):
+    """Yield every item of `source`, plus heartbeats while it is silent.
+
+    `source` (the async generator from `ChatService.process_message_stream`) is
+    drained by a producer task so this generator stays responsive: whenever no
+    item has arrived for `SSE_HEARTBEAT_INTERVAL_SECONDS` it yields
+    `SSE_HEARTBEAT_SENTINEL`, which lets the route write a byte to the socket and
+    thereby stops nginx (or any other proxy in front of it) from treating a slow
+    generation as an idle connection and resetting the HTTP/2 stream mid-answer.
+
+    Exceptions raised by `source` are re-raised on the consuming side, so the
+    route's existing error handling keeps working unchanged.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+    _STREAM_END = object()
+
+    async def _producer():
+        try:
+            async for item in source:
+                queue.put_nowait(item)
+        except asyncio.CancelledError:
+            raise  # the consumer went away: don't mask the cancellation
+        except BaseException as exc:  # noqa: BLE001 - forwarded to the consumer
+            queue.put_nowait(exc)
+        finally:
+            queue.put_nowait(_STREAM_END)
+
+    producer = asyncio.create_task(_producer())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(
+                    queue.get(), SSE_HEARTBEAT_INTERVAL_SECONDS
+                )
+            except asyncio.TimeoutError:
+                yield SSE_HEARTBEAT_SENTINEL
+                continue
+
+            if item is _STREAM_END:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+    finally:
+        # Client disconnected, an error was raised or the answer finished:
+        # never leave the producer running past the response it feeds.
+        if not producer.done():
+            producer.cancel()
+
 
 # Create router for chat endpoints
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -404,11 +497,28 @@ async def stream_chat(
                 title = existing_conversation[0].title
         
         if not title:
-            title = await chat_service.generate_conversation_title(message)
+            # Bounded: this LLM round trip happens before the first byte of the
+            # response, so an unresponsive provider would otherwise keep the
+            # client (and every proxy in between) waiting with no headers at
+            # all. `generate_conversation_title` already falls back on errors.
+            try:
+                title = await asyncio.wait_for(
+                    chat_service.generate_conversation_title(message),
+                    timeout=TITLE_GENERATION_TIMEOUT_SECONDS,
+                )
+            except Exception as title_error:
+                logger.warning(f"Conversation title not generated: {title_error}")
+                title = "New Conversation"
 
         # Generator function to stream the response
         async def stream_generator():
             try:
+                # Flush the status line + headers (a real byte on the wire)
+                # before the first slow step, so no proxy can consider this
+                # connection idle while retrieval + the first LLM round trip
+                # run, and the client starts rendering immediately.
+                yield SSE_STREAM_OPEN_FRAME
+
                 # Stream the message processing
                 full_answer = ""
                 query_analysis = None
@@ -418,11 +528,19 @@ async def stream_chat(
                 prompt_snapshot = None
                 stream_error = None
                 
-                async for chunk in chat_service.process_message_stream(
+                _stream = _with_sse_heartbeats(chat_service.process_message_stream(
                     user_id=user_id,
                     message=message,
                     conversation_history=existing_conversation
-                ):
+                ))
+                async for chunk in _stream:
+                    # Keep-alive tick: the service is still working, so write a
+                    # comment frame (no `data:` line, ignored by the frontend
+                    # parser) and keep waiting.
+                    if chunk is SSE_HEARTBEAT_SENTINEL:
+                        yield SSE_HEARTBEAT_FRAME
+                        continue
+
                     event_type = chunk.get("type")
                     
                     # Handle metadata chunks (sent once, early)
@@ -456,6 +574,11 @@ async def stream_chat(
                         stream_error = chunk
                         break
                 
+                # Deterministic cleanup for the `break` above: closing the wrapper
+                # cancels the producer, so the service generator stops immediately
+                # instead of running until garbage collection.
+                await _stream.aclose()
+
                 if stream_error is not None:
                     error_data = {
                         "type": "error",

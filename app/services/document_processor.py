@@ -46,10 +46,26 @@ except ImportError:
 from app.core.config import settings
 
 
+# Bounded embedding calls. The OpenAI SDK defaults are a 600s timeout with 2
+# retries, so a degraded/unfunded embeddings endpoint used to hold a request for
+# up to ~30 minutes. Every retrieval path probes embeddings
+# (`_ensure_embeddings`), and that probe runs inside async request handlers, so
+# an unbounded call is what let a streaming chat request sit silently until
+# nginx/gunicorn killed the connection (`net::ERR_HTTP2_PROTOCOL_ERROR` on the
+# client, `WORKER TIMEOUT` in the logs).
+EMBEDDING_REQUEST_TIMEOUT_SECONDS = 30.0
+EMBEDDING_MAX_RETRIES = 1
+
+
 class OpenRouterEmbeddings:
     def __init__(self, api_key: str, base_url: str, model: str, referer: str = None, site_title: str = None):
         from openai import OpenAI
-        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=EMBEDDING_REQUEST_TIMEOUT_SECONDS,
+            max_retries=EMBEDDING_MAX_RETRIES,
+        )
         self.model = model
         self.extra_headers = {}
 

@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional, AsyncGenerator
 import uuid
 import logging
+import asyncio
 import os
 import time
 from datetime import datetime
@@ -171,6 +172,27 @@ class KnowledgeBaseService:
             self._hybrid_service = svc
             self._hybrid_service_dp = self.document_processor
         return svc
+
+    async def _get_vector_store_async(self):
+        """Return the vector store without blocking the event loop.
+
+        `DocumentProcessor.get_vector_store()` is synchronous and, whenever the
+        embedding probe is failing (`_ensure_embeddings` retries a failed probe on
+        EVERY request), it performs a blocking HTTP round trip. Called directly
+        from an async handler it freezes the whole event loop, so gunicorn's
+        worker heartbeat stops and the worker is killed with
+        `WORKER TIMEOUT ... SIGABRT` while the client is still streaming -- which
+        reaches the browser as `net::ERR_HTTP2_PROTOCOL_ERROR`.
+        """
+        return await asyncio.to_thread(self.document_processor.get_vector_store)
+
+    async def _get_hybrid_service_async(self):
+        """Return the cached hybrid retrieval service, off the event loop.
+
+        Building it calls `get_vector_store()` (see above) and every call site is
+        async, so the first construction must happen in a thread as well.
+        """
+        return await asyncio.to_thread(self._get_hybrid_service)
 
     async def refresh(self):
         logging.info("[KB SERVICE] Force refresh requested")
@@ -385,13 +407,21 @@ class KnowledgeBaseService:
             f"{'=' * 50}"
         )
 
-    def process_excel_files(self) -> int:
+    async def process_excel_files(self) -> int:
         """Process all Excel QA files in the configured directory.
+
+        Runs off the event loop: `ExcelProcessor.process_all_excel_files` is
+        synchronous and talks to the embeddings endpoint (via
+        `document_processor.get_vector_store()` and `vector_store.add_documents`),
+        so leaving it inline would block every other request for the duration --
+        including an in-flight `/chat/stream` response, whose connection the
+        proxies then reset. Starlette awaits async background tasks, so the route
+        keeps calling this the same way.
 
         Returns:
             Number of QA pairs processed
         """
-        return self.excel_processor.process_all_excel_files()
+        return await asyncio.to_thread(self.excel_processor.process_all_excel_files)
 
     async def add_knowledge_contribution(
         self,
@@ -606,7 +636,7 @@ class KnowledgeBaseService:
                 if not langchain_documents and not file_docs:
                      raise ValueError("Failed to create document for vector store.")
 
-                vector_store = self.document_processor.get_vector_store()
+                vector_store = await self._get_vector_store_async()
 
                 # Add text contribution
                 if langchain_documents:
@@ -1053,7 +1083,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
                 logging.error(f"[Retrieval] Web search error: {str(e)}")
 
         # --- Hybrid retrieval (dense + BM25, already reranked inside hybrid_retrieve) ---
-        vector_store = self.document_processor.get_vector_store()
+        vector_store = await self._get_vector_store_async()
         if vector_store is None:
             raise RuntimeError(
                 "Vector store not available. OpenAI embeddings may not be properly configured. "
@@ -1069,7 +1099,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
 
         t0 = time.perf_counter()
         docs_with_scores = []
-        hrs = self._get_hybrid_service()
+        hrs = await self._get_hybrid_service_async()
         for search_query in all_queries:
             search_query = (search_query or "").strip()
             if not search_query:
@@ -1332,7 +1362,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
             t0 = time.perf_counter()
 
             # First, check if we have an exact or semantically similar match in our QA database
-            vector_store = self.document_processor.get_vector_store()
+            vector_store = await self._get_vector_store_async()
 
             # If vector store is not available, raise an exception to be handled by chat service
             if vector_store is None:
@@ -1361,7 +1391,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
                 initial_count = 0
             else:
                 try:
-                    hrs = self._get_hybrid_service()
+                    hrs = await self._get_hybrid_service_async()
                     docs_with_scores = []
                     for q in all_queries_sanitized:
                         try:
@@ -1646,7 +1676,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
             db_removal_success = False
 
             # Get vector store
-            vector_store = self.document_processor.get_vector_store()
+            vector_store = await self._get_vector_store_async()
 
             if vector_store is None:
                 logging.warning("Vector store is not available. Cannot remove documents from vector database.")
