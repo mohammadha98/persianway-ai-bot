@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import Optional
+import asyncio
 import os
 import uuid
 import shutil
@@ -8,7 +9,7 @@ from pathlib import Path
 from fastapi.responses import JSONResponse
 
 from app.schemas.upload import FileUploadResponse, PDFProcessingResponse
-from app.services.document_processor import DocumentProcessor
+from app.services.document_processor import get_document_processor
 
 # Create router for upload endpoints
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -103,19 +104,28 @@ async def process_pdf_to_vectors(
         with open(temp_file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # Initialize document processor
-        processor = DocumentProcessor()
+        # Initialize document processor.
+        # Reuse the process-wide processor: a fresh `DocumentProcessor()` opened a
+        # second Chroma client + LangChain wrapper on the same `persist_directory`
+        # for every upload (see `DocumentProcessor.get_vector_store`).
+        processor = get_document_processor()
         
-        # Check if embeddings are available
-        if create_vectors and not processor.embeddings_available:
-            return JSONResponse(
-                status_code=503,
-                content=PDFProcessingResponse(
-                    status="error",
-                    message="Vector embeddings service is not available. Please check OpenAI API configuration.",
-                    filename=file.filename
-                ).dict()
-            )
+        # Check if embeddings are available. `get_vector_store()` runs the probe
+        # (with backoff) and returns None exactly when embeddings are unavailable,
+        # so it is the reliable signal -- `processor.embeddings_available` stays
+        # False until the probe has run. Blocking, so keep it off the loop.
+        vector_store = None
+        if create_vectors:
+            vector_store = await asyncio.to_thread(processor.get_vector_store)
+            if vector_store is None:
+                return JSONResponse(
+                    status_code=503,
+                    content=PDFProcessingResponse(
+                        status="error",
+                        message="Vector embeddings service is not available. Please check OpenAI API configuration.",
+                        filename=file.filename
+                    ).dict()
+                )
         
         # Create output directory for processed files
         output_dir = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))) / "processed_pdfs"
@@ -173,10 +183,12 @@ async def process_pdf_to_vectors(
                         )
                         documents.append(doc)
                     
-                    # Add to vector store
-                    vector_store = processor.get_vector_store()
-                    vector_store.add_documents(documents)
-                    vector_store.persist()
+                    # Add to vector store. `persist()` is gone on purpose: Chroma
+                    # >= 0.4.x persists as it writes, and calling it raised
+                    # `ValueError: You must specify a persist_directory on
+                    # creation` because this wrapper is built around an existing
+                    # client (see `DocumentProcessor.get_vector_store`).
+                    await asyncio.to_thread(vector_store.add_documents, documents)
                     vector_store_updated = True
             
             # Calculate processing time

@@ -1,5 +1,6 @@
 from typing import List, Dict, Any
 import os
+import threading
 import time
 
 # ChromaDB reads the aliases removed in NumPy 2.0 while being imported, so the
@@ -114,6 +115,12 @@ class DocumentProcessor:
     creating embeddings, and storing them in a vector database.
     """
      
+    # Guards the one-time construction of `_vector_store`/`chroma_client`.
+    # Class-level on purpose: the vector store is per-process (see
+    # `get_document_processor`) and a bare `DocumentProcessor()` must not be
+    # able to bypass the guard by skipping `__init__`.
+    _vector_store_lock = threading.Lock()
+
     def __init__(self):
         """Initialize the document processor."""
         _project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -282,17 +289,47 @@ class DocumentProcessor:
 
 
     def get_vector_store(self):
-        """Get or create the vector store."""
-        # If embeddings are not available, return None
-        # if not hasattr(self, 'embeddings_available') or not self.embeddings_available:
-        #     logging.warning("Cannot access vector store: embeddings are not available.")
-        #     return None
+        """Get or create the vector store.
+
+        Built at most once per process and safe to call concurrently. The overlap
+        is real: `KnowledgeBaseService._get_vector_store_async()` calls this
+        through `asyncio.to_thread` as part of the startup warm-up, while the
+        first request can call it on the event loop. Opening the persistent store
+        is file/SQLite work, so the loop thread gets the GIL in the middle of that
+        window; without the lock both callers pass the `_vector_store is None`
+        check and build two clients/wrappers on the same `persist_directory`.
+
+        NOTE on the `LangChainDeprecationWarning` this method prints on its first
+        call: `langchain-chroma` is deliberately not a dependency (see
+        requirements.txt), so `Chroma` here is the `langchain_community` fallback
+        (see the import fallback at the top of this module).
+        `langchain_core/_api/deprecation.py` keeps a `nonlocal warned` flag per
+        decorated class, so that warning is emitted AT MOST ONCE PER PROCESS: the
+        number of such warnings in a log equals the number of worker processes
+        (plus restarts), never the number of requests.
+
+        Also: never call the deprecated `Chroma.persist()` on the wrapper built
+        here. Because the wrapper is built around an existing `client`,
+        `_persist_directory` is None and that call raises `ValueError: You must
+        specify a persist_directory on creation` -- after the documents were
+        already written. Chroma >= 0.4.x persists as it writes, so the call is
+        obsolete; it was removed from every ingest path for that reason.
+        """
         if not self._ensure_embeddings():
             logging.warning("Cannot access vector store: embeddings are not available.")
             return None
-        os.makedirs(self.persist_directory, exist_ok=True)
 
-        if self._vector_store is None:
+        # Fast path: already built (the common case on the request path).
+        if self._vector_store is not None:
+            return self._vector_store
+
+        with self._vector_store_lock:
+            # Another thread may have finished the build while we waited.
+            if self._vector_store is not None:
+                return self._vector_store
+
+            os.makedirs(self.persist_directory, exist_ok=True)
+
             if self.chroma_client is None:
                 # Check if we should use remote ChromaDB or local persistent storage
                 if settings.USE_REMOTE_CHROMADB:
@@ -326,7 +363,7 @@ class DocumentProcessor:
             if not settings.USE_REMOTE_CHROMADB:
                 logging.info(f"[PID {os.getpid()}] Local dir contents: {os.listdir(self.persist_directory)}")
 
-        return self._vector_store
+            return self._vector_store
 
     def process_pdf(self, file_path: str) -> List[Document]:
         """Process a single PDF file and return the extracted documents.
@@ -383,8 +420,6 @@ class DocumentProcessor:
                 batch = all_docs[i:i + batch_size]
                 vector_store.add_documents(batch)
                 print(f"Processed batch {i//batch_size + 1}/{(len(all_docs) + batch_size - 1)//batch_size} with {len(batch)} documents")
-
-            vector_store.persist()
 
         return len(all_docs)
 
@@ -789,7 +824,6 @@ class DocumentProcessor:
             try:
                 vector_store = self.get_vector_store()
                 vector_store.add_documents(documents_for_vector)
-                vector_store.persist()
                 logging.info(f"Added {len(documents_for_vector)} document chunks to vector store")
             except Exception as e:
                 logging.error(f"Error adding documents to vector store: {e}")
@@ -961,7 +995,6 @@ class DocumentProcessor:
                     vector_store.add_documents(batch)
                     logging.info(f"Added batch {i//batch_size + 1} ({len(batch)} documents) to vector store")
 
-                vector_store.persist()
                 logging.info(f"Successfully added {len(documents_for_vector)} document chunks to vector store")
 
             except Exception as e:
@@ -1209,8 +1242,6 @@ class DocumentProcessor:
                 vector_store.add_documents(batch)
                 logging.info(f"Processed batch {i//batch_size + 1}/{(len(all_docs) + batch_size - 1)//batch_size} with {len(batch)} documents")
 
-            vector_store.persist()
-
         return len(all_docs)
 
     def process_all_documents(self) -> Dict[str, int]:
@@ -1403,7 +1434,6 @@ class DocumentProcessor:
                     vector_store.add_documents(batch)
                     logging.info(f"Added batch {i//batch_size + 1} ({len(batch)} documents) to vector store")
 
-                vector_store.persist()
                 logging.info(f"Successfully added {len(documents_for_vector)} document chunks to vector store")
 
             except Exception as e:

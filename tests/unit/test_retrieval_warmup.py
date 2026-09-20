@@ -17,6 +17,7 @@ import os
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -161,3 +162,75 @@ def test_embedding_probe_retries_once_the_backoff_expired():
     assert processor._ensure_embeddings() is False
     assert embeddings.calls == 2
 
+def _processor_with_fake_chroma(monkeypatch, tmp_path, delay=0.03):
+    """A processor with a short-circuited embeddings probe and a faked Chroma.
+
+    `delay` widens the window between the `_vector_store is None` check and the
+    assignment, which is exactly where a second caller used to slip in.
+    """
+    import app.services.document_processor as dp_module
+
+    processor = _bare_processor(embeddings=None)
+    processor.embeddings_available = True  # probe short-circuits: no network
+    processor._vector_store = None
+    processor.chroma_client = None
+
+    monkeypatch.setattr(
+        DocumentProcessor, "persist_directory", property(lambda self: str(tmp_path))
+    )
+    monkeypatch.setattr(
+        dp_module, "settings", SimpleNamespace(USE_REMOTE_CHROMADB=False)
+    )
+
+    counts = {"clients": 0, "wrappers": 0}
+
+    class _FakeChromaClient:
+        def get_or_create_collection(self, name):
+            return {"name": name}
+
+    def _persistent_client(path, settings=None):
+        counts["clients"] += 1
+        time.sleep(delay)
+        return _FakeChromaClient()
+
+    def _chroma(*args, **kwargs):
+        counts["wrappers"] += 1
+        time.sleep(delay)
+        return {"client": kwargs.get("client"), "collection": kwargs.get("collection_name")}
+
+    monkeypatch.setattr(dp_module.chromadb, "PersistentClient", _persistent_client)
+    monkeypatch.setattr(dp_module, "Chroma", _chroma)
+    return processor, counts
+
+
+def test_vector_store_is_built_once(monkeypatch, tmp_path):
+    """Repeated access reuses the store instead of re-opening Chroma."""
+    processor, counts = _processor_with_fake_chroma(monkeypatch, tmp_path)
+
+    first = processor.get_vector_store()
+    second = processor.get_vector_store()
+
+    assert first is second
+    assert counts == {"clients": 1, "wrappers": 1}
+
+
+def test_vector_store_construction_is_single_under_concurrency(monkeypatch, tmp_path):
+    """The startup warm-up (worker thread) and the first request (loop) overlap."""
+    processor, counts = _processor_with_fake_chroma(monkeypatch, tmp_path)
+
+    results = []
+    barrier = threading.Barrier(8)
+
+    def _worker():
+        barrier.wait()
+        results.append(processor.get_vector_store())
+
+    threads = [threading.Thread(target=_worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(results) == 8
+    assert counts == {"clients": 1, "wrappers": 1}
+    assert len({id(store) for store in results}) == 1

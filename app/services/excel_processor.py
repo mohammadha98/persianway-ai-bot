@@ -373,8 +373,6 @@ class ExcelQAProcessor:
                     f"Processed batch {i // batch_size + 1}/{(len(all_docs) + batch_size - 1) // batch_size} with {len(batch)} documents"
                 )
 
-            vector_store.persist()
-
         return total_qa_pairs
 
 

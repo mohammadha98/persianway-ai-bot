@@ -37,7 +37,7 @@ class ConfigService:
     async def _load_config(self):
         """Load configuration from database or create default if not exists."""
         if self._config_collection is None:
-            logger.error("Configuration collection is None, reinitializing")
+            logger.info("ConfigService has no collection yet (used before initialize()); connecting lazily")
             db_service = await get_database_service()
             database = db_service.get_database()
             self._config_collection = database["config"]
