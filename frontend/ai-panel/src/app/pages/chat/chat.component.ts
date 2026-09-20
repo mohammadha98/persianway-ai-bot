@@ -77,6 +77,10 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
   messages: Message[] = [];
   currentMessage = '';
   isLoading = false;
+  // Latest "status" event from the stream ("در حال جستجو…" / "در حال تولید پاسخ…").
+  // Rendered inside the typing indicator so a slow retrieval or a slow first
+  // token is explained instead of looking like an endless spinner.
+  streamStatus = '';
   userId = '';
   showAnalysisDetails = false;
   // Requires the 'Analysis' permission (admins always allowed).
@@ -161,6 +165,7 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
 
     this.currentMessage = '';
     this.isLoading = true;
+    this.streamStatus = '';
     console.log('[CHAT] Set isLoading to true');
 
     const chatRequest = this.chatService.prepareChatRequest(messageContent);
@@ -240,7 +245,13 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
         next: (event) => {
           console.log('[CHAT] Received event from stream:', event);
 
-          if (event.type === 'metadata') {
+          if (event.type === 'status') {
+            // Progress notification: the server tells us which stage is running
+            // (retrieval / generation), so the typing indicator can explain the
+            // wait instead of spinning silently.
+            console.log('[CHAT] Stream status:', event.stage, event.message);
+            this.streamStatus = event.message || '';
+          } else if (event.type === 'metadata') {
             console.log('[CHAT] Processing metadata event');
             metadata = event.data;
             console.log('[CHAT] Metadata:', metadata);
@@ -266,6 +277,7 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
           } else if (event.type === 'done') {
             console.log('[CHAT] Processing done event');
             this.isLoading = false;
+            this.streamStatus = '';
             const messageToUpdate = ensureAiMessage();
             if (messageToUpdate) {
               messageToUpdate.content = fullAnswer || messageToUpdate.content || '';
@@ -285,6 +297,7 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
         error: (error) => {
           console.error('[CHAT] Stream error:', error);
           this.isLoading = false;
+          this.streamStatus = '';
 
           // Stop the typing effect immediately so it cannot keep writing
           // into the message after the stream failed.
@@ -341,6 +354,7 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
         complete: () => {
           console.log('[CHAT] Stream subscription completed');
           this.isLoading = false;
+          this.streamStatus = '';
           this.streamSubscription = null;
         }
       });

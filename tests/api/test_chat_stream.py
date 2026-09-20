@@ -335,3 +335,50 @@ async def test_http_layer_flushes_bytes_before_the_answer_is_ready(monkeypatch):
     # Heartbeats arrive before the first real token, so a proxy idle timeout
     # never fires while retrieval + the first LLM round trip are running.
     assert 0 < heartbeat_index < first_data_index
+
+
+@pytest.mark.asyncio
+async def test_status_events_are_forwarded_so_the_ui_can_explain_the_wait():
+    """`status` frames survive the route instead of being dropped.
+
+    The keep-alive (`: ping`) is a comment frame the frontend parser ignores, so
+    `status` is the only *user-renderable* progress signal. Before this, the route
+    had no branch for it and a slow retrieval/generation looked like a bare
+    spinner -- the reported "no status message, endless loading" symptom.
+    """
+    events = [
+        {"type": "status", "stage": "retrieval", "message": "در حال جستجو در پایگاه دانش…"},
+        {"type": "metadata", "query_analysis": {"confidence_score": 0.9}, "normalized_sources": []},
+        {"type": "status", "stage": "generation", "message": "در حال تولید پاسخ…"},
+        {"type": "chunk", "content": "پاسخ "},
+        {"type": "done", "answer": "پاسخ ", "query_analysis": {"confidence_score": 0.9}},
+    ]
+
+    frames = _data_frames(await _stream_parts(_FakeChatService(events)))
+
+    assert [frame["type"] for frame in frames] == [
+        "status", "metadata", "status", "chunk", "done",
+    ]
+    assert frames[0]["stage"] == "retrieval"
+    assert frames[0]["message"] == "در حال جستجو در پایگاه دانش…"
+    assert frames[2]["stage"] == "generation"
+    assert frames[2]["message"] == "در حال تولید پاسخ…"
+
+
+@pytest.mark.asyncio
+async def test_provider_error_event_is_forwarded_with_its_code():
+    """A provider-level failure keeps its own code so the UI can name the cause."""
+    events = [
+        {"type": "status", "stage": "generation", "message": "در حال تولید پاسخ…"},
+        {
+            "type": "error",
+            "message": "سرویس موقتاً شلوغ است؛ لطفاً چند لحظه دیگر دوباره تلاش کنید.",
+            "code": "provider_rate_limited",
+        },
+    ]
+
+    frames = _data_frames(await _stream_parts(_FakeChatService(events)))
+
+    assert [frame["type"] for frame in frames] == ["status", "error"]
+    assert frames[-1]["code"] == "provider_rate_limited"
+    assert "شلوغ" in frames[-1]["message"]

@@ -7,9 +7,54 @@ from datetime import datetime
 from enum import Enum
 from langchain_openai import ChatOpenAI
 import logging
+import openai
 from loguru import logger
 
-async def get_llm(model_name: str = None, temperature: float = None, max_tokens: int = None, top_p: float = None):
+# ==================== Provider request budget ====================
+# Every LLM call in this pipeline (intent classification, query rewriting,
+# retrieval QA and the answer itself) goes through `get_llm`. Neither
+# `request_timeout` nor `max_retries` used to be set, so the openai SDK fell
+# back to its own defaults -- `httpx.Timeout(timeout=600, connect=5.0)` and
+# `DEFAULT_MAX_RETRIES = 2`, see `openai/_constants.py`. A rate-limited or
+# stalled upstream could therefore keep a single turn silent for ~30 minutes,
+# while the only bytes on the wire were the SSE keep-alive comment frames: that
+# is exactly the reported "endless loading with no status message" symptom.
+LLM_REQUEST_TIMEOUT_SECONDS = 45.0
+LLM_MAX_RETRIES = 1
+
+# User-visible notices for provider-level failures (HTTP 429 / read timeout).
+# They are PREPENDED to the configured human-referral message instead of
+# replacing it: explaining why the turn failed must not cost the user the
+# handoff path the product already offered.
+PROVIDER_BUSY_MESSAGE = "سرویس موقتاً شلوغ است؛ لطفاً چند لحظه دیگر دوباره تلاش کنید."
+PROVIDER_TIMEOUT_MESSAGE = "زمان پاسخ‌دهی سرویس به پایان رسید؛ لطفاً دوباره تلاش کنید."
+
+# Raised by the openai SDK *after* it has exhausted its own retries. Verified to
+# propagate unwrapped through `llm.astream`, `prompt | llm` and
+# `create_stuff_documents_chain(...).astream`, so these are the types the
+# streaming pipeline has to catch.
+PROVIDER_ERROR_TYPES = (openai.RateLimitError, openai.APITimeoutError)
+
+# The conversation title is a *cosmetic, best-effort* LLM call, and it sits on
+# the request path before the first byte of the answer, so it must NOT inherit
+# the answer budget above (45s x 2 attempts):
+#   * `TITLE_LLM_MAX_RETRIES = 0`: retrying a 429'd provider for a title only
+#     adds load to the very provider the answer is about to need -- and the
+#     title is not worth it (`generate_conversation_title` falls back to "New
+#     Conversation", which is also what a failed generation already returned).
+#   * `TITLE_LLM_REQUEST_TIMEOUT_SECONDS = 8.0`: both call sites additionally
+#     wrap the call in `asyncio.wait_for(TITLE_GENERATION_TIMEOUT_SECONDS)`
+#     (15s, see chat.py / conversation_service.py), so a tighter inner budget
+#     replaces "spend the whole 15s being cancelled from the outside, after a
+#     retry" with "fail fast and start the answer". POST `/api/chat/`
+#     (chat.py:435) has no outer bound at all: there this budget is the only
+#     thing standing between a stalled provider and a ~92s wait.
+TITLE_LLM_REQUEST_TIMEOUT_SECONDS = 8.0
+TITLE_LLM_MAX_RETRIES = 0
+
+
+async def get_llm(model_name: str = None, temperature: float = None, max_tokens: int = None, top_p: float = None,
+                  request_timeout: float = None, max_retries: int = None):
     """Initializes and returns the appropriate language model client.
     
     This function selects the API provider based on the PREFERRED_API_PROVIDER setting.
@@ -22,6 +67,13 @@ async def get_llm(model_name: str = None, temperature: float = None, max_tokens:
     - Meta models: "meta-llama/llama-2-70b-chat"
     
     When using OpenAI directly, provider prefixes are automatically removed.
+
+    `request_timeout` / `max_retries` override the process-wide budget defined at
+    the top of this module. They exist for callers that need a different budget
+    than the answer path -- currently only the best-effort conversation title,
+    which runs before the first byte of the response. `get_llm` does not cache
+    clients (a fresh `ChatOpenAI` is built per call), so an override can never
+    leak into another caller.
     """
     from app.services.config_service import get_config_service
 
@@ -84,6 +136,8 @@ async def get_llm(model_name: str = None, temperature: float = None, max_tokens:
             top_p=top_p if top_p is not None else llm_settings.top_p,
             openai_api_key=llm_settings.openrouter_api_key,
             openai_api_base=llm_settings.openrouter_api_base,
+            request_timeout=request_timeout if request_timeout is not None else LLM_REQUEST_TIMEOUT_SECONDS,
+            max_retries=max_retries if max_retries is not None else LLM_MAX_RETRIES,
         )
     elif has_openai_key:
         # Using OpenAI directly
@@ -100,6 +154,8 @@ async def get_llm(model_name: str = None, temperature: float = None, max_tokens:
             max_tokens=max_tokens if max_tokens is not None else llm_settings.max_tokens,
             top_p=top_p if top_p is not None else llm_settings.top_p,
             openai_api_key=llm_settings.openai_api_key,
+            request_timeout=request_timeout if request_timeout is not None else LLM_REQUEST_TIMEOUT_SECONDS,
+            max_retries=max_retries if max_retries is not None else LLM_MAX_RETRIES,
         )
     else:
         raise ValueError("Either OPENAI_API_KEY or OPENROUTER_API_KEY must be set")
@@ -111,6 +167,32 @@ from app.core.config import settings
 from app.schemas.chat import ChatMessage
 from app.services.knowledge_base import get_knowledge_base_service
 from app.services.config_service import ConfigService
+
+
+def _provider_error_event(exc: BaseException, referral_message: str) -> Dict[str, Any]:
+    """Build the structured error event for a rate-limit / timeout failure.
+
+    The provider notice is PREPENDED to `referral_message` (the configured
+    human-referral text) rather than replacing it, so the user learns *why* the
+    turn failed and still keeps the handoff path the product already offers.
+    """
+    if isinstance(exc, openai.APITimeoutError):
+        notice, code = PROVIDER_TIMEOUT_MESSAGE, "provider_timeout"
+    else:
+        notice, code = PROVIDER_BUSY_MESSAGE, "provider_rate_limited"
+
+    message = f"{notice}\n\n{referral_message}" if referral_message else notice
+    return {
+        "type": "error",
+        "message": message,
+        "code": code,
+        "query_analysis": {
+            "confidence_score": 0.0,
+            "knowledge_source": "none",
+            "requires_human_referral": True,
+            "reasoning": f"Provider error before the answer completed: {type(exc).__name__}",
+        },
+    }
 
 
 class ContextState(str, Enum):
@@ -458,6 +540,11 @@ class ChatService:
     async def generate_conversation_title(self, message: str) -> str:
         """Generate a conversation title based on the user's message.
         
+        Best-effort by design: this runs before the first byte of a turn (route)
+        and after the last token of one (conversation_service), so it gets the
+        tight `TITLE_LLM_*` budget instead of the answer budget and falls back to
+        "New Conversation" on any failure.
+
         Args:
             message: The user's message to generate a title from
             
@@ -465,8 +552,14 @@ class ChatService:
             A concise title for the conversation
         """
         try:
-            # Get LLM instance
-            llm = await get_llm(model_name="gpt-4o-mini",temperature=0.1, max_tokens=100)
+            # Get LLM instance -- explicit tight budget, never the default one.
+            llm = await get_llm(
+                model_name="gpt-4o-mini",
+                temperature=0.1,
+                max_tokens=100,
+                request_timeout=TITLE_LLM_REQUEST_TIMEOUT_SECONDS,
+                max_retries=TITLE_LLM_MAX_RETRIES,
+            )
             
             # Create a prompt to generate a concise title
             title_prompt = f"""Based on the following user message, generate a concise and descriptive title (maximum 5-7 words) for this conversation. The title should be in the same language as the user's message.
@@ -1378,9 +1471,11 @@ Title:"""
             parameters: Additional parameters for the model
             
         Yields:
-            Dictionary chunks with type "metadata" or "chunk":
+            Dictionary chunks with type "status", "metadata", "chunk" or "error":
+                - {"type": "status", "stage": "retrieval"|"generation", "message": "..."}
                 - {"type": "metadata", "query_analysis": {...}, "normalized_sources": [...]}
                 - {"type": "chunk", "content": "text content"}
+                - {"type": "error", "message": "...", "code": "..."}
         """
         # === PERF: Timing Instrumentation ===
         t_pipeline_start = time.perf_counter()
@@ -1413,7 +1508,18 @@ Title:"""
         try:
             # Detect query intent
             t0 = time.perf_counter()
-            intent_result = await self.detect_query_intent(message, conversation_history)
+            try:
+                intent_result = await self.detect_query_intent(message, conversation_history)
+            except PROVIDER_ERROR_TYPES as provider_error:
+                # This classifier is an LLM call that runs BEFORE the first byte of
+                # the answer, so a 429 / read timeout here used to fall through to
+                # the generic handler and reach the user as an unrelated internal
+                # error, with no hint that the provider was the problem.
+                logger.error(
+                    f"[PROVIDER] intent detection failed: {type(provider_error).__name__}"
+                )
+                yield _provider_error_event(provider_error, HUMAN_REFERRAL_MESSAGE)
+                return
             timings['intent_detection'] = time.perf_counter() - t0
             logger.info(f"[PERF] step=intent_detection elapsed={timings['intent_detection']:.3f}s")
             
@@ -1596,6 +1702,17 @@ Title:"""
             # _retrieve_context performs rewrite/expand -> hybrid retrieval -> threshold
             # filter -> dedup -> rerank. It raises on failure; the single top-level
             # handler below turns it into one structured error event.
+            #
+            # Status event: retrieval is the longest silent phase of a turn (it
+            # includes the rewrite/expansion LLM calls), and until now the only
+            # thing the client received during it was an invisible SSE comment
+            # frame. This is a real, user-renderable event.
+            yield {
+                "type": "status",
+                "stage": "retrieval",
+                "message": "در حال جستجو در پایگاه دانش…",
+            }
+
             t0 = time.perf_counter()
             kb_service = get_knowledge_base_service()
             retrieval = await kb_service._retrieve_context(
@@ -1630,13 +1747,32 @@ Title:"""
                     "response_parameters": response_parameters,
                 }
 
+                # Status event before the answer LLM call: the user must see that
+                # generation started, not just a spinner (the SSE keep-alive is a
+                # comment frame the frontend parser drops).
+                yield {
+                    "type": "status",
+                    "stage": "generation",
+                    "message": "در حال تولید پاسخ…",
+                }
+
                 # stream_answer_from_context uses astream, skips chunks without valid
                 # content, and raises on failure (never yields error text).
-                async for token in kb_service.stream_answer_from_context(
-                    rewritten_query, retrieval["normalized_docs"]
-                ):
-                    full_answer += token
-                    yield {"type": "chunk", "content": token}
+                try:
+                    async for token in kb_service.stream_answer_from_context(
+                        rewritten_query, retrieval["normalized_docs"]
+                    ):
+                        full_answer += token
+                        yield {"type": "chunk", "content": token}
+                except PROVIDER_ERROR_TYPES as provider_error:
+                    # Provider-level failure (429 / read timeout) instead of a generic
+                    # internal error: the user is told why the turn stopped and keeps
+                    # the human-referral path.
+                    logger.error(
+                        f"[PROVIDER] KB generation failed: {type(provider_error).__name__}"
+                    )
+                    yield _provider_error_event(provider_error, HUMAN_REFERRAL_MESSAGE)
+                    return
 
                 # Referral-indicator check on the final answer (reported via done event)
                 if any(indicator in full_answer for indicator in referral_indicators):
@@ -1683,13 +1819,28 @@ Title:"""
                         history = history[-2:]
                     history_before_append = self._snapshot_history(history)
 
-                    # Real token streaming; raises on failure -> top-level handler
-                    async for chunk in conversation.astream({"input": message, "history": history}):
-                        chunk_content = getattr(chunk, "content", None)
-                        if not chunk_content:
-                            continue  # skip chunks without valid content; never str(chunk)
-                        full_answer += chunk_content
-                        yield {"type": "chunk", "content": chunk_content}
+                    # Status event before the answer LLM call (see the KB path).
+                    yield {
+                        "type": "status",
+                        "stage": "generation",
+                        "message": "در حال تولید پاسخ…",
+                    }
+
+                    # Real token streaming; raises on failure -> provider handler
+                    # below for 429/timeout, top-level handler for anything else.
+                    try:
+                        async for chunk in conversation.astream({"input": message, "history": history}):
+                            chunk_content = getattr(chunk, "content", None)
+                            if not chunk_content:
+                                continue  # skip chunks without valid content; never str(chunk)
+                            full_answer += chunk_content
+                            yield {"type": "chunk", "content": chunk_content}
+                    except PROVIDER_ERROR_TYPES as provider_error:
+                        logger.error(
+                            f"[PROVIDER] general generation failed: {type(provider_error).__name__}"
+                        )
+                        yield _provider_error_event(provider_error, HUMAN_REFERRAL_MESSAGE)
+                        return
 
                     if any(indicator in full_answer for indicator in referral_indicators):
                         query_analysis["requires_human_referral"] = True

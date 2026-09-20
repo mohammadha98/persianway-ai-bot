@@ -128,7 +128,7 @@ export class ChatService {
    *
    * - Buffers partial SSE frames split across network chunks until a full
    *   event (delimited by a blank line, "\n\n") is received.
-   * - Emits every parsed JSON event (metadata / chunk / done / error).
+   * - Emits every parsed JSON event (status / metadata / chunk / done / error).
    * - Completes on `done`; errors with {message, code} on `error`,
    *   on stream end without `done` (code: stream_incomplete), or on
    *   network failures.

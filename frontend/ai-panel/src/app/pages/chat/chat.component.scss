@@ -620,6 +620,16 @@
       animation-delay: 0.4s;
     }
   }
+
+  // Stage label pushed by the backend's `status` events ("در حال جستجو…",
+  // "در حال تولید پاسخ…"), so a slow turn explains itself.
+  .stream-status {
+    margin-inline-start: 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #777;
+    white-space: nowrap;
+  }
 }
 
 @keyframes typing {

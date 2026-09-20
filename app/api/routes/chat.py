@@ -535,8 +535,8 @@ async def stream_chat(
     * ``: ping`` -- comment frame written before any slow work, and then every
       ``SSE_HEARTBEAT_INTERVAL_SECONDS`` while the answer is still being
       produced, so no proxy mistakes a slow generation for an idle connection.
-    * ``data: {...}`` -- one JSON event per frame (``metadata``, ``chunk``,
-      ``done`` or ``error``), serialised through ``_sse_data_frame``.
+    * ``data: {...}`` -- one JSON event per frame (``status``, ``metadata``,
+      ``chunk``, ``done`` or ``error``), serialised through ``_sse_data_frame``.
     * ``data: [DONE]`` -- explicit end-of-stream marker written last.
 
     Supports both GET (for EventSource) and POST methods.
@@ -600,9 +600,20 @@ async def stream_chat(
                         continue
 
                     event_type = chunk.get("type")
-                    
+
+                    # Handle progress notifications: forwarded verbatim so the UI
+                    # can say what the pipeline is doing ("searching…", "writing
+                    # the answer…") instead of showing a silent spinner while
+                    # retrieval + the first LLM round trip run.
+                    if event_type == "status":
+                        yield _sse_data_frame({
+                            "type": "status",
+                            "stage": chunk.get("stage"),
+                            "message": chunk.get("message"),
+                        })
+
                     # Handle metadata chunks (sent once, early)
-                    if event_type == "metadata":
+                    elif event_type == "metadata":
                         query_analysis = chunk.get("query_analysis")
                         normalized_sources = chunk.get("normalized_sources", [])
                         response_parameters = chunk.get("response_parameters") or response_parameters
