@@ -214,6 +214,94 @@ results = processor.search_documents("your query", k=5)
 
 See `examples/` for runnable scripts.
 
+## Deployment
+
+### Start command / port (Runflare and similar managed hosts)
+
+Deploy through the panel **without overriding the start command and port**. Panels inject the
+listening port (usually `$PORT`) and run their own supervisor plus health check. Hard-coding a
+command such as:
+
+```bash
+gunicorn main:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 \
+  -w 2 --timeout 0 --graceful-timeout 30 --keep-alive 75 --worker-connections 1000
+```
+
+produced an endless restart loop (7 restarts, ~100 s lifetime per attempt) while the app itself
+stayed healthy: the logs showed an external `Handling signal: term`, **no** traceback, **no**
+`WORKER TIMEOUT` and no OOM. The panel's own health check never got a good response from the
+container — the hard-coded bind (`0.0.0.0:8000`) was not the port the panel probes, and the two
+workers each repeat the cold-start warm-up, so the container lived past the check budget — hence
+`SIGTERM` + restart. Clearing the custom command in the panel fixed it.
+
+Guidelines:
+
+- Let the panel build the command/port. If you must set one, keep the bind address, the app port
+  and the panel's health-check port identical.
+- Point the health check at `GET /health` (defined in `main.py`), not `/` — `/` answers `503`
+  when the Angular bundle is missing (see the caveat above).
+- Avoid `gunicorn --timeout 0` on hosts that have no external watchdog: it disables gunicorn's
+  own worker killer, so a hung worker is never recycled and `WORKER TIMEOUT` never shows up in
+  the logs (which hides the real problem). It is still useful when SSE responses are longer than
+  the timeout — but then the platform health check must be tuned instead.
+- With `-w N` greater than 1, every worker repeats the cold-start warm-up (its own Chroma client
+  and BM25 index): budget N× CPU/RAM at boot, or keep a single worker on small plans.
+
+### Chat transport mode & proxy timeouts
+
+`POST/GET /api/chat/stream` stays an SSE endpoint in both of its transport modes, chosen by one
+variable:
+
+| `CHAT_STREAMING_ENABLED` | Behaviour |
+| --- | --- |
+| `true` | token by token: one `data: {"type":"chunk",...}` frame per model token |
+| `false` (default) | single frame: the answer is buffered server-side and written once, inside the `done` frame |
+
+Both modes share the whole route: the response still opens with a `: ping` comment frame, keeps
+writing comment frames while retrieval/generation run, still forwards `status`, `metadata` and
+`error` frames, and still ends with `data: [DONE]`. That is deliberate — those comment frames are
+the only thing keeping a proxy from treating a long answer as an idle connection, and the answer
+inside the `done` frame is what the frontend renders, so there is one server code path and one
+client parser for both modes. Switching modes is an environment change plus a restart; nothing in
+the repository has to be edited.
+
+**nginx (or any proxy with an idle read timeout).** nginx's default `proxy_read_timeout` is 60 s: an
+answer that stays silent longer than that is reset upstream (`upstream prematurely closed
+connection`), which the browser reports as `net::ERR_HTTP2_PROTOCOL_ERROR`. Keep the heartbeats and
+raise the timeout past the slowest expected answer:
+
+```nginx
+location /api/chat/stream {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;        # never buffer an SSE body
+    proxy_cache off;
+    proxy_read_timeout 300s;    # must exceed the slowest expected answer
+    proxy_send_timeout 300s;
+}
+```
+
+**`gunicorn --timeout` is not a per-request deadline here.** With `-k uvicorn.workers.UvicornWorker`
+gunicorn hands its timeout to uvicorn as `timeout_notify` and uses it as the interval for
+`callback_notify` — the worker's liveness ping back to the gunicorn arbiter
+(`uvicorn/workers.py`: `"timeout_notify": self.timeout, "callback_notify": self.callback_notify`;
+`uvicorn/server.py::on_tick` fires that callback every `timeout_notify` seconds). The event loop
+keeps ticking while an async handler awaits the model, so a 158 s answer does not produce
+`WORKER TIMEOUT`; only a *blocking* call inside the handler can starve the tick and cause one. Tune
+the proxy instead — the warning above about `--timeout 0` still stands.
+
+### Startup window & observability
+
+The app schedules a background retrieval warm-up after startup (lifespan in `main.py` →
+`KnowledgeBaseService.warm_up()`), so early requests are fast, but the first ~1–2 minutes of a
+container's life are CPU heavy. Any probe on the container must tolerate that window.
+
+Note that application-level logs (`logging.info(...)` across `app/`) are **not** emitted in
+production, because `app/core/logging.py::setup_logging()` is never called: only gunicorn/uvicorn
+lines and library warnings reach stdout. Call `setup_logging()` from `main.py` if you want the
+warm-up progress (`[KB WARMUP] ...`) visible in the pod logs.
+
 ## Testing
 
 ```bash

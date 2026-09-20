@@ -109,6 +109,24 @@ _STREAM_EVENTS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _token_streaming_enabled(monkeypatch):
+    """Pin the streaming transport for every test in this module.
+
+    `CHAT_STREAMING_ENABLED` ships as `false` (single-frame SSE), so a test that
+    asserts `chunk` frames must opt into token streaming explicitly instead of
+    inheriting whatever the process environment happens to hold. The single-frame
+    tests below pull in `_single_frame_mode`, which overrides this back to `false`.
+    """
+    monkeypatch.setattr(chat_module.settings, "CHAT_STREAMING_ENABLED", True)
+
+
+@pytest.fixture
+def _single_frame_mode(monkeypatch):
+    """`CHAT_STREAMING_ENABLED=false`: one `done` frame carries the whole answer."""
+    monkeypatch.setattr(chat_module.settings, "CHAT_STREAMING_ENABLED", False)
+
+
 @pytest.mark.asyncio
 async def test_stream_opens_with_a_frame_before_any_slow_work():
     """The first bytes on the wire are a comment frame, never silence."""
@@ -382,3 +400,115 @@ async def test_provider_error_event_is_forwarded_with_its_code():
     assert [frame["type"] for frame in frames] == ["status", "error"]
     assert frames[-1]["code"] == "provider_rate_limited"
     assert "شلوغ" in frames[-1]["message"]
+
+
+# ---------------------------------------------------------------------------
+# Single-frame transport (`CHAT_STREAMING_ENABLED=false`)
+# ---------------------------------------------------------------------------
+# The switch changes one thing only: `chunk` frames are not written, and the
+# complete answer travels inside the `done` frame. These tests pin that everything
+# a client depends on *during* a slow answer -- the open frame, the keep-alive
+# bytes, the renderable `status` frames, the structured `error` frames and the
+# `[DONE]` terminator -- is identical in both transports.
+
+
+@pytest.mark.asyncio
+async def test_single_frame_mode_delivers_the_answer_once_in_the_done_frame(_single_frame_mode):
+    """No token frames, and the whole answer arrives exactly once."""
+    parts = await _stream_parts(_FakeChatService(_STREAM_EVENTS))
+
+    frames = _data_frames(parts)
+
+    assert [frame["type"] for frame in frames] == ["metadata", "done"]
+    assert frames[-1]["answer"] == _STREAM_EVENTS[-1]["answer"]
+    # Nothing was written token by token: the answer exists only in `done`.
+    assert [frame for frame in frames if frame["type"] == "chunk"] == []
+    # Same framing as the streaming transport, headers included.
+    assert parts[0] == chat_module.SSE_STREAM_OPEN_FRAME
+    assert parts[-1] == chat_module.SSE_DONE_FRAME
+
+
+@pytest.mark.asyncio
+async def test_single_frame_mode_keeps_heartbeats_while_it_buffers(monkeypatch, _single_frame_mode):
+    """Buffering must not turn the connection silent while the answer is produced.
+
+    This is why the switch keeps the SSE route instead of returning plain JSON: a
+    two-minute answer produces no client bytes for two minutes, and these comment
+    frames are the only thing stopping nginx's default `proxy_read_timeout` (60s)
+    from resetting a request that is still perfectly healthy.
+    """
+    monkeypatch.setattr(chat_module, "SSE_HEARTBEAT_INTERVAL_SECONDS", 0.05)
+
+    parts = await _stream_parts(_FakeChatService(_STREAM_EVENTS, delay=0.12))
+
+    first_data_index = next(i for i, part in enumerate(parts) if part.startswith("data:"))
+    periodic_heartbeats = [
+        i for i, part in enumerate(parts[1:], start=1) if part == chat_module.SSE_HEARTBEAT_FRAME
+    ]
+
+    assert periodic_heartbeats, "no keep-alive frame was written while buffering"
+    # Heartbeats already flow before the first frame is ready, so they also flow
+    # across the long generation window that precedes `done`.
+    assert periodic_heartbeats[0] < first_data_index
+    assert [frame["type"] for frame in _data_frames(parts)] == ["metadata", "done"]
+
+
+@pytest.mark.asyncio
+async def test_single_frame_mode_still_forwards_status_frames(_single_frame_mode):
+    """The waiting user keeps seeing progress text while the answer is buffered."""
+    # The placeholders stand in for the Persian status text the service emits: this
+    # test pins forwarding, not wording.
+    events = [
+        {"type": "status", "stage": "retrieval", "message": "STATUS_RETRIEVAL"},
+        {"type": "status", "stage": "generation", "message": "STATUS_GENERATION"},
+        {"type": "chunk", "content": _STREAM_EVENTS[1]["content"]},
+        {"type": "done", "answer": _STREAM_EVENTS[-1]["answer"]},
+    ]
+
+    frames = _data_frames(await _stream_parts(_FakeChatService(events)))
+
+    assert [frame["type"] for frame in frames] == ["status", "status", "done"]
+    assert [frame["stage"] for frame in frames[:-1]] == ["retrieval", "generation"]
+    assert [frame["message"] for frame in frames[:-1]] == [
+        "STATUS_RETRIEVAL",
+        "STATUS_GENERATION",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_single_frame_mode_forwards_a_provider_error_with_its_code(_single_frame_mode):
+    """A provider failure stays a structured error frame, never a silent stream."""
+    events = [
+        {
+            "type": "error",
+            "message": "PROVIDER_BUSY",  # stands in for the Persian referral text
+            "code": "provider_rate_limited",
+        },
+    ]
+
+    parts = await _stream_parts(_FakeChatService(events))
+    frames = _data_frames(parts)
+
+    assert [frame["type"] for frame in frames] == ["error"]
+    assert frames[-1]["code"] == "provider_rate_limited"
+    assert frames[-1]["message"] == "PROVIDER_BUSY"
+    assert parts[-1] == chat_module.SSE_DONE_FRAME
+
+
+@pytest.mark.asyncio
+async def test_single_frame_mode_delivers_a_low_confidence_referral_complete(_single_frame_mode):
+    """A low-confidence referral answer is not truncated by the transport switch."""
+    referral = _STREAM_EVENTS[-1]["answer"]
+    events = [
+        {"type": "metadata", "query_analysis": {"confidence_score": 0.2}, "normalized_sources": []},
+        {"type": "chunk", "content": referral},
+        {"type": "done", "answer": referral, "query_analysis": {"confidence_score": 0.2}},
+    ]
+
+    frames = _data_frames(await _stream_parts(_FakeChatService(events)))
+
+    assert [frame["type"] for frame in frames] == ["metadata", "done"]
+    assert frames[-1]["answer"] == referral
+    # The score travels with the answer, which is what the UI uses to show the
+    # referral notice.
+    assert frames[-1]["query_analysis"]["confidence_score"] == 0.2

@@ -48,6 +48,19 @@ def _params():
     }
 
 
+@pytest.fixture(autouse=True)
+def _token_streaming_enabled(monkeypatch):
+    """Pin the streaming transport for the contract tests in this module.
+
+    The shipped default of `CHAT_STREAMING_ENABLED` is `false` (single-frame SSE),
+    which would make the "one event per model token" contract untestable. Each test
+    that asserts the wire format must therefore state which transport it describes
+    instead of inheriting the process environment. The single-frame counterpart
+    below sets the flag to `false` itself.
+    """
+    monkeypatch.setattr(chat_module.settings, "CHAT_STREAMING_ENABLED", True)
+
+
 class _FakeConversationService:
     """Minimal stand-in for the route's ConversationService dependency."""
 
@@ -339,5 +352,52 @@ async def test_heartbeats_continue_while_the_answer_is_persisted(monkeypatch):
         for frame in frames[last_token_index + 1:done_index]
     ), "no heartbeat was written while the conversation was being persisted"
     assert frames[-1] == chat_module.SSE_DONE_FRAME
+
+
+@pytest.mark.asyncio
+async def test_single_frame_mode_is_still_an_sse_stream(monkeypatch):
+    """`CHAT_STREAMING_ENABLED=false`: one `done` event carries the whole answer.
+
+    The transport switch must not change the wire contract -- same content type,
+    same no-buffering headers, same `: ping` comment frames, same `[DONE]`
+    terminator -- only the number of answer events. That is what lets the browser
+    keep one code path (and one parser) for both transports.
+    """
+    monkeypatch.setattr(chat_module.settings, "CHAT_STREAMING_ENABLED", False)
+
+    service = _FakeChatService(_STREAM_EVENTS)
+
+    with _override_dependencies(service):
+        transport = httpx.ASGITransport(app=_app())
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            async with client.stream("GET", "/api/chat/stream", params=_params()) as response:
+                assert response.status_code == 200
+                assert response.headers["content-type"].startswith("text/event-stream")
+                assert response.headers["cache-control"] == "no-cache"
+                assert response.headers["x-accel-buffering"] == "no"
+                body = "".join([text async for text in response.aiter_text()])
+
+    frames = _sse_frames(body)
+
+    # The stream still opens with a comment frame, so the headers reach the client
+    # before the (possibly long) answer is ready.
+    assert frames[0] == ": ping"
+    for frame in frames:
+        for line in frame.split("\n"):
+            assert line.startswith((": ", "data: ")), f"invalid SSE line: {line!r}"
+
+    payloads = _data_payloads(frames)
+    assert payloads[-1] == "[DONE]"
+
+    events = [json.loads(payload) for payload in payloads[:-1]]
+    # No per-token events: metadata, then the answer in a single frame.
+    assert [event["type"] for event in events] == ["metadata", "done"]
+    # The answer is complete, exactly as the tokens would have added up to.
+    assert events[-1]["answer"] == _STREAM_EVENTS[-1]["answer"]
+    assert events[-1]["answer"] == "".join(
+        event["content"] for event in _STREAM_EVENTS if event["type"] == "chunk"
+    )
+    assert events[-1]["conversation_id"] == "conv-1"
+    assert events[-1]["message_id"] == "msg-1"
 
 

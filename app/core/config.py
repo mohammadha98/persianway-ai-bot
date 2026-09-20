@@ -56,6 +56,18 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     DEBUG: bool = False
+
+    # Chat transport mode for `POST/GET /api/chat/stream`.
+    #   True  -> the answer is written token by token (`chunk` frames per model token).
+    #   False -> the answer is held server-side and delivered once, inside the single
+    #            `done` frame (single-frame SSE).
+    # Deliberately a two-state switch, not a third "plain HTTP" mode: both states travel
+    # the same `text/event-stream` route, so the keep-alive comment frames that stop a
+    # proxy (`proxy_read_timeout`, 60s by default in nginx) from resetting a slow request
+    # stay on the wire, and `status` / `metadata` / `error` frames keep their shape.
+    # Nothing is deleted when this is off, so re-enabling token streaming is this one
+    # environment variable.
+    CHAT_STREAMING_ENABLED: bool = False
     
     # Security
     secret_key: str = "your-secret-key-here"

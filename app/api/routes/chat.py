@@ -6,6 +6,7 @@ import time
 import json
 import logging
 
+from app.core.config import settings
 from app.schemas.chat import (
     ChatRequest, ChatResponse, SimplifiedChatResponse,
     FeedbackRequest, FeedbackResponse, FeedbackDetail,
@@ -539,6 +540,15 @@ async def stream_chat(
       ``chunk``, ``done`` or ``error``), serialised through ``_sse_data_frame``.
     * ``data: [DONE]`` -- explicit end-of-stream marker written last.
 
+    Transport mode is chosen by ``settings.CHAT_STREAMING_ENABLED`` and changes
+    exactly one thing: whether the ``chunk`` frames are written as the model
+    produces them (``True``) or the tokens are accumulated server-side and handed
+    over once inside the ``done`` frame (``False``, single-frame SSE). Everything
+    else -- the open frame, the heartbeats, ``status`` / ``metadata`` / ``error``
+    frames, the persistence tail and the end-of-stream marker -- is shared by both
+    modes, so the two can never drift apart and neither one loses the keep-alive
+    bytes that stop a proxy from resetting a slow request.
+
     Supports both GET (for EventSource) and POST methods.
     """
     try:
@@ -585,6 +595,13 @@ async def stream_chat(
                 normalized_sources = []
                 prompt_snapshot = None
                 stream_error = None
+
+                # Transport mode (see the route docstring). Only the answer tokens
+                # are affected: `status`, `metadata` and `error` frames are forwarded
+                # in both modes, the heartbeats keep flowing while the tokens are
+                # buffered, and the `done` frame below already carries the complete
+                # answer, so single-frame mode needs no second code path.
+                stream_tokens = settings.CHAT_STREAMING_ENABLED
                 
                 _stream = _with_sse_heartbeats(chat_service.process_message_stream(
                     user_id=user_id,
@@ -625,6 +642,10 @@ async def stream_chat(
                     elif event_type == "chunk":
                         content = chunk.get("content", "")
                         full_answer += content
+                        if not stream_tokens:
+                            # Single-frame mode: the token is accumulated above and
+                            # written by the `done` frame instead of here.
+                            continue
                         
                         # Send content chunk to client
                         yield _sse_data_frame({'type': 'chunk', 'content': content})

@@ -280,7 +280,12 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
             this.streamStatus = '';
             const messageToUpdate = ensureAiMessage();
             if (messageToUpdate) {
-              messageToUpdate.content = fullAnswer || messageToUpdate.content || '';
+              // `event.answer` is authoritative. The server writes the complete answer
+              // into the `done` frame in both transports: when tokens were streamed
+              // (`chunk` frames) and in single-frame mode (`CHAT_STREAMING_ENABLED=false`),
+              // where no `chunk` frame exists and `fullAnswer` stays empty — without this
+              // fallback the single-frame answer would render as an empty bubble.
+              messageToUpdate.content = event.answer || fullAnswer || messageToUpdate.content || '';
               messageToUpdate.message_id = event.message_id;
               messageToUpdate.conversation_id = event.conversation_id;
               messageToUpdate.session_id = event.session_id || chatRequest.session_id;
