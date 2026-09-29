@@ -302,6 +302,82 @@ production, because `app/core/logging.py::setup_logging()` is never called: only
 lines and library warnings reach stdout. Call `setup_logging()` from `main.py` if you want the
 warm-up progress (`[KB WARMUP] ...`) visible in the pod logs.
 
+### Retrieval latency instrumentation & benchmark
+
+Every stage of a chat turn is timed with `time.perf_counter()` and logged at INFO by
+`app/core/perf_timing.py` (`timed_stage` / `timed_async_stage` / `timed_async_generator_stage`):
+
+```text
+[PERF_STAGE] stage=bm25_search elapsed=0.056s docs=45 ok=True
+```
+
+The instrumentation is behind the single flag `PERF_TIMING_LOG` (default `true`); set it to
+`false` and no clock is read and no record is written. The module attaches its own stdout
+handler while enabled, so those lines are visible even though `setup_logging()` is never
+called in production (see the note above) — and they are emitted exactly once.
+
+To answer "where did the 38 s go?" without a browser, use the standalone benchmark (no HTTP,
+no writes; it drives the retrieval services directly with real Persian questions from the
+feedback dump):
+
+```bash
+python scripts/bench_retrieval_latency.py                    # warm-up, BM25, hybrid, retrieval, prompt build
+python scripts/bench_retrieval_latency.py --with-llm          # + the LLM answer stream
+python scripts/bench_retrieval_latency.py --concurrency 4     # + event-loop contention probe
+python scripts/bench_retrieval_latency.py --no-dense          # BM25-only, fully local
+```
+
+It prints a per-stage table (cold run reported separately from the warm median/p95) and writes
+`reports/bench_retrieval_<timestamp>/summary.json` + `stages.csv`. The measured numbers and
+the analysis live in the untracked `docs/RAG_LATENCY_AUDIT_BM25.md` and `reports/` (both
+gitignored).
+
+### Migrating user accounts from a previous deployment
+
+Moving the accounts of an earlier deployment (new host, new database, rotated `SECRET_KEY`) needs
+**no** password reset. `POST /api/users/login` resolves the account by `username` *or* `email` and
+verifies the stored `password_hash` with `bcrypt.checkpw` (`app/services/user_service.py`); the JWT
+secret only signs the *issued* tokens. Copy the bcrypt hash byte for byte and every user signs in
+once more with the password they already have — the sole casualty of a rotation is a token minted by
+the old deployment, and those expire after 30 minutes anyway.
+
+`scripts/import_legacy_users.py` performs that migration from a `mongoexport` / `mongodump`
+Extended JSON dump (`{"$oid": ...}`, `{"$date": ...}`):
+
+```bash
+# dry run (default): shows the plan, writes nothing
+venv/bin/python scripts/import_legacy_users.py --file /opt/persianway-rag-db.users.json
+
+# write it
+venv/bin/python scripts/import_legacy_users.py --file /opt/persianway-rag-db.users.json --apply
+
+# prove the login chain afterwards with a password you know
+venv/bin/python scripts/import_legacy_users.py --file ... --apply --check-login admin=<password>
+```
+
+Without `--file` the script looks for `../persianway-rag-db.users.json` (or `$LEGACY_USERS_FILE`).
+
+Behaviour:
+
+- the source document is validated (`UserDocument`) and then written **verbatim** — hashes,
+  `created_at`, `last_login` and permission grant dates are preserved, nothing is re-hashed;
+- accounts are matched by `username`, then `email`, then `_id`; a match is merged (legacy values
+  win), never duplicated, so the script is idempotent and safe to re-run;
+- an account that already exists keeps the password stored in the target unless
+  `--force-passwords` asks for the legacy hash, so a freshly generated admin password stays valid;
+- permissions are merged permissively (`--replace-permissions` stores exactly the legacy list) and a
+  unique-key clash involving two different accounts is reported as a conflict instead of being
+  force-written (exit code `1`);
+- `--apply` writes a JSON backup of the current collection first (`--backup-dir`, default the system
+  temp directory) and every run re-reads the written documents, checks the bcrypt hash, exercises
+  `UserService.get_user_by_username` and — with `--check-login USER=PASSWORD` — does a real
+  `POST /api/users/login` followed by a JWT decode against the *current* `settings.secret_key`;
+- `--database NAME` runs the whole thing against a scratch database for a rehearsal
+  (`--check-login` is skipped there because the live API serves the configured database).
+
+Exit codes: `0` imported and verified, `1` verification failure or conflicts, `2` preconditions
+failed. The planning layer is covered by `tests/unit/test_legacy_user_import.py`.
+
 ## Testing
 
 ```bash
@@ -309,6 +385,30 @@ pytest
 ```
 
 The test suite (`tests/`) covers API, services, unit and tooling behaviour: retrieval, re-ranking, confidence scoring, document processing, conversation filtering, intent detection and more.
+
+### Live (deployed-deployment) tests
+
+`tests/e2e_live/` contains tests that run against a **running deployment** instead of
+starting the app in-process, because the failures they guard against only exist outside the
+process: a CDN/nginx that buffers the answer, a proxy that resets a silent stream, a stale
+frontend bundle, a chat page that renders nothing.
+
+```bash
+# Free, read-only: deployed bundle vs this checkout, streaming parser, health, validation.
+E2E_LIVE=1 pytest tests/e2e_live/test_live_frontend_artifact.py -v -s
+
+# The full live suite (spends ~10 LLM turns on the production deployment).
+pytest tests/e2e_live --live -v -s
+
+# Real headless browser (login page always; the chat UI needs a throwaway account).
+E2E_USERNAME=... E2E_PASSWORD=... pytest tests/e2e_live/test_live_frontend_browser.py --live -v -s
+```
+
+They skip unless `E2E_LIVE=1` / `--live` is given, so a plain `pytest` never touches a
+deployment. What each test proves, the measured results (including the finding that the live
+edge delivers a whole turn in 2-3 flushes instead of token by token), the per-test cost and the
+risk profile are recorded in the untracked `docs/LIVE_E2E_STREAMING_TESTS.md` (`docs/` is
+gitignored).
 
 ## License
 
