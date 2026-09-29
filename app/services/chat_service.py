@@ -10,6 +10,14 @@ import logging
 import openai
 from loguru import logger
 
+# Stage timings ([PERF_STAGE] ...) for the latency audit; switchable/removable via
+# `PERF_TIMING_LOG` -- see app/core/perf_timing.py.
+from app.core.perf_timing import (
+    timed_async_generator_stage,
+    timed_async_stage,
+    timed_stage,
+)
+
 # ==================== Provider request budget ====================
 # Every LLM call in this pipeline (intent classification, query rewriting,
 # retrieval QA and the answer itself) goes through `get_llm`. Neither
@@ -1058,6 +1066,7 @@ Title:"""
             "context_decided": False,
         }
 
+    @timed_async_stage("chat_request_total", mode="buffered")
     async def process_message(self, user_id: str, message: str, conversation_history: List = None, model: str = None, parameters: dict = None) -> Dict[str, Any]:
         logger.debug(f"[DEBUG] process_message called with model: {model}")
         
@@ -1135,7 +1144,8 @@ Title:"""
                 
                 # === PERF: Intent Detection ===
                 t0 = time.perf_counter()
-                intent_result = await self.detect_query_intent(message, conversation_history)
+                with timed_stage("intent_detection_llm"):
+                    intent_result = await self.detect_query_intent(message, conversation_history)
                 timings['intent_detection'] = time.perf_counter() - t0
                 logger.info(f"[PERF] step=intent_detection elapsed={timings['intent_detection']:.3f}s")
                 
@@ -1457,6 +1467,7 @@ Title:"""
                 }
             }
 
+    @timed_async_generator_stage("chat_request_total", mode="stream")
     async def process_message_stream(self, user_id: str, message: str, conversation_history: List = None, model: str = None, parameters: dict = None) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream a user message using an AsyncGenerator that yields chunks.
         
@@ -1509,7 +1520,8 @@ Title:"""
             # Detect query intent
             t0 = time.perf_counter()
             try:
-                intent_result = await self.detect_query_intent(message, conversation_history)
+                with timed_stage("intent_detection_llm"):
+                    intent_result = await self.detect_query_intent(message, conversation_history)
             except PROVIDER_ERROR_TYPES as provider_error:
                 # This classifier is an LLM call that runs BEFORE the first byte of
                 # the answer, so a 429 / read timeout here used to fall through to
