@@ -32,7 +32,19 @@ class UserService:
     
     def __init__(self):
         self._collection: Optional[AsyncIOMotorCollection] = None
-        self.secret_key = getattr(settings, 'SECRET_KEY', 'your-secret-key-here')
+        # ``Settings`` declares this field in lowercase: ``secret_key``
+        # (app/core/config.py:73). The previous
+        # ``getattr(settings, 'SECRET_KEY', 'your-secret-key-here')`` never
+        # resolved against the pydantic model, so the literal fallback silently
+        # won: every token was signed with it and, because the same literal was
+        # used to verify, any token forged with that publicly known string was
+        # accepted as valid. ``SECRET_KEY`` / ``secret_key`` in .env now wins.
+        self.secret_key = settings.secret_key
+        if self.secret_key == "your-secret-key-here":
+            logger.warning(
+                "SECRET_KEY is unset or still the default placeholder; "
+                "issued JWTs are signed with a publicly known secret."
+            )
         self.algorithm = "HS256"
         self.access_token_expire_minutes = 30
     
@@ -75,7 +87,13 @@ class UserService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has expired"
             )
-        except jwt.JWTError:
+        # ``jwt.JWTError`` was a 1.x alias that PyJWT dropped in 2.10; the modern
+        # name is ``PyJWTError``, the base class of ``DecodeError`` /
+        # ``InvalidSignatureError`` / ``ExpiredSignatureError``. With the removed
+        # alias this handler raised ``AttributeError`` for *every* invalid token,
+        # turning a 401 into a 500. ``ExpiredSignatureError`` above must stay
+        # first because it is a subclass of ``PyJWTError``.
+        except jwt.PyJWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"
