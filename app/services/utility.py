@@ -7,6 +7,13 @@ import asyncio
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 
+# Message used whenever the panel has switched web search off (`is_enabled`).
+# Callers (`knowledge_base`, `search_persianway`) treat anything prefixed with
+# "Error searching web" as a failure and never inject it into the answer context,
+# so this text reaches logs and the panel's test button only.
+TAVILY_DISABLED_MESSAGE = "جستجوی وب در پنل مدیریت غیرفعال شده است."
+
+
 class TavilySearchService:
     def __init__(self):
         self.client: Optional[TavilyClient] = None
@@ -31,14 +38,17 @@ class TavilySearchService:
         config_service = await get_config_service()
         config = await config_service.get_config()
         tavily_cfg = config.tavily_settings
-        
+
+        # The panel switch (`is_enabled`) wins over everything: when an operator has
+        # turned web search off, no request is made even if an API key exists in the
+        # config or in `.env`. `disabled` lets callers tell this apart from a failure.
+        if not tavily_cfg.is_enabled:
+            logger.info("Tavily search skipped: disabled in the panel configuration")
+            return {"error": TAVILY_DISABLED_MESSAGE, "results": [], "disabled": True}
+
         # Use dynamic API key if available, otherwise fallback to settings.TAVILY_API_KEY
         api_key = tavily_cfg.tavily_api_key or settings.TAVILY_API_KEY
-        
-        # If enabled in config is False, we respect that UNLESS it's the default/unconfigured state 
-        # and we have an env key. But strictly following the requirement: "if config values are empty... pass from .env"
-        # The is_enabled flag defaults to True in the model, so we check if key is present.
-        
+
         if not api_key:
             logger.warning("Tavily search disabled: No API key in config or .env")
             return {"error": "Search service is disabled", "results": []}

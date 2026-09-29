@@ -13,12 +13,20 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.services.document_processor import get_document_processor
 from app.services.hybrid_retrieval import HybridRetrievalService
 from app.services.excel_processor import get_excel_qa_processor
-from app.services.config_service import ConfigService
+from app.services.config_service import ConfigService, get_config_service
 from app.services.context_condenser import batch_condense
 from app.services.text_sanitizer import sanitize_documents
 from app.services.utility import search_persianway
 from langchain_core.documents import Document
 from app.services.task_service import TaskStatus
+# Stage timings ([PERF_STAGE] ...) for the latency audit; switchable/removable via
+# `PERF_TIMING_LOG` -- see app/core/perf_timing.py.
+from app.core.perf_timing import (
+    log_stage,
+    timed_async_generator_stage,
+    timed_async_stage,
+    timed_stage,
+)
 # Set up logging for human referrals
 referral_logger = logging.getLogger("human_referral")
 file_handler = logging.FileHandler("human_referrals.log", encoding="utf-8")
@@ -54,6 +62,29 @@ RAW_L2_DISTANCE_RANGE = 2.5
 # fails every configurable `knowledge_base_confidence_threshold` in the schema's
 # legal (0, 1] range except the degenerate 0.0.
 BEST_DOCUMENT_RELEVANCE_FLOOR = 0.3
+
+
+async def _web_search_enabled() -> bool:
+    """Whether the operator left Tavily web search on in the admin panel.
+
+    Reads the dynamic configuration (`tavily_settings.is_enabled`) so the panel
+    switch takes effect on the next question without a restart. When the switch is
+    off the search is never issued: no request, no latency, and no error text that
+    could be mistaken for retrieved content. If the configuration cannot be read at
+    all, the previous behaviour (search) is kept rather than silently disabling a
+    feature on a transient database hiccup.
+    """
+    try:
+        config_service = await get_config_service()
+        config = await config_service.get_config()
+        enabled = bool(config.tavily_settings.is_enabled)
+    except Exception as exc:
+        logging.warning(f"[Retrieval] Could not read the web search switch, assuming enabled: {exc}")
+        return True
+
+    if not enabled:
+        logging.info("[Retrieval] Web search skipped: disabled in the panel configuration")
+    return enabled
 
 
 class KnowledgeBaseService:
@@ -229,7 +260,9 @@ class KnowledgeBaseService:
         """
         started = time.perf_counter()
         try:
-            vector_store = await self._get_vector_store_async()
+            with timed_stage("warmup_vector_store") as t_vs:
+                vector_store = await self._get_vector_store_async()
+                t_vs["available"] = vector_store is not None
             if vector_store is None:
                 logging.warning(
                     "[KB WARMUP] Vector store unavailable (embeddings not ready); "
@@ -237,7 +270,8 @@ class KnowledgeBaseService:
                 )
                 return
             hybrid = await self._get_hybrid_service_async()
-            await hybrid.prewarm()
+            with timed_stage("warmup_bm25_prewarm") as t_prewarm:
+                t_prewarm["ready_branches"] = await hybrid.prewarm()
             logging.info(f"[KB WARMUP] Retrieval ready in {time.perf_counter() - started:.3f}s")
         except Exception as e:
             logging.error(
@@ -1032,6 +1066,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
 
 
 
+    @timed_async_stage("retrieval_total")
     async def _retrieve_context(
         self,
         query: str,
@@ -1081,25 +1116,29 @@ Return ONLY a JSON object in PERSIAN with these fields:
                         continue
                 filtered_history.append(msg)
 
-        # --- Query rewriting/expansion ---
+        # --- Query rewriting/expansion (LLM round trip) ---
         t0 = time.perf_counter()
-        query_expansion_result = await self.expand_query_with_context(
-            query=query,
-            conversation_history=filtered_history if filtered_history else None,
-            skip_rewrite=skip_rewrite
-        )
-        rewritten_query = query_expansion_result["rewritten_query"]
-        all_queries = query_expansion_result.get("all_queries") or [rewritten_query]
+        with timed_stage("expand_query_llm", skip_rewrite=skip_rewrite) as t_expand:
+            query_expansion_result = await self.expand_query_with_context(
+                query=query,
+                conversation_history=filtered_history if filtered_history else None,
+                skip_rewrite=skip_rewrite
+            )
+            rewritten_query = query_expansion_result["rewritten_query"]
+            all_queries = query_expansion_result.get("all_queries") or [rewritten_query]
+            t_expand["queries"] = len(all_queries)
         retrieval_timings['expand_query'] = time.perf_counter() - t0
         logging.info(f"[PERF_RETRIEVAL] step=expand_query elapsed={retrieval_timings['expand_query']:.3f}s")
 
         # --- Web search (public queries only) ---
         persianway_docs_for_rerank = []
         web_search_content = ""
-        if is_public and include_web_search:
+        if is_public and include_web_search and await _web_search_enabled():
             try:
-                search_result = await search_persianway.ainvoke({"query": rewritten_query})
-                web_search_content = search_result or ""
+                with timed_stage("tavily_web_search") as t_web:
+                    search_result = await search_persianway.ainvoke({"query": rewritten_query})
+                    web_search_content = search_result or ""
+                    t_web["chars"] = len(web_search_content)
                 if search_result and "Error executing search" not in search_result and "Error searching web" not in search_result:
                     web_search_doc = Document(
                         page_content=search_result,
@@ -1118,7 +1157,9 @@ Return ONLY a JSON object in PERSIAN with these fields:
                 logging.error(f"[Retrieval] Web search error: {str(e)}")
 
         # --- Hybrid retrieval (dense + BM25, already reranked inside hybrid_retrieve) ---
-        vector_store = await self._get_vector_store_async()
+        with timed_stage("vector_store_load") as t_vs:
+            vector_store = await self._get_vector_store_async()
+            t_vs["available"] = vector_store is not None
         if vector_store is None:
             raise RuntimeError(
                 "Vector store not available. OpenAI embeddings may not be properly configured. "
@@ -1135,20 +1176,22 @@ Return ONLY a JSON object in PERSIAN with these fields:
         t0 = time.perf_counter()
         docs_with_scores = []
         hrs = await self._get_hybrid_service_async()
-        for search_query in all_queries:
-            search_query = (search_query or "").strip()
-            if not search_query:
-                continue
-            try:
-                hybrid_docs = await hrs.hybrid_retrieve(search_query, is_public)
-                for doc in hybrid_docs:
-                    if not _validate_is_public(doc):
-                        continue
-                    hs = float(doc.metadata.get("hybrid_score", 0.0) or 0.0)
-                    pseudo_distance = 1.0 - max(0.0, min(1.0, hs))
-                    docs_with_scores.append((doc, pseudo_distance, search_query, "single"))
-            except Exception as e:
-                logging.error(f"[Retrieval] Hybrid retrieval failed for query '{search_query[:50]}...': {str(e)}")
+        with timed_stage("hybrid_retrieval", queries=len(all_queries)) as t_hyb:
+            for search_query in all_queries:
+                search_query = (search_query or "").strip()
+                if not search_query:
+                    continue
+                try:
+                    hybrid_docs = await hrs.hybrid_retrieve(search_query, is_public)
+                    for doc in hybrid_docs:
+                        if not _validate_is_public(doc):
+                            continue
+                        hs = float(doc.metadata.get("hybrid_score", 0.0) or 0.0)
+                        pseudo_distance = 1.0 - max(0.0, min(1.0, hs))
+                        docs_with_scores.append((doc, pseudo_distance, search_query, "single"))
+                except Exception as e:
+                    logging.error(f"[Retrieval] Hybrid retrieval failed for query '{search_query[:50]}...': {str(e)}")
+            t_hyb["docs_found"] = len(docs_with_scores)
         retrieval_timings['hybrid_retrieval'] = time.perf_counter() - t0
         logging.info(f"[PERF_RETRIEVAL] step=hybrid_retrieval elapsed={retrieval_timings['hybrid_retrieval']:.3f}s docs_found={len(docs_with_scores)}")
 
@@ -1176,25 +1219,28 @@ Return ONLY a JSON object in PERSIAN with these fields:
 
         seen_hashes = {}
         deduplicated_docs = []
-        for doc, score, source_query, query_type in sorted(filtered_docs, key=lambda x: x[1]):
-            if not _validate_is_public(doc):
-                continue
-            doc_hash = _get_doc_hash(doc)
-            if doc_hash in seen_hashes:
-                existing_score = seen_hashes[doc_hash][1]
-                if score < existing_score:
-                    deduplicated_docs = [item for item in deduplicated_docs if _get_doc_hash(item[0]) != doc_hash]
+        with timed_stage("dedup_filter") as t_dedup:
+            for doc, score, source_query, query_type in sorted(filtered_docs, key=lambda x: x[1]):
+                if not _validate_is_public(doc):
+                    continue
+                doc_hash = _get_doc_hash(doc)
+                if doc_hash in seen_hashes:
+                    existing_score = seen_hashes[doc_hash][1]
+                    if score < existing_score:
+                        deduplicated_docs = [item for item in deduplicated_docs if _get_doc_hash(item[0]) != doc_hash]
+                        deduplicated_docs.append((doc, score, source_query, query_type))
+                        seen_hashes[doc_hash] = (doc, score, source_query, query_type)
+                else:
                     deduplicated_docs.append((doc, score, source_query, query_type))
                     seen_hashes[doc_hash] = (doc, score, source_query, query_type)
-            else:
-                deduplicated_docs.append((doc, score, source_query, query_type))
-                seen_hashes[doc_hash] = (doc, score, source_query, query_type)
 
-        unique_docs_with_scores = sorted(
-            [(doc, score) for doc, score, _, _ in deduplicated_docs],
-            key=lambda x: x[1]
-        )
-        final_docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
+            unique_docs_with_scores = sorted(
+                [(doc, score) for doc, score, _, _ in deduplicated_docs],
+                key=lambda x: x[1]
+            )
+            final_docs_with_scores = unique_docs_with_scores[:rag_settings.top_k_results]
+            t_dedup["candidates"] = len(docs_with_scores)
+            t_dedup["final_docs"] = len(final_docs_with_scores)
         retrieval_timings['deduplication'] = time.perf_counter() - t0
         logging.info(
             f"[PERF_RETRIEVAL] step=deduplication elapsed={retrieval_timings['deduplication']:.3f}s "
@@ -1246,6 +1292,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
             "retrieval_timings": retrieval_timings,
         }
 
+    @timed_async_generator_stage("llm_answer_stream")
     async def stream_answer_from_context(
         self,
         query: str,
@@ -1284,11 +1331,19 @@ Return ONLY a JSON object in PERSIAN with these fields:
                 continue  # skip chunks without valid content; never str(chunk)
             if not first_chunk_logged:
                 first_chunk_logged = True
+                # Time to first token = prompt formatting + provider TTFB. This is
+                # what the user perceives as "the answer is starting".
+                log_stage(
+                    "llm_first_chunk",
+                    time.perf_counter() - t_gen_start,
+                    {"chars": len(content)},
+                )
                 logging.info(f"[PERF_KB] time_to_first_chunk={(time.perf_counter() - t_gen_start):.3f}s")
             yield content
         logging.info(f"[PERF_KB] step=response_generation_stream elapsed={(time.perf_counter() - t_gen_start):.3f}s")
 
 
+    @timed_async_stage("kb_query_total")
     async def query_knowledge_base(self, query: str, conversation_history: List = None, is_public: bool = False, external_context: str = None, skip_rewrite: bool = False) -> Dict[str, Any]:
         """Query the knowledge base with a question using improved retrieval strategy.
 
@@ -1366,7 +1421,7 @@ Return ONLY a JSON object in PERSIAN with these fields:
             persianway_docs_for_rerank = []
             web_search_content = ""
 
-            if is_public:
+            if is_public and await _web_search_enabled():
                 try:
                     search_result = await search_persianway.ainvoke({"query": rewritten_query})
                     web_search_content = search_result

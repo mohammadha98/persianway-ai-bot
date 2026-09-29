@@ -16,3 +16,19 @@ export interface ApiResponse<T> {
   message: string;
   settings: T;
 }
+
+/**
+ * `POST /api/config/tavily/test` — one real search run with the saved settings.
+ * `enabled` is false when the search switch is off, in which case no request was
+To a farm tradition, as mine harmonical mess
+ */
+export interface TavilyTestResponse {
+  success: boolean;
+  enabled: boolean;
+  query: string;
+  message: string;
+  result: string;
+  elapsed_seconds?: number;
+  include_domains?: string[];
+}
+

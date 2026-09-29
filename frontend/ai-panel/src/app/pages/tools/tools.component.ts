@@ -1,8 +1,9 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { WebToolService } from '../../services/web-tool.service';
-import { TavilySearchSettings } from '../../models/tavily-settings.model';
+import { TavilySearchSettings, TavilyTestResponse } from '../../models/tavily-settings.model';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -36,7 +37,18 @@ export class ToolsComponent implements OnInit {
   form: FormGroup;
   loading = false;
   saving = false;
+  testing = false;
+  resetting = false;
+  showApiKey = false;
+
   saveMessage = '';
+  saveMessageType: 'success' | 'error' = 'success';
+
+  testQuery = '';
+  testResult: TavilyTestResponse | null = null;
+
+  /** Serialized copy of the settings as last read from / written to the server. */
+  private savedSnapshot = '';
 
   constructor(private fb: FormBuilder, private webTool: WebToolService) {
     this.form = this.fb.group({
@@ -49,6 +61,19 @@ export class ToolsComponent implements OnInit {
       exclude_domains_string: [''],
       snippet_length: [200, [Validators.required, Validators.min(1)]]
     });
+  }
+
+  /** True only when the form differs from what the server currently stores. */
+  get hasChanges(): boolean {
+    return this.serialize(this.buildPayload()) !== this.savedSnapshot;
+  }
+
+  get searchEnabled(): boolean {
+    return !!this.form.value.is_enabled;
+  }
+
+  get busy(): boolean {
+    return this.loading || this.saving || this.testing || this.resetting;
   }
 
   ngOnInit(): void {
