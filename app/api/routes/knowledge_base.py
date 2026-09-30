@@ -165,6 +165,28 @@ async def process_excel_files(background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=f"Excel processing error: {str(e)}")
 
 
+@router.post("/process-docx", response_model=ProcessDocsResponse)
+async def process_docx_files(background_tasks: BackgroundTasks):
+    """Process all Word (DOCX) documents in the docs directory.
+
+    This endpoint triggers the processing of all DOCX files in the docs directory
+    and adds them to the vector database. This operation runs in the background.
+    """
+    try:
+        # Get the knowledge base service
+        kb_service = get_knowledge_base_service()
+
+        # Process DOCX files in the background
+        background_tasks.add_task(kb_service.process_docx_files)
+
+        return ProcessDocsResponse(
+            message="DOCX processing started in the background",
+            status="processing"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DOCX processing error: {str(e)}")
+
+
 @router.get("/status")
 async def get_processing_status():
     """Get the status of the document processing.
@@ -186,6 +208,7 @@ async def get_processing_status():
                 "message": "Vector store is not available. Check if OpenAI API key is configured correctly.",
                 "document_count": 0,
                 "pdf_document_count": 0,
+                "docx_document_count": 0,
                 "excel_qa_count": 0
             }
         
@@ -195,12 +218,15 @@ async def get_processing_status():
         
         # Count documents by source type
         pdf_count = 0
+        docx_document_count = 0
         excel_qa_count = 0
         
         # This is a simple approach - in a production system you might want to use more efficient queries
         for doc in collection.get()['metadatas']:
             if doc.get('source_type') == 'excel_qa':
                 excel_qa_count += 1
+            elif doc.get('source_type') == 'docx' or doc.get('file_type') == 'docx':
+                docx_document_count += 1
             else:
                 pdf_count += 1
         
@@ -208,6 +234,7 @@ async def get_processing_status():
             "status": "ready" if count > 0 else "empty",
             "document_count": count,
             "pdf_document_count": pdf_count,
+            "docx_document_count": docx_document_count,
             "excel_qa_count": excel_qa_count
         }
     except Exception as e:

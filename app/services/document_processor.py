@@ -1199,7 +1199,20 @@ class DocumentProcessor:
                         "source": filename,
                         "file_path": file_path,
                         "chunk_index": i,
-                        "file_type": "docx"
+                        "file_type": "docx",
+                        # Retrieval-compatibility keys. `HybridRetrievalService`
+                        # only searches the `entry_type="user_contribution_docx"`
+                        # branch (see `_dense_parallel` / `_bm25_branch_filters`
+                        # in hybrid_retrieval.py), and that branch additionally
+                        # requires `is_public != True` for private queries. A
+                        # DOCX ingested without these keys matches no branch and
+                        # is therefore invisible to the knowledge base. The
+                        # contribution flow (`process_knowledge_contribution_background`)
+                        # overrides them afterwards when the caller sets its own
+                        # `is_public` value.
+                        "source_type": "docx",
+                        "entry_type": "user_contribution_docx",
+                        "is_public": False,
                     }
                 )
                 documents.append(doc)

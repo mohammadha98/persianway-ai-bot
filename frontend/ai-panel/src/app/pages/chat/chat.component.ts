@@ -42,6 +42,19 @@ interface Message {
   message_id?: string;
   conversation_id?: string;
   session_id?: string;
+  // Server-side completion status of this answer (`done` frame). `truncated` is
+  // true when the provider stopped at the `max_tokens` ceiling; the answer is
+  // kept as-is and `truncationNotice` explains the cut to the user.
+  truncated?: boolean;
+  truncationNotice?: string;
+  // Failure state: the answer never arrived (stream error / empty answer). A failed
+  // message renders a retry button that re-sends `retryQuestion` from the panel,
+  // instead of leaving the user with a dead end.
+  failed?: boolean;
+  /** The question that produced this bubble, kept so a retry can re-ask it. */
+  retryQuestion?: string;
+  /** True while a retry for this message is in flight. */
+  retrying?: boolean;
 }
 
 @Component({
@@ -164,16 +177,61 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
     console.log('[CHAT] Added user message, total messages:', this.messages.length);
 
     this.currentMessage = '';
+    this.startAnswer(messageContent);
+  }
+
+  /**
+   * Re-sends the question behind a failed answer.
+   *
+   * The failed bubble is reused as the answer placeholder, so a retry never piles
+   * a second bubble next to the error it is fixing.
+   */
+  retryMessage(message: Message): void {
+    if (!message || message.isUser || !message.failed) {
+      return;
+    }
+    if (this.isLoading) {
+      console.log('[CHAT] retryMessage blocked - a stream is already running');
+      return;
+    }
+
+    const question = (message.retryQuestion || '').trim();
+    if (!question) {
+      return;
+    }
+
+    console.log('[CHAT] retrying question:', question);
+    this.startAnswer(question, message);
+  }
+
+  /**
+   * Runs the SSE answer pipeline for `question`.
+   *
+   * `retryTarget` is the failed message being retried (when there is one): the
+   * question is asked again, so the failure state is cleared and that same bubble
+   * is filled with the new answer.
+   */
+  private startAnswer(question: string, retryTarget?: Message) {
     this.isLoading = true;
     this.streamStatus = '';
     console.log('[CHAT] Set isLoading to true');
 
-    const chatRequest = this.chatService.prepareChatRequest(messageContent);
+    if (retryTarget) {
+      retryTarget.content = '';
+      retryTarget.truncated = false;
+      retryTarget.truncationNotice = '';
+      retryTarget.failed = false;
+      retryTarget.retrying = true;
+      this.messages = [...this.messages];
+    }
+
+    const chatRequest = this.chatService.prepareChatRequest(question);
     console.log('[CHAT] Prepared chat request:', chatRequest);
 
     let fullAnswer = '';
     let metadata: any = null;
-    let aiMessageId: string | null = null;
+    // A retried failure already has a bubble: it becomes the answer placeholder.
+    let aiMessageId: string | null = retryTarget ? retryTarget.id : null;
     let typedText = '';
     let typingTimer: any = null;
 
@@ -290,8 +348,43 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
               messageToUpdate.conversation_id = event.conversation_id;
               messageToUpdate.session_id = event.session_id || chatRequest.session_id;
               messageToUpdate.conversationHistory = event.conversation_history;
+              // Completion status: the backend flags an answer the provider cut
+              // off at the `max_tokens` ceiling. The partial answer stays on
+              // screen (it is still the best answer available) and the user is
+              // told why it ends where it does, instead of silently receiving
+              // what looks like a complete reply.
+              messageToUpdate.truncated = !!event.truncated;
+              messageToUpdate.truncationNotice = event.truncation_notice || '';
+              // The answer arrived, so whatever failed before is now answered: the
+              // retry affordance (and the question it carried) goes away.
+              messageToUpdate.failed = false;
+              messageToUpdate.retrying = false;
+              messageToUpdate.retryQuestion = undefined;
+              // The `done` frame carries the FINAL analysis (the earlier
+              // `metadata` frame is emitted before generation, so it cannot know
+              // how the answer ended). Merging it is what makes late flags like
+              // `answer_truncated` visible in the analysis panel.
+              if (event.query_analysis) {
+                messageToUpdate.queryAnalysis = {
+                  ...messageToUpdate.queryAnalysis,
+                  ...event.query_analysis
+                };
+              }
               this.messages = [...this.messages];
               console.log('[CHAT] Updated message with server-side IDs');
+            }
+            if (event.truncated) {
+              console.warn('[CHAT] Answer truncated at the token ceiling:', event.finish_reason);
+              this.snackBar.open(
+                event.truncation_notice || 'پاسخ ناتمام ماند؛ لطفاً ادامهٔ پرسش را جداگانه بپرسید.',
+                'بستن',
+                {
+                  duration: 6000,
+                  horizontalPosition: 'center',
+                  verticalPosition: 'bottom',
+                  panelClass: ['warning-snackbar']
+                }
+              );
             }
             console.log('[CHAT] Loading conversation history');
             this.loadConversationHistory();
@@ -315,38 +408,20 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
             ? error.message
             : 'متأسفم، خطایی در ارسال پیام رخ داد. لطفاً دوباره تلاش کنید.';
 
-          if (fullAnswer.length > 0) {
-            // Keep the partial answer visible and report the error via the
-            // snackbar, so error text is never glued into the answer body.
-            const partialMessage = ensureAiMessage();
-            if (partialMessage) {
-              partialMessage.content = fullAnswer;
-              this.messages = [...this.messages];
-              console.log('[CHAT] Kept partial answer after error, length:', fullAnswer.length);
-            }
-          } else if (error && error.code === 'stream_incomplete') {
-            // Stream ended without a `done` event and nothing was received.
-            const messageToUpdate = ensureAiMessage();
-            if (messageToUpdate) {
-              messageToUpdate.content = errorMessageText;
-              this.messages = [...this.messages];
-            }
-          } else {
-            // No content received at all: replace the placeholder with an
-            // explicit error message.
-            if (aiMessageId) {
-              this.messages = this.messages.filter(m => m.id !== aiMessageId);
-            }
-
-            const errorMessage: Message = {
-              id: this.generateId(),
-              content: errorMessageText,
-              isUser: false,
-              timestamp: new Date()
-            };
-
-            this.messages = [...this.messages, errorMessage];
-            console.log('[CHAT] Added error message');
+          // The bubble that was waiting for an answer becomes the failure notice: a
+          // partial answer stays visible when there is one, otherwise the error
+          // text replaces the placeholder. Either way the message is marked
+          // `failed`, which is what puts the retry button under it.
+          const failedMessage = ensureAiMessage();
+          if (failedMessage) {
+            failedMessage.content = fullAnswer.length > 0 ? fullAnswer : errorMessageText;
+            failedMessage.truncated = false;
+            failedMessage.truncationNotice = '';
+            failedMessage.failed = true;
+            failedMessage.retrying = false;
+            failedMessage.retryQuestion = question;
+            this.messages = [...this.messages];
+            console.log('[CHAT] Marked answer as failed, kept', fullAnswer.length, 'chars');
           }
 
           this.snackBar.open(errorMessageText, 'بستن', {

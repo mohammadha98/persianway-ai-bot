@@ -235,6 +235,146 @@
   }
 }
 
+/* Explains a section's effect before the operator has to guess it. */
+.section-description {
+  margin: -12px 0 16px 0;
+  font-family: 'Vazirmatn', sans-serif;
+  font-size: 0.9rem;
+  color: #78909c;
+}
+
+/* Reminder that web search is a *site* search, plus a one-click way back to the
+   locked default domain. */
+.domain-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border-radius: 10px;
+  background: #e8eaf6;
+  color: #283593;
+  font-family: 'Vazirmatn', sans-serif;
+  font-size: 0.9rem;
+
+  > mat-icon {
+    color: #3f51b5;
+    flex-shrink: 0;
+  }
+
+  span {
+    flex: 1 1 240px;
+  }
+
+  .persianway-btn {
+    font-family: 'Vazirmatn', sans-serif;
+    font-weight: 500;
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      margin-left: 6px;
+    }
+  }
+}
+
+/* Test search: one real Tavily request with the saved settings. */
+.test-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+
+  .test-query-field {
+    flex: 1 1 320px;
+    min-width: 240px;
+  }
+
+  .test-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 56px;
+    margin-top: 4px;
+    padding: 0 24px;
+    font-family: 'Vazirmatn', sans-serif;
+    font-weight: 500;
+
+    mat-progress-spinner {
+      display: inline-block;
+    }
+  }
+}
+
+.test-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-family: 'Vazirmatn', sans-serif;
+  font-size: 0.9rem;
+
+  &.error {
+    background: #ffebee;
+    color: #c62828;
+  }
+
+  mat-icon {
+    flex-shrink: 0;
+  }
+
+  .test-result-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    .test-meta {
+      font-size: 0.8rem;
+      opacity: 0.85;
+      direction: ltr;
+      text-align: right;
+    }
+  }
+}
+
+/* Raw tool output: the same formatted string a live answer is built from. */
+.test-output {
+  margin: 12px 0 0 0;
+  padding: 12px 16px;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #263238;
+  color: #eceff1;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.form-actions .reset-btn {
+  height: 48px;
+  padding: 8px 24px;
+  font-family: 'Vazirmatn', sans-serif;
+  font-weight: 500;
+  font-size: 0.95rem;
+
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
+
+  mat-progress-spinner {
+    display: inline-block;
+  }
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .page-header {

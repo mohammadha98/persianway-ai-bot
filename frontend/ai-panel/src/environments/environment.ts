@@ -5,5 +5,5 @@ export const environment = {
   // apiUrl: 'https://crm.persianway.ir',
   // Angular services build their URLs as `${apiUrl}/api/...`, so this must be the
   // origin only -- no trailing slash.
-  apiUrl: 'http://91.107.148.51',
+  apiUrl: 'https://crm.persianway.ir',
 };

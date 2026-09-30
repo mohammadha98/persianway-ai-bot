@@ -99,13 +99,25 @@ class AppSettings(BaseModel):
     debug: bool = Field(default=False, description="Debug mode")
     allowed_hosts: List[str] = Field(default_factory=lambda: ["*"], description="Allowed hosts")
 
+
+# Web search through Tavily is a Persian Way *site* search: this is the one host the
+# bot may read unless an operator widens the list in the panel's "allowed domains"
+# field. Keeping it as the schema default means a brand-new configuration, a
+# database that was wiped and `POST /api/config/tavily/reset` can never silently
+# fall back to searching the whole web.
+DEFAULT_TAVILY_INCLUDE_DOMAINS: List[str] = ["persianway.ir"]
+
+
 class TavilySearchSettings(BaseModel):
     tavily_api_key: Optional[str] = Field(default=None, description="Dynamic Tavily API key")
     is_enabled: bool = Field(default=True, description="Enable/disable Tavily web search")
     search_depth: str = Field(default="advanced", description="Search depth: basic or advanced")
     max_results: int = Field(default=5, ge=1, le=20, description="Maximum number of results to return")
     include_answer: bool = Field(default=True, description="Include AI-generated answer from Tavily")
-    include_domains: List[str] = Field(default_factory=list, description="Domains to restrict search to")
+    include_domains: List[str] = Field(
+        default_factory=lambda: list(DEFAULT_TAVILY_INCLUDE_DOMAINS),
+        description="Domains to restrict search to (the Persian Way host by default)",
+    )
     exclude_domains: List[str] = Field(default_factory=list, description="Domains to exclude from search")
     snippet_length: int = Field(default=200, gt=0, description="Character limit for result snippet formatting")
 

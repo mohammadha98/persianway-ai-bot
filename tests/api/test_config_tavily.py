@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.routes import config as config_module
+from app.api.routes.users import get_current_user
 from app.core.config import settings as static_settings
 from app.schemas.config import DynamicConfig, TavilySearchSettings
 from app.services.chat_service import get_chat_service
@@ -20,7 +21,6 @@ from app.services.knowledge_base import get_knowledge_base_service
 from main import app
 
 client = TestClient(app)
-To a farm tradition, as mine harmonical
 TAVILY_URL = "/api/config/tavily"
 
 
@@ -45,6 +45,20 @@ class _FakeConfigService:
             setattr(self.config, section, TavilySearchSettings(**current))
         self.update_calls.append(updates)
         return self.config
+
+
+@pytest.fixture(autouse=True)
+def authenticated_panel():
+    """`/api/config/*` sits behind the panel's JWT; these tests pin the payload.
+
+    Anonymous access is covered separately in `tests/api/test_config_auth.py`, so
+    here the token check is stubbed out and every case exercises the real route.
+    """
+    app.dependency_overrides[get_current_user] = lambda: MagicMock(username="operator")
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture
@@ -74,8 +88,16 @@ def stub_heavy_services():
         app.dependency_overrides.pop(get_chat_service, None)
 
 
-def test_get_tavily_settings_is_never_cached(fake_config_service):
-    """Multi-instance deployments need the stored document, not the process cache."""
+def test_get_tavily_settings_is_never_cached_masks_the_key(fake_config_service):
+    """Multi-instance deployments need the stored document, not the process cache.
+
+    The stored key never leaves the API verbatim: an operator only needs to
+    recognise which key is active.
+    """
+    fake_config_service.config.tavily_settings = TavilySearchSettings(
+        tavily_api_key="tvly-secret-abcd"
+    )
+
     response = client.get(TAVILY_URL)
 
     assert response.status_code == 200
@@ -83,6 +105,8 @@ def test_get_tavily_settings_is_never_cached(fake_config_service):
     assert body["success"] is True
     assert body["settings"]["is_enabled"] is True
     assert body["settings"]["search_depth"] == "advanced"
+    assert body["settings"]["tavily_api_key"] == "****abcd"
+    assert "tvly-secret-abcd" not in response.text
     assert fake_config_service.clear_cache_calls == 1
     assert response.headers["cache-control"].startswith("no-store")
     assert response.headers["pragma"] == "no-cache"
@@ -209,8 +233,139 @@ def test_reset_restores_only_the_tavily_section(fake_config_service):
     assert settings["is_enabled"] is True
     assert settings["search_depth"] == "advanced"
     assert settings["max_results"] == 5
-    assert settings["include_domains"] == []
+    # The locked default: web search goes back to reading only Persian Way.
+    assert settings["include_domains"] == ["persianway.ir"]
     assert settings["snippet_length"] == 200
-    assert settings["tavily_api_key"] == static_settings.TAVILY_API_KEY
+    # The response only carries a masked key; the `.env` value is what got stored.
+    assert settings["tavily_api_key"] != static_settings.TAVILY_API_KEY
+    stored = fake_config_service.config.tavily_settings.tavily_api_key
+    assert stored == static_settings.TAVILY_API_KEY
+    if stored:
+        assert settings["tavily_api_key"] == f"****{stored[-4:]}"
     # Only the Tavily section was written.
     assert list(fake_config_service.update_calls[-1].keys()) == ["tavily_settings"]
+
+
+def test_put_stores_a_new_key_masked_in_the_response(fake_config_service):
+    """A real key replaces the stored one, and the answer still hides it."""
+    fake_config_service.config.tavily_settings = TavilySearchSettings(
+        tavily_api_key="tvly-old-key"
+    )
+
+    response = client.put(TAVILY_URL, json={"tavily_api_key": "tvly-new-key-6789"})
+
+    assert response.status_code == 200
+    assert fake_config_service.config.tavily_settings.tavily_api_key == "tvly-new-key-6789"
+    assert response.json()["settings"]["tavily_api_key"] == "****6789"
+    assert "tvly-new-key-6789" not in response.text
+
+
+def test_put_keeps_the_stored_key_when_the_panel_echoes_the_mask(fake_config_service):
+    """The panel posts the whole form back; the mask it read must not wipe the key.
+
+    `tools.component.ts` loads the form from the masked `GET` and saves it as-is
+    when an operator only flips a switch, which used to be a key-overwriting path.
+    """
+    fake_config_service.config.tavily_settings = TavilySearchSettings(
+        tavily_api_key="tvly-stored-key"
+    )
+
+    response = client.put(
+        TAVILY_URL, json={"is_enabled": False, "tavily_api_key": "****-key"}
+    )
+
+    assert response.status_code == 200
+    assert fake_config_service.config.tavily_settings.tavily_api_key == "tvly-stored-key"
+    assert fake_config_service.config.tavily_settings.is_enabled is False
+    assert "tavily_api_key" not in fake_config_service.update_calls[-1]["tavily_settings"]
+
+
+def test_put_keeps_the_stored_key_when_the_field_is_cleared(fake_config_service):
+    """An empty field means "unchanged", so a key is never blanked by accident."""
+    fake_config_service.config.tavily_settings = TavilySearchSettings(
+        tavily_api_key="tvly-stored-key", is_enabled=False
+    )
+
+    response = client.put(TAVILY_URL, json={"is_enabled": True, "tavily_api_key": "   "})
+
+    assert response.status_code == 200
+    assert fake_config_service.config.tavily_settings.tavily_api_key == "tvly-stored-key"
+    assert fake_config_service.config.tavily_settings.is_enabled is True
+
+
+def test_put_rejects_a_document_that_only_carries_a_placeholder(fake_config_service):
+    """A placeholder is not a setting: nothing would be written, so say so loudly."""
+    response = client.put(TAVILY_URL, json={"tavily_api_key": "****-key"})
+
+    assert response.status_code == 400
+    assert fake_config_service.update_calls == []
+
+
+def test_put_saves_the_full_panel_form(fake_config_service):
+    """Every field the panel renders is writable through this one endpoint."""
+    response = client.put(
+        TAVILY_URL,
+        json={
+            "tavily_api_key": "tvly-panel-key-1234",
+            "is_enabled": True,
+            "search_depth": "basic",
+            "max_results": 7,
+            "include_answer": False,
+            "include_domains": ["persianway.ir"],
+            "exclude_domains": ["ads.example"],
+            "snippet_length": 321,
+        },
+    )
+
+    assert response.status_code == 200
+    stored = fake_config_service.config.tavily_settings
+    assert stored.tavily_api_key == "tvly-panel-key-1234"
+    assert stored.is_enabled is True
+    assert stored.search_depth == "basic"
+    assert stored.max_results == 7
+    assert stored.include_answer is False
+    assert stored.include_domains == ["persianway.ir"]
+    assert stored.exclude_domains == ["ads.example"]
+    assert stored.snippet_length == 321
+    # Only the web search section was written, and the answer stays masked.
+    assert list(fake_config_service.update_calls[-1].keys()) == ["tavily_settings"]
+    assert response.json()["settings"]["tavily_api_key"] == "****1234"
+
+
+def test_put_rejects_an_empty_allowed_domains_list(fake_config_service):
+    """Clearing the field must not turn the site search into a whole-web search."""
+    response = client.put(TAVILY_URL, json={"include_domains": []})
+
+    assert response.status_code == 400
+    assert "include_domains" in response.json()["detail"]
+    assert fake_config_service.update_calls == []
+
+
+def test_put_rejects_a_blank_allowed_domains_string(fake_config_service):
+    """The panel sends the textarea as a comma separated string; blank stays empty."""
+    response = client.put(TAVILY_URL, json={"include_domains": " , "})
+
+    assert response.status_code == 400
+    assert fake_config_service.update_calls == []
+
+
+def test_a_fresh_document_is_locked_to_persianway(fake_config_service):
+    """Defaults matter: a wiped database must not open the whole web to Tavily."""
+    response = client.get(TAVILY_URL)
+
+    assert response.status_code == 200
+    assert response.json()["settings"]["include_domains"] == ["persianway.ir"]
+    assert TavilySearchSettings().include_domains == ["persianway.ir"]
+
+
+def test_test_endpoint_reports_the_domains_the_search_used(fake_config_service, monkeypatch):
+    """An empty stored list still searches persianway.ir, and the panel says so."""
+    search_tool = MagicMock()
+    search_tool.ainvoke = AsyncMock(return_value="Answer: x")
+    monkeypatch.setattr(config_module, "search_persianway", search_tool)
+    fake_config_service.config.tavily_settings = TavilySearchSettings(include_domains=[])
+
+    response = client.post(f"{TAVILY_URL}/test", json={"query": "price"})
+
+    assert response.status_code == 200
+    assert response.json()["include_domains"] == ["persianway.ir"]

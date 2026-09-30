@@ -7,9 +7,10 @@ import time
 from datetime import datetime
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from app.services.reranker import EmbeddingReranker
-from app.services.chat_service import get_llm
+from app.services.chat_service import FINISH_REASON_LENGTH, get_llm
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.callbacks import AsyncCallbackHandler
 from app.services.document_processor import get_document_processor
 from app.services.hybrid_retrieval import HybridRetrievalService
 from app.services.excel_processor import get_excel_qa_processor
@@ -85,6 +86,53 @@ async def _web_search_enabled() -> bool:
     if not enabled:
         logging.info("[Retrieval] Web search skipped: disabled in the panel configuration")
     return enabled
+
+
+def _finish_reason_from(metadata: Any) -> Optional[str]:
+    """Read `finish_reason` out of one metadata mapping, or None if absent."""
+    if not isinstance(metadata, dict):
+        return None
+    reason = metadata.get("finish_reason")
+    return reason or None
+
+
+class _FinishReasonTracker(AsyncCallbackHandler):
+    """Records the provider's `finish_reason` for one streamed answer.
+
+    `create_stuff_documents_chain` (the KB answer chain) ends in
+    `StrOutputParser`, so `doc_chain.astream(...)` yields **strings**: by the
+    time a token reaches the caller, every message metadata field -- including
+    `finish_reason` -- has been dropped. The value still exists one level down,
+    on the `ChatGenerationChunk` that `langchain-core` hands to
+    `on_llm_new_token` (`response_metadata` already carries the merged
+    `generation_info`), so this tracker rides along as a callback and keeps the
+    last non-empty reason it observes.
+
+    Without it, an answer cut off by the `max_tokens` ceiling is
+    indistinguishable from a complete one: HTTP 200, a well-formed token stream,
+    a normal `done` frame -- and, in production, an answer that simply stops
+    mid-sentence with nothing in the logs.
+    """
+
+    def __init__(self) -> None:
+        self.finish_reason: Optional[str] = None
+        self.usage_metadata: Optional[Dict[str, Any]] = None
+
+    async def on_llm_new_token(self, token: str, *, chunk: Any = None, **kwargs: Any) -> None:
+        message = getattr(chunk, "message", None)
+        # `langchain-core` merges `generation_info` into the message's
+        # `response_metadata` before calling this hook for chat models, while a
+        # non-chat model hands over a GenerationChunk whose value only exists
+        # under `generation_info` -- so both are checked, independently.
+        reason = _finish_reason_from(getattr(message, "response_metadata", None))
+        if reason is None:
+            reason = _finish_reason_from(getattr(chunk, "generation_info", None))
+        if reason:
+            self.finish_reason = reason
+
+        usage = getattr(message, "usage_metadata", None)
+        if usage:
+            self.usage_metadata = usage
 
 
 class KnowledgeBaseService:
@@ -496,6 +544,23 @@ class KnowledgeBaseService:
             Number of QA pairs processed
         """
         return await asyncio.to_thread(self.excel_processor.process_all_excel_files)
+
+    async def process_docx_files(self) -> int:
+        """Process all Word (DOCX) files in the docs directory.
+
+        Runs off the event loop for the same reason as `process_excel_files`:
+        `DocumentProcessor.process_all_docx` is synchronous and talks to the
+        embeddings endpoint (via `get_vector_store()` and
+        `vector_store.add_documents`), so leaving it inline would block every
+        other request for the duration -- including an in-flight
+        `/chat/stream` response, whose connection the proxies then reset.
+        Starlette awaits async background tasks, so the route keeps calling
+        this the same way.
+
+        Returns:
+            Number of document chunks added to the vector store
+        """
+        return await asyncio.to_thread(self.document_processor.process_all_docx)
 
     async def add_knowledge_contribution(
         self,
@@ -1298,10 +1363,18 @@ Return ONLY a JSON object in PERSIAN with these fields:
         query: str,
         normalized_docs: List[Any],
         external_context: str = None,
+        completion_state: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream the KB answer token-by-token for an already-retrieved context.
 
         Raises on failure (caller decides error handling) — never yields error text.
+
+        `completion_state`, when passed, is updated IN PLACE with how the provider
+        says the answer ended (`finish_reason`, `truncated`) and with the token
+        usage it reported. It is an out-parameter rather than a richer yielded
+        object because every caller consumes this method as a plain
+        `AsyncGenerator[str, None]` (`chat_service`, `bench_retrieval_latency.py`,
+        `e2e_rag_harness.py`); yielding anything else would break them all.
         """
         doc_chain = await self._get_document_chain()
         if doc_chain is None:
@@ -1321,7 +1394,13 @@ Return ONLY a JSON object in PERSIAN with these fields:
 
         t_gen_start = time.perf_counter()
         first_chunk_logged = False
-        async for chunk in doc_chain.astream({"input": query, "context": docs}):
+        # `create_stuff_documents_chain` ends in `StrOutputParser`, so the iterator
+        # below yields plain strings and `finish_reason` never reaches it -- the
+        # callback is the only place the value still exists. See the tracker.
+        tracker = _FinishReasonTracker()
+        async for chunk in doc_chain.astream(
+            {"input": query, "context": docs}, config={"callbacks": [tracker]}
+        ):
             content = None
             if isinstance(chunk, str):
                 content = chunk
@@ -1341,6 +1420,19 @@ Return ONLY a JSON object in PERSIAN with these fields:
                 logging.info(f"[PERF_KB] time_to_first_chunk={(time.perf_counter() - t_gen_start):.3f}s")
             yield content
         logging.info(f"[PERF_KB] step=response_generation_stream elapsed={(time.perf_counter() - t_gen_start):.3f}s")
+
+        finish_reason = tracker.finish_reason
+        if completion_state is not None:
+            completion_state["finish_reason"] = finish_reason
+            completion_state["truncated"] = finish_reason == FINISH_REASON_LENGTH
+            completion_state["usage_metadata"] = tracker.usage_metadata
+        if finish_reason == FINISH_REASON_LENGTH:
+            # Not an exception (nothing failed) and not a silent success either:
+            # the answer the user receives is genuinely incomplete.
+            logging.warning(
+                "[KB STREAM] Answer truncated at the token ceiling "
+                f"(finish_reason={finish_reason}, usage={tracker.usage_metadata})"
+            )
 
 
     @timed_async_stage("kb_query_total")

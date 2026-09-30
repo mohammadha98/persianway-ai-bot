@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional, List
 from tavily import TavilyClient
 from loguru import logger
+from app.schemas.config import DEFAULT_TAVILY_INCLUDE_DOMAINS, TavilySearchSettings
 from app.services.config_service import get_config_service
 from app.core.config import settings
 import asyncio
@@ -12,6 +13,17 @@ from pydantic import BaseModel, Field
 # "Error searching web" as a failure and never inject it into the answer context,
 # so this text reaches logs and the panel's test button only.
 TAVILY_DISABLED_MESSAGE = "جستجوی وب در پنل مدیریت غیرفعال شده است."
+
+
+def effective_include_domains(tavily_settings: TavilySearchSettings) -> List[str]:
+    """The domains Tavily is allowed to read from.
+
+    The panel's "allowed domains" list is authoritative; when it is empty (an older
+    stored document, a hand-edited database row) the locked Persian Way default
+    applies. The field exists to *narrow* or *extend* the list, never to turn the
+    bot's Tavily key into a general-purpose search engine by accident.
+    """
+    return list(tavily_settings.include_domains) or list(DEFAULT_TAVILY_INCLUDE_DOMAINS)
 
 
 class TavilySearchService:
@@ -59,8 +71,13 @@ class TavilySearchService:
         if not self.client:
             return {"error": "Search service is not available", "results": []}
             
+        # The domains Tavily may read from: the panel's list, or the locked Persian
+        # Way default when that list is empty. Never `None` (which Tavily reads as
+        # "search the whole web").
+        include_domains = effective_include_domains(tavily_cfg)
+
         try:
-            logger.info(f"Searching Tavily for: {query}")
+            logger.info(f"Searching Tavily for: {query} (domains: {include_domains})")
             # Tavily client is synchronous, so we run it in a thread pool to avoid blocking the event loop
             response = await asyncio.to_thread(
                 self.client.search,
@@ -68,13 +85,18 @@ class TavilySearchService:
                 search_depth=tavily_cfg.search_depth,
                 include_answer=tavily_cfg.include_answer,
                 max_results=tavily_cfg.max_results,
-                include_domains=tavily_cfg.include_domains if tavily_cfg.include_domains else None,
+                include_domains=include_domains,
                 exclude_domains=tavily_cfg.exclude_domains if tavily_cfg.exclude_domains else None,
             )
             return response
         except Exception as e:
-            logger.error(f"Error performing Tavily search: {e}")
-            return {"error": str(e), "results": []}
+            # Tavily answers a rejected key with an empty body (`ForbiddenError('')`),
+            # so `str(e)` alone left the panel's test button reporting a bare
+            # "Error searching web: " with nothing to act on. The exception type is
+            # always present and is what tells an operator to check the API key.
+            detail = " ".join(part for part in (type(e).__name__, str(e).strip()) if part)
+            logger.error(f"Error performing Tavily search: {detail}")
+            return {"error": detail, "results": []}
 
 tavily_service = TavilySearchService()
 
@@ -106,7 +128,8 @@ async def search_persianway(query: str) -> str:
     Domain-aware web search tool using Tavily with dynamic configuration.
     
     Uses the current TavilySearchSettings from the database to:
-    - Restrict queries to configured include_domains (e.g., site:persianway.ir)
+    - Restrict queries to configured include_domains (e.g., site:persianway.ir); the
+      locked Persian Way host applies when that list is empty
     - Apply dynamic search_depth, max_results, include/exclude domains
     - Format output snippets using configured snippet_length
     
@@ -116,11 +139,9 @@ async def search_persianway(query: str) -> str:
     try:
         config_service = await get_config_service()
         config = await config_service.get_config()
-        include_domains = config.tavily_settings.include_domains
-        restricted_query = query
-        if include_domains:
-            domains_expr = " OR ".join([f"site:{d}" for d in include_domains])
-            restricted_query = f"{domains_expr} {query}"
+        include_domains = effective_include_domains(config.tavily_settings)
+        domains_expr = " OR ".join([f"site:{d}" for d in include_domains])
+        restricted_query = f"{domains_expr} {query}"
         logger.debug(f"search_persianway called with query: '{restricted_query}'")
         return await search_web(restricted_query)
     except Exception as e:

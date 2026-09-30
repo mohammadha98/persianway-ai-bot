@@ -43,6 +43,25 @@ PROVIDER_TIMEOUT_MESSAGE = "زمان پاسخ‌دهی سرویس به پایا�
 # streaming pipeline has to catch.
 PROVIDER_ERROR_TYPES = (openai.RateLimitError, openai.APITimeoutError)
 
+# ==================== Answer-completion (finish_reason) reporting ====================
+# An answer cut off by the `max_tokens` ceiling is NOT an error: the provider
+# answers HTTP 200, the token stream is well-formed and the SSE `done` frame is
+# delivered normally. Production symptom: a long answer stopped mid-sentence
+# ("…سپس با خاک پوشان") in the UI *and* in the stored conversation, with no
+# error event, no `ok=False` and nothing in the logs -- because the only signal
+# the provider gives (`finish_reason == "length"`) was dropped on the floor.
+# These helpers carry that signal to the `done` frame so "truncated" can no
+# longer be confused with "complete".
+FINISH_REASON_LENGTH = "length"
+
+# User-visible notice attached to a truncated answer. The answer text itself is
+# left untouched: it is still the best (partial) answer we have, and rewriting it
+# would lose content the user may be reading.
+ANSWER_TRUNCATED_NOTICE = (
+    "پاسخ به دلیل رسیدن به سقف طول تولید، ناتمام ماند. "
+    "برای دریافت ادامه، پرسش را در یک پیام جداگانه بپرسید."
+)
+
 # The conversation title is a *cosmetic, best-effort* LLM call, and it sits on
 # the request path before the first byte of the answer, so it must NOT inherit
 # the answer budget above (45s x 2 attempts):
@@ -173,8 +192,22 @@ from app.services.utility import search_persianway
 
 from app.core.config import settings
 from app.schemas.chat import ChatMessage
-from app.services.knowledge_base import get_knowledge_base_service
 from app.services.config_service import ConfigService
+
+
+def get_knowledge_base_service():
+    """The knowledge base factory, imported on first use.
+
+    `app.services.knowledge_base` imports *this* module (for `get_llm` /
+    `FINISH_REASON_LENGTH`), so a module-level import here made the pair circular and
+    `import app.services.knowledge_base` failed whenever the knowledge base was the
+    first of the two to be imported (for example when running the web search tests on
+    their own). The indirection keeps the name available here — and patchable, which
+    the chat tests rely on.
+    """
+    from app.services.knowledge_base import get_knowledge_base_service as factory
+
+    return factory()
 
 
 def _provider_error_event(exc: BaseException, referral_message: str) -> Dict[str, Any]:
@@ -201,6 +234,41 @@ def _provider_error_event(exc: BaseException, referral_message: str) -> Dict[str
             "reasoning": f"Provider error before the answer completed: {type(exc).__name__}",
         },
     }
+
+
+def extract_finish_reason(chunk: Any) -> Optional[str]:
+    """Read the provider's `finish_reason` from one streamed LangChain chunk.
+
+    Only usable for streams that yield message objects (`prompt | llm`), where
+    `langchain-openai` merges the provider's `choices[0].finish_reason` into
+    `response_metadata` (`generation_info` before the merge). Returns None when
+    the chunk is a plain string or carries no metadata -- a chain that ends in
+    `StrOutputParser` (e.g. `create_stuff_documents_chain`, used by the KB path)
+    yields strings only, which is why that path has to listen on a callback
+    instead: see `KnowledgeBaseService._FinishReasonTracker`.
+    """
+    metadata = getattr(chunk, "response_metadata", None)
+    if not metadata:
+        metadata = getattr(chunk, "generation_info", None)
+    if not isinstance(metadata, dict):
+        return None
+    return metadata.get("finish_reason")
+
+
+def _truncation_fields(finish_reason: Optional[str]) -> Dict[str, Any]:
+    """Build the `done`-event fields that describe HOW the answer ended.
+
+    Every `done` event carries `truncated`, so a client never has to infer
+    completeness from the absence of a key: `truncated=False` for a static
+    message, for an answer the model finished on its own (`stop`) and for a
+    pipeline that could not observe a finish reason at all; `truncated=True`
+    (plus `truncation_notice`) only when the ceiling was actually reached.
+    """
+    truncated = finish_reason == FINISH_REASON_LENGTH
+    fields: Dict[str, Any] = {"truncated": truncated, "finish_reason": finish_reason}
+    if truncated:
+        fields["truncation_notice"] = ANSWER_TRUNCATED_NOTICE
+    return fields
 
 
 class ContextState(str, Enum):
@@ -310,6 +378,32 @@ class ChatService:
             self._message_history[user_id] = []
         self._message_history[user_id].append(HumanMessage(content=user_message))
         self._message_history[user_id].append(AIMessage(content=ai_message))
+
+    @staticmethod
+    def _mark_truncation(
+        finish_reason: Optional[str],
+        query_analysis: Dict[str, Any],
+        answer: str,
+        stage: str,
+    ) -> None:
+        """Log a length-truncated answer and flag it in the event's `query_analysis`.
+
+        The flag rides along with the emitted events (`done.query_analysis`, and
+        the POST response's `query_analysis`), which is what lets the UI mark the
+        bubble and lets a coach reading the analysis panel see why the answer
+        stops mid-sentence. NOTE: `ConversationService.store_conversation` copies
+        only a fixed subset of `query_analysis` into the stored message
+        (`confidence_score`, `knowledge_source`, `requires_human_referral`,
+        `reasoning`), so this flag is NOT persisted by that path today -- adding
+        it to `MessageDocument` is a separate change.
+        """
+        if finish_reason != FINISH_REASON_LENGTH:
+            return
+        logger.warning(
+            f"[TRUNCATED] {stage} answer stopped at the token ceiling "
+            f"(finish_reason={finish_reason}, chars={len(answer)})"
+        )
+        query_analysis["answer_truncated"] = True
 
     @staticmethod
     def _snapshot_history(history: Optional[List[Any]]) -> List[Dict[str, str]]:
@@ -1569,6 +1663,10 @@ Title:"""
                     "query_analysis": query_analysis,
                     "normalized_sources": normalized_sources,
                     "prompt_snapshot": prompt_snapshot,
+                    # Static text: never produced by the model, so it can never be
+                    # cut off by the token ceiling. Present so every `done` frame
+                    # carries the key (see `_truncation_fields`).
+                    **_truncation_fields(None),
                 }
                 await self._get_or_create_session(user_id, model, parameters)
                 self._append_history(user_id, message, off_topic_msg)
@@ -1607,6 +1705,8 @@ Title:"""
                     "query_analysis": query_analysis,
                     "normalized_sources": normalized_sources,
                     "prompt_snapshot": prompt_snapshot,
+                    # Static text (see the off-topic branch above).
+                    **_truncation_fields(None),
                 }
                 await self._get_or_create_session(user_id, model, parameters)
                 self._append_history(user_id, message, greeting_msg)
@@ -1639,6 +1739,8 @@ Title:"""
                     "query_analysis": query_analysis,
                     "normalized_sources": normalized_sources,
                     "prompt_snapshot": prompt_snapshot,
+                    # Static text (see the off-topic branch above).
+                    **_truncation_fields(None),
                 }
                 await self._get_or_create_session(user_id, model, parameters)
                 self._append_history(user_id, message, farewell_msg)
@@ -1671,6 +1773,8 @@ Title:"""
                     "query_analysis": query_analysis,
                     "normalized_sources": normalized_sources,
                     "prompt_snapshot": prompt_snapshot,
+                    # Static text (see the off-topic branch above).
+                    **_truncation_fields(None),
                 }
                 await self._get_or_create_session(user_id, model, parameters)
                 self._append_history(user_id, message, small_talk_msg)
@@ -1770,9 +1874,16 @@ Title:"""
 
                 # stream_answer_from_context uses astream, skips chunks without valid
                 # content, and raises on failure (never yields error text).
+                # `completion_state` is filled in-place by the stream with the
+                # provider's `finish_reason`: the chain ends in StrOutputParser,
+                # so the metadata never reaches this loop (see the tracker in
+                # knowledge_base.py) and without it a length-truncated answer
+                # would be indistinguishable from a complete one.
+                completion_state: Dict[str, Any] = {}
                 try:
                     async for token in kb_service.stream_answer_from_context(
-                        rewritten_query, retrieval["normalized_docs"]
+                        rewritten_query, retrieval["normalized_docs"],
+                        completion_state=completion_state,
                     ):
                         full_answer += token
                         yield {"type": "chunk", "content": token}
@@ -1791,6 +1902,16 @@ Title:"""
                     query_analysis["requires_human_referral"] = True
                     query_analysis["reasoning"] = "Knowledge base answer contains referral indicators despite high confidence."
 
+                # The answer stopped at the provider's token ceiling: not an error
+                # (nothing failed), but it must not be presented as a complete
+                # answer. Reported in the `done` event below as well.
+                self._mark_truncation(
+                    completion_state.get("finish_reason"),
+                    query_analysis,
+                    full_answer,
+                    "knowledge_base",
+                )
+
                 await self._get_or_create_session(user_id, model, parameters)
                 prompt_snapshot = await kb_service.build_prompt_snapshot(
                     query=rewritten_query,
@@ -1808,6 +1929,7 @@ Title:"""
                     "query_analysis": query_analysis,
                     "normalized_sources": normalized_sources,
                     "prompt_snapshot": prompt_snapshot,
+                    **_truncation_fields(completion_state.get("finish_reason")),
                 }
             else:
                 # Low KB confidence - handoff path. Below-threshold docs are NEVER
@@ -1840,8 +1962,12 @@ Title:"""
 
                     # Real token streaming; raises on failure -> provider handler
                     # below for 429/timeout, top-level handler for anything else.
+                    # This chain is `prompt | llm`, so the chunks are message
+                    # objects and carry the provider's `finish_reason` directly.
+                    finish_reason = None
                     try:
                         async for chunk in conversation.astream({"input": message, "history": history}):
+                            finish_reason = extract_finish_reason(chunk) or finish_reason
                             chunk_content = getattr(chunk, "content", None)
                             if not chunk_content:
                                 continue  # skip chunks without valid content; never str(chunk)
@@ -1864,6 +1990,9 @@ Title:"""
                         query_analysis["reasoning"] = "Answer provided from general knowledge (fallback)."
                         response_parameters["temperature"] = 0.3
 
+                    self._mark_truncation(
+                        finish_reason, query_analysis, full_answer, "general_knowledge"
+                    )
                     self._append_history(user_id, message, full_answer)
                     prompt_snapshot = await self._build_general_snapshot(
                         message, history_before_append, response_parameters
@@ -1875,6 +2004,7 @@ Title:"""
                         "query_analysis": query_analysis,
                         "normalized_sources": normalized_sources,
                         "prompt_snapshot": prompt_snapshot,
+                        **_truncation_fields(finish_reason),
                     }
                 else:
                     # General answers disabled as a fallback SOURCE — still let the
@@ -1904,8 +2034,12 @@ Title:"""
                     # Real token streaming of the model's own handoff phrasing;
                     # raises on failure -> static referral fallback below
                     handoff_answer = ""
+                    handoff_finish_reason = None
                     try:
                         async for chunk in conversation.astream({"input": message, "history": history}):
+                            handoff_finish_reason = (
+                                extract_finish_reason(chunk) or handoff_finish_reason
+                            )
                             chunk_content = getattr(chunk, "content", None)
                             if not chunk_content:
                                 continue  # skip chunks without valid content
@@ -1919,12 +2053,18 @@ Title:"""
                     if not handoff_answer.strip():
                         # LLM produced nothing or failed — fall back to the static
                         # referral message (already partially streamed content, if
-                        # any, is replaced by the canonical handoff text in `done`)
+                        # any, is replaced by the canonical handoff text in `done`).
+                        # Static text cannot be truncated by a token ceiling, so the
+                        # finish reason observed above no longer describes what is sent.
+                        handoff_finish_reason = None
                         full_answer = HUMAN_REFERRAL_MESSAGE
                         yield {"type": "chunk", "content": HUMAN_REFERRAL_MESSAGE}
                     else:
                         full_answer = handoff_answer
 
+                    self._mark_truncation(
+                        handoff_finish_reason, query_analysis, full_answer, "handoff"
+                    )
                     self._append_history(user_id, message, full_answer)
                     prompt_snapshot = await self._build_general_snapshot(
                         message, history_before_append, response_parameters
@@ -1936,6 +2076,7 @@ Title:"""
                         "query_analysis": query_analysis,
                         "normalized_sources": normalized_sources,
                         "prompt_snapshot": prompt_snapshot,
+                        **_truncation_fields(handoff_finish_reason),
                     }
 
             # === PERF: Total Pipeline Timing ===

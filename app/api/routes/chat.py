@@ -540,6 +540,11 @@ async def stream_chat(
       ``chunk``, ``done`` or ``error``), serialised through ``_sse_data_frame``.
     * ``data: [DONE]`` -- explicit end-of-stream marker written last.
 
+    The ``done`` event also carries ``truncated`` (and, when it is true, a
+    ``truncation_notice``): an answer the provider cut off at the ``max_tokens``
+    ceiling arrives as a normal 200 with a well-formed stream, so without that
+    flag a client cannot tell it apart from a complete answer.
+
     Transport mode is chosen by ``settings.CHAT_STREAMING_ENABLED`` and changes
     exactly one thing: whether the ``chunk`` frames are written as the model
     produces them (``True``) or the tokens are accumulated server-side and handed
@@ -595,6 +600,12 @@ async def stream_chat(
                 normalized_sources = []
                 prompt_snapshot = None
                 stream_error = None
+                # How the answer ended, as reported by the service: `truncated`
+                # says the provider stopped at the `max_tokens` ceiling, so the
+                # answer in this frame is genuinely incomplete. Kept separate from
+                # `error`: nothing failed, and the partial answer is still sent.
+                truncated = False
+                truncation_notice = None
 
                 # Transport mode (see the route docstring). Only the answer tokens
                 # are affected: `status`, `metadata` and `error` frames are forwarded
@@ -656,9 +667,11 @@ async def stream_chat(
                     elif event_type == "done":
                         final_query_analysis = chunk.get("query_analysis") or query_analysis
                         prompt_snapshot = chunk.get("prompt_snapshot")
+                        truncated = bool(chunk.get("truncated"))
+                        truncation_notice = chunk.get("truncation_notice")
                         if chunk.get("answer"):
                             full_answer = chunk.get("answer")
-                    
+
                     # Handle structured service error: forward once and stop streaming.
                     elif event_type == "error":
                         stream_error = chunk
@@ -735,6 +748,12 @@ async def stream_chat(
                     "title": title,
                     "conversation_id": conversation_id,
                     "message_id": assistant_message_id,
+                    # Explicit, always-present completion status: `truncated=True`
+                    # means the answer above stopped at the token ceiling (see
+                    # `truncation_notice` for the user-facing explanation), so a
+                    # client never has to guess whether the text is complete.
+                    "truncated": truncated,
+                    "truncation_notice": truncation_notice,
                     "conversation_history": [
                         {"role": msg.role, "content": msg.content} 
                         for msg in (conversation_history or [])

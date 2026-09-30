@@ -143,8 +143,13 @@ def conversation_service(mock_collection):
 
 @pytest.mark.asyncio
 async def test_store_new_conversation(conversation_service, mock_collection):
-    """Test storing a new conversation when no existing conversation is found."""
-    with patch("app.services.conversation_service.ChatService") as mock_cs:
+    """Test storing a new conversation when no existing conversation is found.
+
+    The title LLM call is patched at its source module: `store_conversation`
+    imports `ChatService` inside the function (`app/services/conversation_service.py`),
+    so there is no module-level name here to patch.
+    """
+    with patch("app.services.chat_service.ChatService") as mock_cs:
         mock_cs.return_value.generate_conversation_title = AsyncMock(return_value="Test Title")
         
         result = await conversation_service.store_conversation(
@@ -177,7 +182,7 @@ async def test_store_conversation_with_dict_sources(conversation_service, mock_c
         {"content": "x" * 500, "source": "big.pdf", "page": 2},
     ]
     
-    with patch("app.services.conversation_service.ChatService") as mock_cs:
+    with patch("app.services.chat_service.ChatService") as mock_cs:
         mock_cs.return_value.generate_conversation_title = AsyncMock(return_value="Test")
         
         result = await conversation_service.store_conversation(
@@ -208,7 +213,7 @@ async def test_store_conversation_with_string_sources(conversation_service, mock
     """Test that plain string sources still work as before."""
     string_sources = ["source1.pdf", "source2.pdf"]
     
-    with patch("app.services.conversation_service.ChatService") as mock_cs:
+    with patch("app.services.chat_service.ChatService") as mock_cs:
         mock_cs.return_value.generate_conversation_title = AsyncMock(return_value="Test")
         
         result = await conversation_service.store_conversation(
@@ -239,7 +244,7 @@ async def test_store_conversation_with_prompt_snapshot(conversation_service, moc
         "response_type": "rag",
     }
     
-    with patch("app.services.conversation_service.ChatService") as mock_cs:
+    with patch("app.services.chat_service.ChatService") as mock_cs:
         mock_cs.return_value.generate_conversation_title = AsyncMock(return_value="Test")
         
         result = await conversation_service.store_conversation(
@@ -266,7 +271,7 @@ async def test_persistence_failure_returns_none_ids(conversation_service, mock_c
     """Test that persistence failure returns None IDs instead of breaking the chat."""
     mock_collection.insert_one.side_effect = Exception("DB connection lost")
     
-    with patch("app.services.conversation_service.ChatService") as mock_cs:
+    with patch("app.services.chat_service.ChatService") as mock_cs:
         mock_cs.return_value.generate_conversation_title = AsyncMock(return_value="Test")
         
         result = await conversation_service.store_conversation(

@@ -20,6 +20,12 @@ export interface QueryAnalysis {
   knowledge_source: string;
   requires_human_referral: boolean;
   reasoning: string;
+  // Set by the backend (and emitted with the `done` event's matching
+  // `truncated` / `truncation_notice` fields) when the provider stopped the
+  // answer at the `max_tokens` ceiling. The answer is still the best partial
+  // answer we have, but it is genuinely incomplete. NOTE: not stored in the
+  // conversation document, see `ChatService._mark_truncation`.
+  answer_truncated?: boolean;
 }
 
 export interface ResponseParameters {

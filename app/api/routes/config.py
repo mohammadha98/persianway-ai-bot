@@ -1,22 +1,35 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import ValidationError
 
+from app.api.routes.users import get_current_user
 from app.core.config import settings as static_settings
 from app.schemas.config import (
     ConfigResponse,
     ConfigUpdateRequest,
+    DynamicConfig,
     TavilySearchSettings,
 )
 from app.services.chat_service import ChatService, get_chat_service
 from app.services.config_service import ConfigService, get_config_service
 from app.services.knowledge_base import KnowledgeBaseService, get_knowledge_base_service
-from app.services.utility import search_persianway
+from app.services.utility import effective_include_domains, search_persianway
 
-# Create router for configuration endpoints
-router = APIRouter(prefix="/config", tags=["configuration"])
+# Create router for configuration endpoints.
+#
+# These routes read and write the credentials every answer is paid with, and they
+# used to answer anyone who could reach the host: `GET /api/config/llm` returned
+# the OpenAI/OpenRouter keys in plaintext and `GET /api/config/database` returned
+# the MongoDB URL. The whole router now sits behind the JWT the panel already
+# sends (`frontend/ai-panel/src/app/services/auth.interceptor.ts`), so an
+# anonymous caller gets 403/401 instead of a key.
+router = APIRouter(
+    prefix="/config",
+    tags=["configuration"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _set_no_cache_headers(response: Response) -> None:
@@ -24,6 +37,82 @@ def _set_no_cache_headers(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
+
+
+# A `GET` must never hand out a usable credential. The panel only needs to know
+# *that* a key is stored (and which one, for an operator rotating keys), so every
+# secret is answered as the mask plus its last four characters. `type="password"`
+# inputs in the panel cannot show more without asking the operator to reveal it,
+# and the plaintext only ever lives in the database and in the process that talks
+# to the provider.
+MASKED_SECRET_PREFIX = "****"
+
+# The only secrets these endpoints own; everything else is safe to show verbatim.
+LLM_SECRET_FIELDS = ("openai_api_key", "openrouter_api_key")
+TAVILY_SECRET_FIELDS = ("tavily_api_key",)
+
+
+def _mask_secret(value: Optional[str]) -> Optional[str]:
+    """Return the display form of a stored secret, never the secret itself."""
+    if not value:
+        # Nothing stored: the panel keeps showing an empty field.
+        return value
+    return (
+        f"{MASKED_SECRET_PREFIX}{value[-4:]}"
+        if len(value) > len(MASKED_SECRET_PREFIX)
+        else MASKED_SECRET_PREFIX
+    )
+
+
+def _masked_fields(data: Dict[str, Any], fields: Iterable[str]) -> Dict[str, Any]:
+    """Copy `data` with `fields` (when present) replaced by their masked form."""
+    masked = dict(data)
+    for field in fields:
+        if field in masked:
+            masked[field] = _mask_secret(masked[field])
+    return masked
+
+
+def _mask_config(config: DynamicConfig) -> DynamicConfig:
+    """Mask the credentials inside a `DynamicConfig` before it leaves the API.
+
+    `GET /api/config/` and the write routes answer with the whole document, so
+    the masking has to reach the nested `llm_settings` / `tavily_settings`.
+    """
+    masked = config.model_copy(deep=True)
+    for field in LLM_SECRET_FIELDS:
+        setattr(masked.llm_settings, field, _mask_secret(getattr(masked.llm_settings, field)))
+    for field in TAVILY_SECRET_FIELDS:
+        setattr(
+            masked.tavily_settings,
+            field,
+            _mask_secret(getattr(masked.tavily_settings, field)),
+        )
+    return masked
+
+
+def _is_secret_placeholder(value: Any) -> bool:
+    """True when a write brings no new secret (the echoed mask, or a cleared field)."""
+    if not isinstance(value, str):
+        return True
+    value = value.strip()
+    return not value or value.startswith(MASKED_SECRET_PREFIX)
+
+
+def _strip_secret_placeholders(
+    updates: Dict[str, Any], fields: Iterable[str]
+) -> Dict[str, Any]:
+    """Drop echoed masks and empty secret fields from an incoming document.
+
+    The panel loads a form from a masked `GET` and posts the same values back when
+    an operator saves an unrelated field, so the stored keys must survive that
+    round trip: a placeholder means "unchanged", and only a real key replaces one.
+    """
+    return {
+        key: value
+        for key, value in updates.items()
+        if key not in fields or not _is_secret_placeholder(value)
+    }
 
 
 # Tavily only accepts these two depths; the panel offers exactly these options.
@@ -78,6 +167,17 @@ def _validate_tavily_updates(payload: Dict[str, Any]) -> Dict[str, Any]:
         if field_name in updates:
             updates[field_name] = _normalize_domain_list(updates[field_name], field_name)
 
+    # Web search is a site search: an emptied list would silently hand the bot's
+    # Tavily key the whole internet, so the panel has to keep at least one domain.
+    if "include_domains" in updates and not updates["include_domains"]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "include_domains cannot be empty; web search has to stay restricted "
+                "to at least one domain (e.g. persianway.ir)"
+            ),
+        )
+
     if "search_depth" in updates:
         depth = str(updates["search_depth"]).strip().lower()
         if depth not in TAVILY_SEARCH_DEPTHS:
@@ -112,7 +212,9 @@ async def get_configuration(
     try:
         config = await config_service.get_config()
         return ConfigResponse(
-            success=True, message="Configuration retrieved successfully", config=config
+            success=True,
+            message="Configuration retrieved successfully",
+            config=_mask_config(config),
         )
     except Exception as e:
         raise HTTPException(
@@ -137,7 +239,9 @@ async def update_configuration(
         updates = {}
 
         if request.llm_settings is not None:
-            updates["llm_settings"] = request.llm_settings.dict(exclude_none=True)
+            updates["llm_settings"] = _strip_secret_placeholders(
+                request.llm_settings.dict(exclude_none=True), LLM_SECRET_FIELDS
+            )
 
         if request.rag_settings is not None:
             updates["rag_settings"] = request.rag_settings.dict(exclude_none=True)
@@ -151,7 +255,9 @@ async def update_configuration(
             updates["app_settings"] = request.app_settings.dict(exclude_none=True)
 
         if request.tavily_settings is not None:
-            updates["tavily_settings"] = request.tavily_settings.dict(exclude_none=True)
+            updates["tavily_settings"] = _strip_secret_placeholders(
+                request.tavily_settings.dict(exclude_none=True), TAVILY_SECRET_FIELDS
+            )
 
         if not updates:
             return ConfigResponse(
@@ -164,7 +270,7 @@ async def update_configuration(
         return ConfigResponse(
             success=True,
             message="Configuration updated successfully",
-            config=updated_config,
+            config=_mask_config(updated_config),
         )
 
     except Exception as e:
@@ -187,7 +293,7 @@ async def reset_configuration(
         return ConfigResponse(
             success=True,
             message="Configuration reset to defaults successfully",
-            config=default_config,
+            config=_mask_config(default_config),
         )
 
     except Exception as e:
@@ -209,7 +315,7 @@ async def get_llm_settings(
         return {
             "success": True,
             "message": "LLM settings retrieved successfully",
-            "settings": llm_settings.dict(),
+            "settings": _masked_fields(llm_settings.dict(), LLM_SECRET_FIELDS),
         }
     except Exception as e:
         raise HTTPException(
@@ -287,7 +393,7 @@ async def get_tavily_settings(
         return {
             "success": True,
             "message": "Tavily settings retrieved successfully",
-            "settings": tavily_settings.dict(),
+            "settings": _masked_fields(tavily_settings.dict(), TAVILY_SECRET_FIELDS),
         }
     except Exception as e:
         raise HTTPException(
@@ -304,14 +410,20 @@ async def update_llm_settings(
 ):
     """Update LLM settings only."""
     try:
-        updates = {"llm_settings": settings}
+        updates = {
+            # The panel posts the whole LLM form back; masks it echoed from the last
+            # `GET` are dropped here so saving a model name cannot wipe a key.
+            "llm_settings": _strip_secret_placeholders(settings, LLM_SECRET_FIELDS)
+        }
         updated_config = await config_service.update_config(updates)
         await kb_service.refresh()
         await chat_service.refresh()
         return {
             "success": True,
             "message": "LLM settings updated successfully",
-            "settings": updated_config.llm_settings.dict(),
+            "settings": _masked_fields(
+                updated_config.llm_settings.dict(), LLM_SECRET_FIELDS
+            ),
         }
 
     except Exception as e:
@@ -359,14 +471,20 @@ async def update_tavily_settings(
     normalised before they reach the stored configuration.
     """
     try:
-        updates = {"tavily_settings": _validate_tavily_updates(settings)}
+        updates = {
+            "tavily_settings": _validate_tavily_updates(
+                _strip_secret_placeholders(settings, TAVILY_SECRET_FIELDS)
+            )
+        }
         updated_config = await config_service.update_config(updates)
         await kb_service.refresh()
         await chat_service.refresh()
         return {
             "success": True,
             "message": "Tavily settings updated successfully",
-            "settings": updated_config.tavily_settings.dict(),
+            "settings": _masked_fields(
+                updated_config.tavily_settings.dict(), TAVILY_SECRET_FIELDS
+            ),
         }
     except HTTPException:
         # Validation failures keep their 400 status/message.
@@ -404,7 +522,7 @@ async def test_tavily_settings(
                 "query": query,
                 "message": "جستجوی وب غیرفعال است؛ برای تست ابتدا آن را فعال کنید.",
                 "result": "",
-                "include_domains": tavily_settings.include_domains,
+                "include_domains": effective_include_domains(tavily_settings),
             }
 
         started_at = time.perf_counter()
@@ -425,7 +543,9 @@ async def test_tavily_settings(
             ),
             "result": result or "",
             "elapsed_seconds": round(elapsed, 2),
-            "include_domains": tavily_settings.include_domains,
+            # The domains the search actually ran against — not the raw stored list,
+            # which may be empty while the locked Persian Way default applies.
+            "include_domains": effective_include_domains(tavily_settings),
         }
     except HTTPException:
         raise
@@ -456,7 +576,9 @@ async def reset_tavily_settings(
         return {
             "success": True,
             "message": "Tavily settings reset to defaults",
-            "settings": updated_config.tavily_settings.dict(),
+            "settings": _masked_fields(
+                updated_config.tavily_settings.dict(), TAVILY_SECRET_FIELDS
+            ),
         }
     except Exception as e:
         raise HTTPException(

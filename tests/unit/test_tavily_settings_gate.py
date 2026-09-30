@@ -6,6 +6,7 @@ the request parameters the panel exposes are the ones sent to Tavily.
 """
 
 from types import SimpleNamespace
+from typing import List
 from unittest.mock import MagicMock
 
 import pytest
@@ -100,6 +101,86 @@ async def test_enabled_search_forwards_every_panel_parameter(monkeypatch):
     assert "پاسخ" in formatted
     # snippet_length from the panel truncates the source snippet.
     assert "c..." in formatted
+
+
+@pytest.mark.asyncio
+async def test_an_empty_domain_list_still_restricts_tavily_to_persianway(monkeypatch):
+    """The panel field narrows or extends the list; it can never open the whole web."""
+    _patch_config(monkeypatch, utility, TavilySearchSettings(is_enabled=True, include_domains=[]))
+
+    client_instance = MagicMock()
+    client_instance.search.return_value = {"answer": "answer", "results": []}
+    monkeypatch.setattr(utility, "TavilyClient", MagicMock(return_value=client_instance))
+
+    service = utility.TavilySearchService()
+    await service.search("price")
+
+    kwargs = client_instance.search.call_args.kwargs
+    assert kwargs["include_domains"] == ["persianway.ir"]
+
+
+@pytest.mark.asyncio
+async def test_the_chat_tool_asks_for_persianway_results(monkeypatch):
+    """`search_persianway` is a site search: every query carries the site filter."""
+    _patch_config(monkeypatch, utility, TavilySearchSettings(is_enabled=True, include_domains=[]))
+    queried: List[str] = []
+
+    async def _fake_search_web(query: str) -> str:
+        queried.append(query)
+        return "Sources: (persianway.ir)"
+
+    monkeypatch.setattr(utility, "search_web", _fake_search_web)
+
+    output = await utility.search_persianway.ainvoke({"query": "price of urea"})
+
+    assert queried == ["site:persianway.ir price of urea"]
+    assert "persianway.ir" in output
+
+
+@pytest.mark.asyncio
+async def test_domains_typed_in_the_panel_widen_the_restriction(monkeypatch):
+    """An operator adding a domain gets `site:` filters for both, not for the web."""
+    _patch_config(
+        monkeypatch,
+        utility,
+        TavilySearchSettings(
+            is_enabled=True,
+            include_domains=["persianway.ir", "blog.persianway.ir"],
+        ),
+    )
+    queried: List[str] = []
+
+    async def _fake_search_web(query: str) -> str:
+        queried.append(query)
+        return "Sources: (persianway.ir)"
+
+    monkeypatch.setattr(utility, "search_web", _fake_search_web)
+
+    await utility.search_persianway.ainvoke({"query": "price"})
+
+    assert queried == ["site:persianway.ir OR site:blog.persianway.ir price"]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_key_is_reported_with_its_exception_type(monkeypatch):
+    """Tavily raises an empty-message error for a bad key; the panel needs a reason."""
+    _patch_config(monkeypatch, utility, TavilySearchSettings(is_enabled=True, tavily_api_key="tvly-bad"))
+
+    class ForbiddenError(Exception):
+        """Same shape as `tavily.errors.ForbiddenError`: no message at all."""
+
+    client_instance = MagicMock()
+    client_instance.search.side_effect = ForbiddenError()
+    monkeypatch.setattr(utility, "TavilyClient", MagicMock(return_value=client_instance))
+
+    service = utility.TavilySearchService()
+    result = await service.search("price")
+
+    assert result["error"] == "ForbiddenError"
+    assert result["results"] == []
+
+    formatted = await utility.search_web("price")
+    assert formatted == "Error searching web: ForbiddenError"
 
 
 @pytest.mark.asyncio

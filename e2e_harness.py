@@ -13,7 +13,8 @@ Usage (no arguments required)::
 Environment variables (all optional):
 
     PERSIANWAY_BASE_URL       API root, default ``http://127.0.0.1:8000``
-    PERSIANWAY_TOKEN          Bearer token, only sent when set (never hardcoded)
+    PERSIANWAY_TOKEN          Bearer token, only sent when set (never hardcoded);
+                              required for the `/api/config/` drift snapshot
     PERSIANWAY_FEEDBACK_FILE  Explicit path to the ai_feedback JSON export
     PERSIANWAY_MAX_RECORDS    Optional cap on records, for smoke tests / CI
 
@@ -927,9 +928,18 @@ def discover_chat_endpoint(client: httpx.Client) -> str:
 
 
 def fetch_live_config(client: httpx.Client) -> Optional[Dict[str, Any]]:
-    """Read the live config to detect drift from the frozen snapshot."""
+    """Read the live config to detect drift from the frozen snapshot.
+
+    `/api/config/*` sits behind the panel's JWT (it used to hand out the provider
+    keys anonymously), so the snapshot needs `PERSIANWAY_TOKEN`; without it the
+    drift check is skipped instead of failing the sweep.
+    """
     try:
-        response = client.get(f"{BASE_URL}/api/config/", timeout=10.0)
+        response = client.get(
+            f"{BASE_URL}/api/config/",
+            timeout=10.0,
+            headers=_authorized_headers(),
+        )
         response.raise_for_status()
         return response.json().get("config") or {}
     except (httpx.HTTPError, ValueError) as exc:

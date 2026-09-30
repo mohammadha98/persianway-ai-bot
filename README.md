@@ -163,6 +163,20 @@ Environment variables are loaded from `.env` (see `.env.example` for the full li
 
 All routes are prefixed with `/api` (plus `/health` and `/ui` from `main.py`).
 
+> **`/api/config/*` is the credential store.** Every route there requires the panel's JWT
+> (`Authorization: Bearer <token>`) and the LLM/Tavily keys are answered masked
+> (`****1234`) rather than verbatim, so an anonymous caller gets 401/403 instead of a key.
+> On a write, a masked or empty key means "keep the stored value": saving an unrelated
+> field from the panel can never blank a working key. Set `PERSIANWAY_TOKEN` when running
+> `e2e_harness.py` so its config drift snapshot keeps working.
+>
+> **Web search is a site search.** `include_domains` defaults to `persianway.ir`
+> (`DEFAULT_TAVILY_INCLUDE_DOMAINS` in `app/schemas/config.py`), `POST /api/config/tavily/reset`
+> restores it, and `TavilySearchService` falls back to it whenever the stored list is empty —
+> so an emptied panel field can never turn the bot's Tavily key into a general-purpose search
+> engine. The API refuses an empty list with a 400, which is why the panel keeps the field
+> non-empty, and `POST /api/config/tavily/test` reports the domains the search actually used.
+
 | Group | Endpoint(s) | Description |
 |---|---|---|
 | Health | `GET /health` | Health & version check |
@@ -172,13 +186,15 @@ All routes are prefixed with `/api` (plus `/health` and `/ui` from `main.py`).
 | Feedback | `POST` / `GET /api/chat/feedback` | Submit / list AI feedback |
 |  | `GET /api/chat/feedback/{id}` · `PATCH .../status` · `DELETE ...` | Manage a single feedback |
 |  | `GET /api/chat/feedback/stats/summary` | Feedback statistics |
-| Config | `GET` / `PUT /api/config/` · `POST /api/config/reset` | Get / update / reset settings |
-|  | `GET /api/config/llm` · `/rag` · `/database` | Per-group settings |
+| Config | `GET` / `PUT /api/config/` · `POST /api/config/reset` | Get / update / reset settings (auth; keys masked) |
+|  | `GET /api/config/llm` · `/rag` · `/database` | Per-group settings (auth) |
+|  | `GET` / `PUT /api/config/tavily` | Web search (Tavily) settings; domains default to `persianway.ir` |
+|  | `POST /api/config/tavily/test` · `/tavily/reset` | Run one real search with the saved settings / restore the search defaults |
 | Conversations | `GET /api/conversations/{user_id}` · `/search` · `/search/advanced` | Conversation history |
 |  | `GET /api/conversations/stats/overview` | Usage stats |
 | Knowledge | `GET /api/knowledge/knowledge-list` | Paginated knowledge list |
 |  | `POST /api/knowledge/query` | Query the knowledge base |
-|  | `POST /api/knowledge/process` · `/process-excel` | Ingest documents |
+|  | `POST /api/knowledge/process` · `/process-excel` · `/process-docx` | Ingest documents |
 |  | `POST /api/knowledge/contribute` · `DELETE /api/knowledge/remove/{hash_id}` | Add / remove knowledge |
 | Upload | `POST /api/upload/` | Upload a file |
 |  | `POST /api/upload/pdf/process` | Upload & vectorize a PDF |
@@ -385,6 +401,17 @@ pytest
 ```
 
 The test suite (`tests/`) covers API, services, unit and tooling behaviour: retrieval, re-ranking, confidence scoring, document processing, conversation filtering, intent detection and more.
+
+### Frontend (admin panel)
+
+```bash
+cd frontend/ai-panel
+npm test -- --watch=false --browsers=ChromeHeadless
+```
+
+The Karma/Jasmine specs cover the panel's web search page (`pages/tools`: load, edit, save,
+test, reset, with the allowed-domain lock) and the chat failure path (`pages/chat`: a dead
+stream marks the answer as failed, and the retry re-sends the very same question).
 
 ### Live (deployed-deployment) tests
 

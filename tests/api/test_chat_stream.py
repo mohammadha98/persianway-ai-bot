@@ -266,6 +266,47 @@ async def test_heartbeat_wrapper_signals_silence_with_a_sentinel(monkeypatch):
     assert remaining[-1] == {"type": "done", "answer": "ok"}
 
 
+@pytest.mark.asyncio
+async def test_done_frame_reports_a_length_terminated_answer():
+    """An answer cut off at the token ceiling is marked in the `done` frame.
+
+    The provider answers 200 and the stream is perfectly well-formed, so without
+    this flag the client cannot tell a truncated answer from a complete one: the
+    same partial text simply looks finished.
+    """
+    events = [
+        {"type": "metadata", "normalized_sources": []},
+        {"type": "chunk", "content": "Ø³Ù¾Ø³ Ø¨Ø§ Ø®Ø§Ú© "},
+        {
+            "type": "done",
+            "answer": "Ø³Ù¾Ø³ Ø¨Ø§ Ø®Ø§Ú©",
+            "truncated": True,
+            "truncation_notice": "TRUNCATION_NOTICE",
+            "finish_reason": "length",
+        },
+    ]
+
+    frames = _data_frames(await _stream_parts(_FakeChatService(events)))
+
+    assert [frame["type"] for frame in frames] == ["metadata", "chunk", "done"]
+    assert frames[-1]["answer"] == "Ø³Ù¾Ø³ Ø¨Ø§ Ø®Ø§Ú©"
+    assert frames[-1]["truncated"] is True
+    assert frames[-1]["truncation_notice"] == "TRUNCATION_NOTICE"
+
+
+@pytest.mark.asyncio
+async def test_done_frame_marks_a_completed_answer_as_not_truncated():
+    """The flag is present on every `done` frame: absence is not the signal.
+
+    A service event that predates the flag (no `truncated` key at all) must still
+    reach the client as `truncated: false` rather than as a missing field.
+    """
+    frames = _data_frames(await _stream_parts(_FakeChatService(_STREAM_EVENTS)))
+
+    assert frames[-1]["truncated"] is False
+    assert frames[-1]["truncation_notice"] is None
+
+
 async def _collect_asgi_messages(chat_service):
     """Run the real app through the ASGI interface, recording the `send` calls.
 

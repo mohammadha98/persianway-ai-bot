@@ -106,6 +106,29 @@
             <div class="message-content">
               <p>{{ message.content }}</p>
 
+              <!-- Incomplete answer: the provider stopped at the token ceiling.
+                   The partial text above is kept as-is, this only explains why
+                   it ends mid-sentence. -->
+              <div *ngIf="!message.isUser && message.truncated" class="truncation-warning">
+                <mat-icon>warning_amber</mat-icon>
+                <span>{{ message.truncationNotice || 'پاسخ ناتمام ماند؛ لطفاً ادامهٔ پرسش را جداگانه بپرسید.' }}</span>
+              </div>
+
+              <!-- Failed answer: the stream never delivered a usable answer. The
+                   retry re-sends the same question from here, so the user is not
+                   left with a dead end (or with retyping it). -->
+              <div *ngIf="!message.isUser && message.failed" class="retry-row">
+                <button mat-stroked-button color="primary" (click)="retryMessage(message)"
+                  [disabled]="isLoading || message.retrying" class="retry-btn"
+                  matTooltip="همین پرسش دوباره برای هوش مصنوعی ارسال می‌شود">
+                  <mat-icon *ngIf="!message.retrying">refresh</mat-icon>
+                  <mat-progress-spinner *ngIf="message.retrying" diameter="18" mode="indeterminate">
+                  </mat-progress-spinner>
+                  {{ message.retrying ? 'در حال تلاش مجدد...' : 'تلاش مجدد' }}
+                </button>
+                <span class="retry-hint">پاسخی دریافت نشد؛ با «تلاش مجدد» همین پرسش دوباره ارسال می‌شود.</span>
+              </div>
+
               <!-- Enhanced data for assistant messages (requires 'Analysis' permission) -->
               <div *ngIf="canViewAnalysis && !message.isUser && message.queryAnalysis && showAnalysisDetails"
                 class="message-analysis">

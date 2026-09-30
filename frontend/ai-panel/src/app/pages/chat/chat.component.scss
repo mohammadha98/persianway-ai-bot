@@ -594,6 +594,77 @@
     text-align: right;
   }
 }
+// Incomplete answer: the provider stopped at the token ceiling. Rendered inside
+// the assistant bubble, under the partial answer it explains.
+.truncation-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fff3e0;
+  border: 1px solid #ffe0b2;
+  color: #8a5300;
+  font-size: 11px;
+
+  mat-icon {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: #ef6c00;
+  }
+}
+
+// Failed answer: the stream errored before an answer arrived. The retry button and
+// the question it re-sends live in the chat component, so the user can ask again
+// without retyping anything.
+.retry-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+
+  .retry-btn {
+    font-family: 'Vazirmatn', sans-serif;
+    font-weight: 600;
+    font-size: 12px;
+    height: 32px;
+    padding: 0 12px;
+    color: #c62828;
+
+    mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
+
+    mat-progress-spinner {
+      display: inline-block;
+    }
+  }
+
+  .retry-hint {
+    font-family: 'Vazirmatn', sans-serif;
+    font-size: 11px;
+    color: #b71c1c;
+    opacity: 0.85;
+  }
+}
+
+
+// Snackbar variant of the same notice. Material renders snackbars in an overlay
+// outside this component, so the selector has to pierce encapsulation.
+::ng-deep .warning-snackbar {
+  background: #ff9800 !important;
+  color: #1a1a1a !important;
+}
 
 // Typing indicator
 .typing-indicator {
