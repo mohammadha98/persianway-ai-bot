@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import logging
+import re
 from pymongo import DESCENDING
 from motor.motor_asyncio import AsyncIOMotorCollection
 import bcrypt
@@ -392,6 +393,23 @@ class UserService:
                 ]
             })
             
+            if not user_doc:
+                # Preserve exact-case logins for existing accounts (e.g. Ali / ali).
+                # Escape input and anchor the whole string: this is a literal
+                # identifier comparison, not a user-supplied regular expression.
+                pattern = r"\A" + re.escape(login_data.username) + r"\z"
+                matches = await collection.find({
+                    "$or": [
+                        {"username": {"$regex": pattern, "$options": "i"}},
+                        {"email": {"$regex": pattern, "$options": "i"}}
+                    ]
+                }).limit(2).to_list(length=2)
+
+                # Never arbitrarily select an account when identifiers collide.
+                # The user can still sign in with their original exact spelling.
+                if len(matches) == 1:
+                    user_doc = matches[0]
+
             if not user_doc:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
