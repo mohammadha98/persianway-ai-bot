@@ -37,11 +37,34 @@ LLM_MAX_RETRIES = 1
 PROVIDER_BUSY_MESSAGE = "سرویس موقتاً شلوغ است؛ لطفاً چند لحظه دیگر دوباره تلاش کنید."
 PROVIDER_TIMEOUT_MESSAGE = "زمان پاسخ‌دهی سرویس به پایان رسید؛ لطفاً دوباره تلاش کنید."
 
+# OpenRouter answers HTTP 402 when the account or the key is out of credit:
+# "Your account or API key has insufficient credits. Add more credits and retry
+# the request." It is NOT a rate limit (429) and the SDK does not retry it, so it
+# used to reach the user as the generic "unexpected error" -- with no hint that
+# topping up is the one action that would fix it.
+INSUFFICIENT_CREDIT_CODE = "provider_insufficient_credit"
+INSUFFICIENT_CREDIT_MESSAGE = (
+    "اعتبار حساب سرویس هوش مصنوعی (OpenRouter) به پایان رسیده است. "
+    "برای ادامهٔ پاسخ‌دهی لطفاً حساب را شارژ کنید."
+)
+
 # Raised by the openai SDK *after* it has exhausted its own retries. Verified to
 # propagate unwrapped through `llm.astream`, `prompt | llm` and
 # `create_stuff_documents_chain(...).astream`, so these are the types the
-# streaming pipeline has to catch.
-PROVIDER_ERROR_TYPES = (openai.RateLimitError, openai.APITimeoutError)
+# streaming pipeline has to catch. `APIStatusError` is the base class of the
+# other two, and it is what carries a 402: `_provider_error_event` classifies it
+# and re-raises every other status so unrelated HTTP failures keep their old
+# handling.
+PROVIDER_ERROR_TYPES = (openai.RateLimitError, openai.APITimeoutError, openai.APIStatusError)
+
+
+def is_insufficient_credit_error(exc: BaseException) -> bool:
+    """True for the provider's HTTP 402 (account out of credit).
+
+    The openai SDK has no dedicated class for 402, so the status code is the
+    only reliable signal.
+    """
+    return isinstance(exc, openai.APIStatusError) and getattr(exc, "status_code", None) == 402
 
 # ==================== Answer-completion (finish_reason) reporting ====================
 # An answer cut off by the `max_tokens` ceiling is NOT an error: the provider
@@ -192,6 +215,7 @@ from app.services.utility import search_persianway
 
 from app.core.config import settings
 from app.schemas.chat import ChatMessage
+from app.services import credit_monitor
 from app.services.config_service import ConfigService
 
 
@@ -211,22 +235,36 @@ def get_knowledge_base_service():
 
 
 def _provider_error_event(exc: BaseException, referral_message: str) -> Dict[str, Any]:
-    """Build the structured error event for a rate-limit / timeout failure.
+    """Build the structured error event for a provider-level failure.
 
     The provider notice is PREPENDED to `referral_message` (the configured
     human-referral text) rather than replacing it, so the user learns *why* the
     turn failed and still keeps the handoff path the product already offers.
     """
-    if isinstance(exc, openai.APITimeoutError):
+    if is_insufficient_credit_error(exc):
+        notice, code = INSUFFICIENT_CREDIT_MESSAGE, INSUFFICIENT_CREDIT_CODE
+        # The provider is the authority: even when the balance endpoint cannot
+        # be read (no management key, no per-key limit), a 402 proves the
+        # account is empty, and the panel can warn immediately.
+        credit_monitor.note_insufficient_credits()
+    elif isinstance(exc, openai.APITimeoutError):
         notice, code = PROVIDER_TIMEOUT_MESSAGE, "provider_timeout"
-    else:
+    elif isinstance(exc, openai.RateLimitError):
         notice, code = PROVIDER_BUSY_MESSAGE, "provider_rate_limited"
+    else:
+        # Any other HTTP status (400/401/403/404/422/5xx). Reporting those as a
+        # rate limit would be wrong; re-raising keeps the previous behaviour of
+        # the top-level handler (a generic, user-safe error event).
+        raise exc
 
     message = f"{notice}\n\n{referral_message}" if referral_message else notice
     return {
         "type": "error",
         "message": message,
         "code": code,
+        # Lets the SSE route and the panel tell a billing failure apart from a
+        # transient one without parsing the message text.
+        "insufficient_credit": code == INSUFFICIENT_CREDIT_CODE,
         "query_analysis": {
             "confidence_score": 0.0,
             "knowledge_source": "none",
@@ -2048,6 +2086,11 @@ Title:"""
                             yield {"type": "chunk", "content": chunk_content}
                     except Exception as handoff_error:
                         logger.error(f"Model-generated handoff streaming failed: {handoff_error}")
+                        if is_insufficient_credit_error(handoff_error):
+                            # This path deliberately falls back to the static
+                            # referral text, so the turn still answers; the
+                            # operator must still learn that the account is empty.
+                            credit_monitor.note_insufficient_credits()
                         handoff_answer = ""
 
                     if not handoff_answer.strip():

@@ -401,3 +401,85 @@ async def test_single_frame_mode_is_still_an_sse_stream(monkeypatch):
     assert events[-1]["message_id"] == "msg-1"
 
 
+
+
+@pytest.mark.asyncio
+async def test_an_out_of_credit_error_frame_tells_the_panel_to_top_up():
+    """The 402 signal must survive the SSE hop, not only the service generator.
+
+    The panel has no way to read a status code out of a 200 `text/event-stream`
+    response, so the route has to repeat the billing flag inside the error frame.
+    """
+    events = [
+        {
+            "type": "metadata",
+            "query_analysis": {"confidence_score": 0.9},
+            "normalized_sources": [],
+        },
+        {
+            "type": "error",
+            "code": "insufficient_credit",
+            "message": "اعتبار حساب OpenRouter تمام شده است.",
+            "insufficient_credit": True,
+        },
+    ]
+    service = _FakeChatService(events)
+
+    with _override_dependencies(service):
+        transport = httpx.ASGITransport(app=_app())
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            async with client.stream(
+                "GET", "/api/chat/stream", params=_params()
+            ) as response:
+                assert response.status_code == 200
+                body = "".join([text async for text in response.aiter_text()])
+
+    payloads = _data_payloads(_sse_frames(body))
+    on_the_wire = [json.loads(payload) for payload in payloads[:-1]]
+
+    error = on_the_wire[-1]
+    assert error["type"] == "error"
+    assert error["code"] == "insufficient_credit"
+    # Without this flag the panel would poll the balance again after every
+    # answer instead of switching its banner on immediately.
+    assert error["insufficient_credit"] is True
+    # An explicit terminator still follows the error, so the panel stops waiting.
+    assert payloads[-1] == "[DONE]"
+
+
+@pytest.mark.asyncio
+async def test_a_transient_error_frame_is_not_flagged_as_a_billing_failure():
+    """A timeout must never turn the credit banner on."""
+    events = [
+        {
+            "type": "metadata",
+            "query_analysis": {"confidence_score": 0.9},
+            "normalized_sources": [],
+        },
+        {
+            "type": "error",
+            "code": "provider_timeout",
+            "message": "زمان پاسخ‌گویی مدل به پایان رسید.",
+        },
+    ]
+    service = _FakeChatService(events)
+
+    with _override_dependencies(service):
+        transport = httpx.ASGITransport(app=_app())
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            async with client.stream(
+                "GET", "/api/chat/stream", params=_params()
+            ) as response:
+                body = "".join([text async for text in response.aiter_text()])
+
+    on_the_wire = [
+        json.loads(payload) for payload in _data_payloads(_sse_frames(body))[:-1]
+    ]
+
+    assert on_the_wire[-1]["code"] == "provider_timeout"
+    assert on_the_wire[-1]["insufficient_credit"] is False
+

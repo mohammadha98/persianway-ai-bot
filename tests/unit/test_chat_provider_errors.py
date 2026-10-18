@@ -33,6 +33,7 @@ import openai
 import pytest
 
 from app.services import chat_service as chat_module
+from app.services import credit_monitor
 
 
 STATIC_REFERRAL = "پیام ارجاع ثابت به کارشناس"
@@ -45,6 +46,22 @@ def _rate_limit_error():
         429, request=request, json={"error": {"message": "rate limited"}}
     )
     return openai.RateLimitError("rate limited", response=response, body=None)
+
+
+def _insufficient_credit_error():
+    """OpenRouter's "account out of credit": HTTP 402, no dedicated SDK class."""
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    response = httpx.Response(
+        402,
+        request=request,
+        json={
+            "error": {
+                "code": 402,
+                "message": "Your account or API key has insufficient credits.",
+            }
+        },
+    )
+    return openai.APIStatusError("Insufficient credits", response=response, body=None)
 
 
 def _timeout_error():
@@ -217,6 +234,73 @@ async def test_intent_classifier_failure_is_reported_as_a_provider_error():
     assert events[0]["code"] == "provider_timeout"
     assert chat_module.PROVIDER_TIMEOUT_MESSAGE in events[0]["message"]
     assert STATIC_REFERRAL in events[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_an_out_of_credit_provider_is_reported_as_a_billing_failure():
+    """HTTP 402 is not a rate limit: name the cause and flag it for the panel."""
+    credit_monitor.reset_credit_cache()
+    kb = _kb_service(confidence=0.9, error=_insufficient_credit_error())
+    service = _make_service()
+
+    try:
+        with patch.object(chat_module, "get_knowledge_base_service", return_value=kb):
+            events = await _collect(service)
+
+        assert [event["type"] for event in events] == [
+            "status", "metadata", "status", "error",
+        ]
+        assert events[-1]["code"] == chat_module.INSUFFICIENT_CREDIT_CODE
+        assert chat_module.INSUFFICIENT_CREDIT_MESSAGE in events[-1]["message"]
+        # The handoff path is kept, exactly like the 429/timeout notices.
+        assert STATIC_REFERRAL in events[-1]["message"]
+        assert events[-1]["insufficient_credit"] is True
+
+        # The monitor remembers it, so the panel can warn even when the balance
+        # endpoint itself is unreadable (no management key, no per-key limit).
+        snapshot = await credit_monitor.get_credit_status()
+        assert snapshot.is_exhausted is True
+        assert snapshot.source == "provider_402"
+    finally:
+        credit_monitor.reset_credit_cache()
+
+
+@pytest.mark.asyncio
+async def test_an_out_of_credit_intent_classifier_stops_the_turn():
+    """The first LLM call of a turn can also be the one that hits 402."""
+    credit_monitor.reset_credit_cache()
+    service = _make_service()
+    service.detect_query_intent = AsyncMock(side_effect=_insufficient_credit_error())
+
+    try:
+        events = await _collect(service)
+
+        assert [event["type"] for event in events] == ["error"]
+        assert events[0]["code"] == chat_module.INSUFFICIENT_CREDIT_CODE
+        assert chat_module.INSUFFICIENT_CREDIT_MESSAGE in events[0]["message"]
+    finally:
+        credit_monitor.reset_credit_cache()
+
+
+@pytest.mark.asyncio
+async def test_other_http_statuses_keep_the_generic_error_path():
+    """A 401/500 is not a billing failure: the old generic event must survive."""
+
+    def _server_error():
+        request = httpx.Request(
+            "POST", "https://openrouter.ai/api/v1/chat/completions"
+        )
+        response = httpx.Response(500, request=request, json={"error": {"code": 500}})
+        return openai.APIStatusError("boom", response=response, body=None)
+
+    kb = _kb_service(confidence=0.9, error=_server_error())
+    service = _make_service()
+
+    with patch.object(chat_module, "get_knowledge_base_service", return_value=kb):
+        events = await _collect(service)
+
+    assert events[-1]["type"] == "error"
+    assert events[-1]["code"] == "stream_internal_error"
 
 
 @pytest.mark.asyncio

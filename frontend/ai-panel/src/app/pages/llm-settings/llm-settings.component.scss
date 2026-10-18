@@ -871,3 +871,34 @@
     opacity: 1;
   }
 }
+
+// ==================== OpenRouter credit section ====================
+// Status line next to the threshold field; colours follow the chat banner
+// (green = healthy, orange = below the threshold).
+.credit-toggle-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 0 12px;
+}
+
+.credit-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f5f5f5;
+  font-size: 0.9rem;
+
+  mat-icon {
+    color: #2e7d32;
+
+    &.low {
+      color: #ef6c00;
+    }
+  }
+
+  .credit-source {
+    opacity: 0.7;
+  }
+}

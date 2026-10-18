@@ -20,6 +20,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 
 import { ChatService, EnhancedChatResponse, QueryAnalysis, ResponseParameters, ConversationResponse, ConversationListResponse } from '../../services/chat.service';
+import { LlmService, OpenRouterCredits } from '../../services/llm.service';
 import { FeedbackDialogComponent } from '../../modals/feedback-dialog/feedback-dialog.component';
 import { SourcesDialogComponent } from '../../modals/sources-dialog/sources-dialog.component';
 import { ContextDialogComponent } from '../../modals/context-dialog/context-dialog.component';
@@ -100,6 +101,13 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
   // Without it the user can only chat: analysis panel and feedback are hidden.
   canViewAnalysis = false;
 
+  // OpenRouter credit notice. Set at page load and refreshed after every answer;
+  // the banner stays visible while the balance is at/below the threshold because
+  // a transient snackbar disappears before the operator can act on it.
+  creditAlert: OpenRouterCredits | null = null;
+  // One probe at a time: the same balance does not need two parallel requests.
+  private creditCheckInFlight = false;
+
   // Conversation history properties
   conversationHistory: ConversationResponse[] = [];
   showConversationHistory = true;
@@ -114,6 +122,7 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
     private snackBar: MatSnackBar,
     private breakpointObserver: BreakpointObserver,
     private ngZone: NgZone,
+    private llmService: LlmService,
     private authService: AuthService
   ) { }
 
@@ -134,6 +143,9 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
       this.userId = 'anonymous_' + Math.random().toString(36).substr(2, 9);
     }
     this.loadConversationHistory();
+    // Show an already-low balance before the operator sends anything. Silent on
+    // purpose: no snackbar until a message has actually been answered.
+    this.refreshCreditAlert();
   }
 
   ngAfterViewChecked() {
@@ -386,6 +398,10 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
                 }
               );
             }
+            // Every completed answer re-checks the balance: this is the
+            // "notice after each message" behaviour. The backend caches the
+            // figure for 60s, so the extra request is nearly free.
+            this.refreshCreditAlert(false, true);
             console.log('[CHAT] Loading conversation history');
             this.loadConversationHistory();
           } else {
@@ -430,6 +446,16 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
             verticalPosition: 'bottom',
             panelClass: ['error-snackbar']
           });
+
+          // Out of credit is the one failure the operator can fix: switch the
+          // banner on immediately (the backend remembered the 402) and let the
+          // forced refresh confirm it.
+          if (error && error.code === 'provider_insufficient_credit') {
+            const alert = this.exhaustedCreditAlert();
+            this.creditAlert = alert;
+            this.showCreditNotice(alert);
+            this.refreshCreditAlert(true);
+          }
         },
         complete: () => {
           console.log('[CHAT] Stream subscription completed');
@@ -928,5 +954,85 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
         });
       }
     });
+  }
+
+  // ==================== OpenRouter credit notice ====================
+
+  /**
+   * Fetch the remaining OpenRouter credit and keep `creditAlert` in sync.
+   *
+   * Called at page load, after every completed answer, and (with `force`) after
+   * an answer failed with HTTP 402. A failure here is deliberately silent: the
+   * chat already works, and this notice is an extra, never a dependency.
+   *
+   * @param force  bypass the backend's 60s cache
+   * @param notify show the snackbar (true only for finished answers, so opening
+   *               the page does not interrupt with a notice)
+   */
+  refreshCreditAlert(force = false, notify = false): void {
+    if (this.creditCheckInFlight) {
+      return;
+    }
+
+    this.creditCheckInFlight = true;
+    this.llmService.getOpenRouterCredits(force).subscribe({
+      next: (response) => {
+        this.creditCheckInFlight = false;
+        const credits = response?.credits;
+        // `applicable: false` means OpenRouter is not the active provider (or
+        // alerts are switched off in the settings page): show nothing at all.
+        this.creditAlert = credits?.applicable ? credits : null;
+        if (notify && credits && (credits.is_low || credits.is_exhausted)) {
+          this.showCreditNotice(credits);
+        }
+      },
+      error: (error) => {
+        // Never surface this: a monitoring read must not disturb the chat.
+        console.warn('[CREDITS] Could not read the OpenRouter credit:', error?.status || error);
+        this.creditCheckInFlight = false;
+      }
+    });
+  }
+
+  /** Snackbar shown after each answer while the balance is low/exhausted. */
+  private showCreditNotice(credits: OpenRouterCredits): void {
+    const text = credits.is_exhausted
+      ? 'اعتبار حساب OpenRouter تمام شده است؛ برای ادامهٔ پاسخ‌دهی حساب را شارژ کنید.'
+      : `موجودی OpenRouter به ${(credits.balance_usd ?? 0).toFixed(2)} دلار رسیده است؛ لطفاً حساب را شارژ کنید.`;
+
+    const ref = this.snackBar.open(text, 'شارژ حساب', {
+      duration: 8000,
+      horizontalPosition: 'center',
+      verticalPosition: 'bottom',
+      panelClass: ['warning-snackbar']
+    });
+
+    ref.onAction().subscribe(() => {
+      window.open(
+        credits.topup_url || 'https://openrouter.ai/settings/credits',
+        '_blank',
+        'noopener'
+      );
+    });
+  }
+
+  /**
+   * Local copy of the backend's "out of credit" state, used to render the
+   * banner immediately, before the forced refresh has answered.
+   */
+  private exhaustedCreditAlert(): OpenRouterCredits {
+    return {
+      provider: 'openrouter',
+      applicable: true,
+      balance_usd: 0,
+      threshold_usd: this.creditAlert?.threshold_usd ?? 1,
+      is_low: true,
+      is_exhausted: true,
+      source: 'provider_402',
+      checked_at: new Date().toISOString(),
+      message: 'اعتبار حساب OpenRouter تمام شده است؛ تا شارژ نشدن حساب، پاسخ‌دهی امکان‌پذیر نیست.',
+      topup_url: 'https://openrouter.ai/settings/credits',
+      error: null
+    };
   }
 }

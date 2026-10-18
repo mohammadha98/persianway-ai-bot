@@ -14,6 +14,7 @@ from app.schemas.config import (
 )
 from app.services.chat_service import ChatService, get_chat_service
 from app.services.config_service import ConfigService, get_config_service
+from app.services.credit_monitor import get_credit_status, reset_credit_cache
 from app.services.knowledge_base import KnowledgeBaseService, get_knowledge_base_service
 from app.services.utility import effective_include_domains, search_persianway
 
@@ -48,7 +49,9 @@ def _set_no_cache_headers(response: Response) -> None:
 MASKED_SECRET_PREFIX = "****"
 
 # The only secrets these endpoints own; everything else is safe to show verbatim.
-LLM_SECRET_FIELDS = ("openai_api_key", "openrouter_api_key")
+# `openrouter_management_key` is optional and is used solely to read the account
+# balance (GET /api/v1/credits); it is masked exactly like the inference keys.
+LLM_SECRET_FIELDS = ("openai_api_key", "openrouter_api_key", "openrouter_management_key")
 TAVILY_SECRET_FIELDS = ("tavily_api_key",)
 
 
@@ -323,6 +326,38 @@ async def get_llm_settings(
         )
 
 
+@router.get("/llm/credits", response_model=Dict[str, Any])
+async def get_openrouter_credits(
+    response: Response,
+    force: bool = False,
+):
+    """Remaining OpenRouter credit, for the panel's top-up notice.
+
+    Monitoring only: an unreachable billing API is reported as an ``error``
+    string instead of a 5xx, because a credits probe must never be able to take
+    the chat screen down with it.
+
+    ``force=true`` bypasses the 60s cache; the panel uses it for its refresh
+    button and right after its own answer failed with HTTP 402.
+    """
+    _set_no_cache_headers(response)
+    try:
+        status = await get_credit_status(force=force)
+        return {
+            "success": True,
+            "message": "OpenRouter credit status retrieved successfully",
+            "credits": status.as_dict(),
+        }
+    except Exception as e:
+        # Defensive: get_credit_status already degrades internally, so this only
+        # covers a programming error and still keeps the panel usable.
+        return {
+            "success": False,
+            "message": f"Failed to read the OpenRouter credit status: {str(e)}",
+            "credits": None,
+        }
+
+
 @router.get("/rag", response_model=Dict[str, Any])
 async def get_rag_settings(
     response: Response, config_service: ConfigService = Depends(get_config_service)
@@ -416,6 +451,9 @@ async def update_llm_settings(
             "llm_settings": _strip_secret_placeholders(settings, LLM_SECRET_FIELDS)
         }
         updated_config = await config_service.update_config(updates)
+        # A new key / threshold / toggle must be reflected by the very next
+        # credits probe instead of waiting out the cache TTL.
+        reset_credit_cache()
         await kb_service.refresh()
         await chat_service.refresh()
         return {

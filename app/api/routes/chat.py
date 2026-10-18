@@ -12,7 +12,11 @@ from app.schemas.chat import (
     FeedbackRequest, FeedbackResponse, FeedbackDetail,
     FeedbackListResponse, FeedbackStats
 )
-from app.services.chat_service import get_chat_service
+from app.services.chat_service import (
+    INSUFFICIENT_CREDIT_MESSAGE,
+    get_chat_service,
+    is_insufficient_credit_error,
+)
 from app.services.conversation_service import get_conversation_service
 from app.services.feedback_service import get_feedback_service
 from app.services.spell_corrector import get_spell_corrector
@@ -497,6 +501,10 @@ async def create_chat(
                 conversation_id=conversation_id
             )
     except Exception as e:
+        # Out of credit is not a generic 500: API clients get the actionable
+        # message and the same 402 status the provider returned.
+        if is_insufficient_credit_error(e):
+            raise HTTPException(status_code=402, detail=INSUFFICIENT_CREDIT_MESSAGE)
         raise HTTPException(status_code=500, detail=f"Chat processing error: {str(e)}")
 
 
@@ -687,6 +695,10 @@ async def stream_chat(
                         "type": "error",
                         "message": stream_error.get("message") or "خطای غیرمنتظره رخ داد. لطفاً دوباره تلاش کنید.",
                         "code": stream_error.get("code", "stream_internal_error"),
+                        # Billing failures are actionable (top up), unlike a
+                        # transient provider error: the panel switches its credit
+                        # banner on immediately instead of waiting for a poll.
+                        "insufficient_credit": bool(stream_error.get("insufficient_credit")),
                     }
                     yield _sse_data_frame(error_data)
                     yield SSE_DONE_FRAME

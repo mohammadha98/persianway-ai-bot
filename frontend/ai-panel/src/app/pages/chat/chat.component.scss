@@ -1601,3 +1601,49 @@
     flex: 1;
   }
 }
+// ==================== OpenRouter credit notice ====================
+// Colours follow the existing `warning-snackbar` (#ff9800) for "low" and the
+// Material error palette for "exhausted".
+.credit-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #fff3e0;
+  border-bottom: 1px solid #ffcc80;
+  color: #4e342e;
+  direction: rtl;
+
+  >mat-icon {
+    color: #ef6c00;
+    flex-shrink: 0;
+  }
+
+  .credit-alert-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    font-size: 0.9rem;
+
+    span {
+      color: inherit;
+      opacity: 0.85;
+    }
+  }
+
+  a[mat-flat-button] {
+    flex-shrink: 0;
+  }
+
+  &.exhausted {
+    background: #ffebee;
+    border-bottom-color: #ef9a9a;
+    color: #b71c1c;
+
+    >mat-icon {
+      color: #c62828;
+    }
+  }
+}

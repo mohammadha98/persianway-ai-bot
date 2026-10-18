@@ -15,6 +15,31 @@ class LLMSettings(BaseModel):
     openrouter_api_base: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter API base URL")
     openai_embedding_model: str = Field(default="text-embedding-ada-002", description="OpenAI embedding model")
 
+    # ==================== OpenRouter credit alerts ====================
+    # The panel warns the operator once the remaining OpenRouter credit reaches
+    # `openrouter_credit_alert_threshold_usd` (see app/services/credit_monitor.py).
+    # The balance itself is read from OpenRouter:
+    #   * GET /api/v1/credits -- the account balance, but only with a MANAGEMENT
+    #     key (an inference key is answered with 403 "Only management keys can
+    #     perform this operation");
+    #   * GET /api/v1/key -- the inference key's own `limit_remaining`, which is
+    #     only populated when that key was created with a spend limit.
+    # Both are optional: with neither, an HTTP 402 from the chat completion is
+    # still reported to the panel, the numeric balance just stays unknown.
+    openrouter_credit_alert_enabled: bool = Field(
+        default=True,
+        description="Show a top-up notice when the OpenRouter credit runs low",
+    )
+    openrouter_credit_alert_threshold_usd: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Warn once the remaining balance reaches this many USD",
+    )
+    openrouter_management_key: Optional[str] = Field(
+        default=None,
+        description="Optional OpenRouter management key, used only to read the account balance",
+    )
+
 
 class RAGSettings(BaseModel):
     """Schema for RAG (Retrieval-Augmented Generation) configuration settings."""

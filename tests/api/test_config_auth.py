@@ -31,11 +31,13 @@ client = TestClient(app)
 OPENROUTER_KEY = "sk-or-v1-secret-1111"
 OPENAI_KEY = "sk-proj-secret-2222"
 TAVILY_KEY = "tvly-secret-3333"
+MANAGEMENT_KEY = "sk-or-v1-mgmt-4444"
 
 # Every route the panel needs a login for; reads and writes both.
 CONFIG_READS = (
     "/api/config/",
     "/api/config/llm",
+    "/api/config/llm/credits",
     "/api/config/rag",
     "/api/config/database",
     "/api/config/app",
@@ -49,7 +51,9 @@ class _FakeConfigService:
     def __init__(self):
         self.config = DynamicConfig(
             llm_settings=LLMSettings(
-                openai_api_key=OPENAI_KEY, openrouter_api_key=OPENROUTER_KEY
+                openai_api_key=OPENAI_KEY,
+                openrouter_api_key=OPENROUTER_KEY,
+                openrouter_management_key=MANAGEMENT_KEY,
             ),
             tavily_settings=TavilySearchSettings(tavily_api_key=TAVILY_KEY),
         )
@@ -149,8 +153,11 @@ def test_authenticated_read_masks_every_key(user_service):
     settings = response.json()["settings"]
     assert settings["openrouter_api_key"] == "****1111"
     assert settings["openai_api_key"] == "****2222"
+    # The optional management key (credit balance only) is a credential too.
+    assert settings["openrouter_management_key"] == "****4444"
     assert OPENROUTER_KEY not in response.text
     assert OPENAI_KEY not in response.text
+    assert MANAGEMENT_KEY not in response.text
 
 
 def test_authenticated_whole_document_masks_the_nested_keys(user_service):

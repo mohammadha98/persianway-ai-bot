@@ -10,8 +10,10 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatDividerModule } from '@angular/material/divider';
 import { trigger, state, style, transition, animate } from '@angular/animations';
-import { LlmService, LlmSettings, LlmSettingsUpdateRequest } from '../../services/llm.service';
+import { LlmService, LlmSettings, LlmSettingsUpdateRequest, OpenRouterCredits } from '../../services/llm.service';
 import { ModelsService, OpenRouterModel, PaginatedModelsResponse } from '../../services/models.service';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
@@ -34,6 +36,8 @@ import { ModelDetailsModalComponent } from '../../modals/model-details-modal/mod
     MatChipsModule,
     MatTooltipModule,
     MatDialogModule,
+    MatSlideToggleModule,
+    MatDividerModule,
   ],
   templateUrl: './llm-settings.component.html',
   styleUrl: './llm-settings.component.scss',
@@ -72,6 +76,12 @@ export class LlmSettingsComponent implements OnInit {
   // Expandable section properties
   isModelsExpanded = true;
 
+  // Remaining OpenRouter credit (app/services/credit_monitor.py). `null` while
+  // loading or when the panel cannot read it; `applicable === false` means
+  // OpenRouter is not the active provider.
+  credits: OpenRouterCredits | null = null;
+  isLoadingCredits = false;
+
   apiProviders = [
     { value: 'openai', label: 'OpenAI' },
     { value: 'openrouter', label: 'OpenRouter' },
@@ -87,6 +97,7 @@ export class LlmSettingsComponent implements OnInit {
   ngOnInit() {
     this.loadLlmSettings();
     this.loadAvailableModels();
+    this.loadCredits();
   }
 
   loadLlmSettings() {
@@ -108,6 +119,25 @@ export class LlmSettingsComponent implements OnInit {
     });
   }
 
+  /**
+   * Read the remaining OpenRouter credit for the status line next to the
+   * threshold field. `force` bypasses the backend's 60s cache.
+   */
+  loadCredits(force = false) {
+    this.isLoadingCredits = true;
+    this.llmService.getOpenRouterCredits(force).subscribe({
+      next: (response) => {
+        this.credits = response?.credits ?? null;
+        this.isLoadingCredits = false;
+      },
+      error: (error) => {
+        console.warn('Error loading OpenRouter credit:', error);
+        this.credits = null;
+        this.isLoadingCredits = false;
+      }
+    });
+  }
+
   saveSettings() {
     if (!this.llmSettings) return;
 
@@ -121,7 +151,12 @@ export class LlmSettingsComponent implements OnInit {
       openai_api_key: this.llmSettings.openai_api_key,
       openrouter_api_key: this.llmSettings.openrouter_api_key,
       openrouter_api_base: this.llmSettings.openrouter_api_base,
-      openai_embedding_model: this.llmSettings.openai_embedding_model
+      openai_embedding_model: this.llmSettings.openai_embedding_model,
+      // Credit alerts: a switch, the USD threshold, and the optional
+      // management key (empty/echoed-mask means "unchanged", see the backend).
+      openrouter_credit_alert_enabled: this.llmSettings.openrouter_credit_alert_enabled,
+      openrouter_credit_alert_threshold_usd: this.llmSettings.openrouter_credit_alert_threshold_usd,
+      openrouter_management_key: this.llmSettings.openrouter_management_key
     };
 
     this.llmService.updateLlmSettings(updateRequest).subscribe({

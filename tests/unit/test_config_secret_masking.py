@@ -23,6 +23,7 @@ from app.schemas.config import DynamicConfig, LLMSettings, TavilySearchSettings
 OPENROUTER_KEY = "sk-or-v1-abcdef123456"
 OPENAI_KEY = "sk-proj-abcdef7890"
 TAVILY_KEY = "tvly-abcdef4321"
+MANAGEMENT_KEY = "sk-or-v1-mgmt-9999"
 
 
 class TestMaskSecret:
@@ -118,7 +119,10 @@ class TestMaskConfig:
     def test_nested_llm_and_tavily_keys_are_masked(self):
         config = DynamicConfig(
             llm_settings=LLMSettings(
-                openai_api_key=OPENAI_KEY, openrouter_api_key=OPENROUTER_KEY
+                openai_api_key=OPENAI_KEY,
+                openrouter_api_key=OPENROUTER_KEY,
+                # Optional, but still a credential: it reads the account balance.
+                openrouter_management_key=MANAGEMENT_KEY,
             ),
             tavily_settings=TavilySearchSettings(tavily_api_key=TAVILY_KEY),
         )
@@ -127,6 +131,7 @@ class TestMaskConfig:
 
         assert masked.llm_settings.openai_api_key == f"{MASKED_SECRET_PREFIX}7890"
         assert masked.llm_settings.openrouter_api_key == f"{MASKED_SECRET_PREFIX}3456"
+        assert masked.llm_settings.openrouter_management_key == f"{MASKED_SECRET_PREFIX}9999"
         assert masked.tavily_settings.tavily_api_key == f"{MASKED_SECRET_PREFIX}4321"
 
     def test_the_stored_config_keeps_its_keys(self):

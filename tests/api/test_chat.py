@@ -1,9 +1,15 @@
+import httpx
+import openai
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, MagicMock
 
 from main import app
-from app.services.chat_service import ChatService, get_chat_service
+from app.services.chat_service import (
+    INSUFFICIENT_CREDIT_MESSAGE,
+    ChatService,
+    get_chat_service,
+)
 from app.services.conversation_service import get_conversation_service
 
 
@@ -120,4 +126,34 @@ def test_chat_error_handling(mock_chat_service, mock_conversation_service):
     assert "Test error" in data["detail"]
 
     # Verify the conversation service was not called due to the error
+    mock_conversation_service.store_conversation.assert_not_called()
+
+
+def _insufficient_credit_error():
+    """OpenRouter answers 402 - there is no dedicated SDK exception class."""
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    response = httpx.Response(
+        402,
+        request=request,
+        json={"error": {"code": 402, "message": "Insufficient credits"}},
+    )
+    return openai.APIStatusError("Insufficient credits", response=response, body=None)
+
+
+def test_an_out_of_credit_provider_is_answered_with_402(
+    mock_chat_service, mock_conversation_service
+):
+    """A billing failure reaches the API client as 402, not as a generic 500.
+
+    That status is what tells the panel to show the top-up notice instead of a
+    "try again" error, so it must not be flattened by the catch-all handler.
+    """
+    mock_chat_service.process_message.side_effect = _insufficient_credit_error()
+
+    response = client.post(
+        "/api/chat/", json={"user_id": "test_user", "message": "Test message"}
+    )
+
+    assert response.status_code == 402
+    assert response.json()["detail"] == INSUFFICIENT_CREDIT_MESSAGE
     mock_conversation_service.store_conversation.assert_not_called()

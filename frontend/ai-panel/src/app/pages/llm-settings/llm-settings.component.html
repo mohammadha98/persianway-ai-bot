@@ -67,6 +67,53 @@
             <input matInput [(ngModel)]="llmSettings.openrouter_api_base">
             <mat-hint>آدرس پایه برای درخواست‌های OpenRouter</mat-hint>
           </mat-form-field>
+
+          <mat-divider></mat-divider>
+
+          <!-- OpenRouter credit alerts (app/services/credit_monitor.py) -->
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>کلید مدیریت OpenRouter (اختیاری)</mat-label>
+            <input matInput type="password" [(ngModel)]="llmSettings.openrouter_management_key">
+            <mat-hint>
+              فقط برای خواندن موجودی حساب لازم است؛ کلید عادی API اجازهٔ خواندن
+              /credits را ندارد. خالی بماند، موجودی از سقف همان کلید خوانده
+              می‌شود و در غیر این صورت هشدار فقط با خطای ۴۰۲ فعال می‌شود.
+            </mat-hint>
+          </mat-form-field>
+
+          <div class="credit-toggle-row">
+            <mat-slide-toggle [(ngModel)]="llmSettings.openrouter_credit_alert_enabled">
+              نمایش هشدار شارژ حساب
+            </mat-slide-toggle>
+          </div>
+
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>آستانهٔ هشدار (دلار)</mat-label>
+            <input matInput type="number" min="0" step="0.5"
+                   [(ngModel)]="llmSettings.openrouter_credit_alert_threshold_usd">
+            <mat-hint>
+              وقتی موجودی به این عدد برسد، بعد از هر پاسخ هشدار نمایش داده می‌شود
+              (پیش‌فرض: ۱ دلار)
+            </mat-hint>
+          </mat-form-field>
+
+          <div class="credit-status" *ngIf="credits && credits.applicable">
+            <mat-icon [class.low]="credits.is_low">account_balance_wallet</mat-icon>
+            <span *ngIf="credits.balance_usd !== null">
+              موجودی فعلی:
+              <strong>{{ credits.balance_usd | number:'1.2-2' }} دلار</strong>
+              <span class="credit-source">
+                ({{ credits.source === 'account' ? 'موجودی حساب' : credits.source === 'key' ? 'سقف کلید' : 'نامشخص' }})
+              </span>
+            </span>
+            <span *ngIf="credits.balance_usd === null">
+              موجودی قابل خواندن نیست؛ هشدار فقط هنگام خطای ۴۰۲ نمایش داده می‌شود.
+            </span>
+            <button mat-icon-button matTooltip="بررسی مجدد" (click)="loadCredits(true)"
+                    [disabled]="isLoadingCredits">
+              <mat-icon>refresh</mat-icon>
+            </button>
+          </div>
         </div>
       </mat-card-content>
     </mat-card>

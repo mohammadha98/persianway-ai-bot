@@ -68,6 +68,30 @@
         </div>
       </header>
 
+      <!-- OpenRouter credit notice. A sticky banner instead of only a snackbar:
+           the operator has to top the account up, so the warning stays on screen
+           until the balance recovers (the backend refreshes at most every 60s). -->
+      <div class="credit-alert"
+           *ngIf="creditAlert && (creditAlert.is_low || creditAlert.is_exhausted)"
+           [class.exhausted]="creditAlert.is_exhausted" dir="rtl">
+        <mat-icon>{{ creditAlert.is_exhausted ? 'error' : 'warning' }}</mat-icon>
+        <div class="credit-alert-text">
+          <strong *ngIf="creditAlert.is_exhausted">اعتبار حساب OpenRouter تمام شده است</strong>
+          <strong *ngIf="!creditAlert.is_exhausted">
+            موجودی OpenRouter: {{ creditAlert.balance_usd | number:'1.2-2' }} دلار
+            (آستانه: {{ creditAlert.threshold_usd | number:'1.0-2' }} دلار)
+          </strong>
+          <span>{{ creditAlert.message }}</span>
+        </div>
+        <a mat-flat-button color="warn" [href]="creditAlert.topup_url" target="_blank" rel="noopener">
+          <mat-icon>account_balance_wallet</mat-icon>
+          شارژ حساب
+        </a>
+        <button mat-icon-button matTooltip="بررسی مجدد" (click)="refreshCreditAlert(true)">
+          <mat-icon>refresh</mat-icon>
+        </button>
+      </div>
+
       <!-- Messages -->
       <main class="messages-area" #messagesContainer>
         <!-- Empty State Placeholder -->
