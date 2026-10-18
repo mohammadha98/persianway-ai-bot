@@ -163,6 +163,10 @@ export class LlmSettingsComponent implements OnInit {
       next: (response) => {
         if (response.success) {
           this.llmSettings = response.settings;
+          // A new management key / threshold / toggle changes what the monitor
+          // can read, and the backend has already dropped its cache on this save.
+          this.loadCredits(true);
+
           this.showMessage('تنظیمات با موفقیت ذخیره شد', 'success');
         } else {
           this.showMessage('خطا در ذخیره تنظیمات', 'error');
