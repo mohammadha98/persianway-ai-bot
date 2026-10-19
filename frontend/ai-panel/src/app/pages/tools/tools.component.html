@@ -30,7 +30,7 @@
           <div class="form-section">
             <h3 class="section-title">کلید دسترسی</h3>
             <div class="row">
-              <mat-form-field appearance="outline" class="full-width api-key-field">
+              <mat-form-field appearance="outline" class="full-width api-key-field" subscriptSizing="dynamic">
                 <mat-label>کلید API (Tavily API Key)</mat-label>
                 <input matInput formControlName="tavily_api_key" placeholder="tvly-..." type="password">
                 <mat-icon matSuffix>vpn_key</mat-icon>
@@ -70,7 +70,7 @@
                 <mat-icon matSuffix>layers</mat-icon>
               </mat-form-field>
 
-              <mat-form-field appearance="outline" class="half-width">
+              <mat-form-field appearance="outline" class="half-width" subscriptSizing="dynamic">
                 <mat-label>تعداد نتایج</mat-label>
                 <input matInput type="number" formControlName="max_results" min="1" max="20">
                 <mat-icon matSuffix>format_list_numbered</mat-icon>
@@ -85,7 +85,7 @@
           <div class="form-section">
             <h3 class="section-title">فیلتر دامنه‌ها</h3>
             <div class="row">
-              <mat-form-field appearance="outline" class="full-width">
+              <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
                 <mat-label>دامنه‌های مجاز (Include Domains)</mat-label>
                 <textarea matInput rows="2" formControlName="include_domains_string"
                   placeholder="persianway.ir, example.com"></textarea>
@@ -110,7 +110,7 @@
             </div>
 
             <div class="row">
-              <mat-form-field appearance="outline" class="full-width">
+              <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
                 <mat-label>دامنه‌های مسدود (Exclude Domains)</mat-label>
                 <textarea matInput rows="2" formControlName="exclude_domains_string"
                   placeholder="spam-site.com, competitor.ir"></textarea>

@@ -41,28 +41,28 @@
           </mat-form-field>
 
           <!-- Default Model -->
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>مدل پیش‌فرض</mat-label>
             <input matInput [(ngModel)]="llmSettings.default_model">
             <mat-hint>نام مدل پیش‌فرض برای پردازش</mat-hint>
           </mat-form-field>
 
           <!-- OpenAI API Key -->
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>کلید API OpenAI</mat-label>
             <input matInput type="password" [(ngModel)]="llmSettings.openai_api_key">
             <mat-hint>کلید API برای دسترسی به سرویس‌های OpenAI — مقدار نمایش‌داده‌شده ماسک کلید ذخیره‌شده است؛ برای تغییر، فیلد را پاک کنید</mat-hint>
           </mat-form-field>
 
           <!-- OpenRouter API Key -->
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>کلید API OpenRouter</mat-label>
             <input matInput type="password" [(ngModel)]="llmSettings.openrouter_api_key">
             <mat-hint>کلید API برای دسترسی به سرویس‌های OpenRouter — مقدار نمایش‌داده‌شده ماسک کلید ذخیره‌شده است؛ برای تغییر، فیلد را پاک کنید</mat-hint>
           </mat-form-field>
 
           <!-- OpenRouter API Base -->
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>آدرس پایه API OpenRouter</mat-label>
             <input matInput [(ngModel)]="llmSettings.openrouter_api_base">
             <mat-hint>آدرس پایه برای درخواست‌های OpenRouter</mat-hint>
@@ -71,7 +71,7 @@
           <mat-divider></mat-divider>
 
           <!-- OpenRouter credit alerts (app/services/credit_monitor.py) -->
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>کلید مدیریت OpenRouter (اختیاری)</mat-label>
             <input matInput type="password" [(ngModel)]="llmSettings.openrouter_management_key">
             <mat-hint>
@@ -87,7 +87,7 @@
             </mat-slide-toggle>
           </div>
 
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>آستانهٔ هشدار (دلار)</mat-label>
             <input matInput type="number" min="0" step="0.5"
                    [(ngModel)]="llmSettings.openrouter_credit_alert_threshold_usd">
@@ -131,7 +131,7 @@
       <mat-card-content>
         <div class="parameters-form">
           <!-- Temperature -->
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>دما (Temperature)</mat-label>
             <input matInput type="number" [(ngModel)]="llmSettings.temperature" 
                    min="0" max="2" step="0.1">
@@ -139,7 +139,7 @@
           </mat-form-field>
 
           <!-- Top P -->
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>Top P</mat-label>
             <input matInput type="number" [(ngModel)]="llmSettings.top_p" 
                    min="0" max="1" step="0.1">
@@ -147,7 +147,7 @@
           </mat-form-field>
 
           <!-- Max Tokens -->
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>حداکثر توکن</mat-label>
             <input matInput type="number" [(ngModel)]="llmSettings.max_tokens" 
                    min="1" max="4096">
@@ -155,7 +155,7 @@
           </mat-form-field>
 
           <!-- Embedding Model -->
-          <mat-form-field appearance="outline" class="full-width">
+          <mat-form-field appearance="outline" class="full-width" subscriptSizing="dynamic">
             <mat-label>مدل Embedding</mat-label>
             <input matInput [(ngModel)]="llmSettings.openai_embedding_model">
             <mat-hint>مدل تبدیل متن به بردار برای جستجو</mat-hint>
