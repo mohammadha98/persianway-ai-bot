@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     
     # Security
     secret_key: str = "your-secret-key-here"
+
+    # Access-token lifetime in minutes. Hard-coding 30 in the service signed
+    # every operator out mid-task; three days lets them work a whole week
+    # without re-authenticating. Override per deployment with
+    # ACCESS_TOKEN_EXPIRE_MINUTES. The panel reads the JWT `exp` claim and
+    # ends the session as soon as it passes.
+    access_token_expire_minutes: int = 60 * 24 * 3
     
     # CORS Configuration
     allowed_origins: list = ["*"]

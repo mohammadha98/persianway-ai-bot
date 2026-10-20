@@ -47,7 +47,14 @@ class UserService:
                 "issued JWTs are signed with a publicly known secret."
             )
         self.algorithm = "HS256"
-        self.access_token_expire_minutes = 30
+        # 30 minutes used to be hard-coded here, so an operator was signed out
+        # mid-task and -- because the panel never noticed the expiry -- kept
+        # clicking a dead session. The lifetime now comes from Settings
+        # (``ACCESS_TOKEN_EXPIRE_MINUTES``, default three days); it is the same
+        # value handed to the client as ``expires_in`` and baked into the JWT
+        # ``exp`` claim. ``max(1, ...)`` keeps a misconfigured 0/negative from
+        # minting tokens that are expired on arrival.
+        self.access_token_expire_minutes = max(1, int(settings.access_token_expire_minutes))
     
     async def _get_collection(self) -> AsyncIOMotorCollection:
         """Get the users collection."""

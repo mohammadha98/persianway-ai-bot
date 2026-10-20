@@ -19,8 +19,11 @@ export class AuthGuard implements CanActivate {
   ): Observable<boolean> | Promise<boolean> | boolean {
     return this.authService.isAuthenticated$.pipe(
       take(1),
-      map(isAuthenticated => {
-        if (!isAuthenticated) {
+      map(() => {
+        // Read the live value rather than the emitted one: a suspended tab can
+        // wake up with the subject still saying "signed in" after `exp` has
+        // passed, and the guard must not let that navigation through.
+        if (!this.authService.isAuthenticated()) {
           // Store the attempted URL for redirecting after login
           this.router.navigate(['/login'], {
             queryParams: { returnUrl: state.url }

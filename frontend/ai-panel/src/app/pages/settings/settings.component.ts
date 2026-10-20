@@ -230,7 +230,12 @@ export class SettingsComponent implements OnInit {
 
   clearCache() {
     try {
-      localStorage.clear();
+      // Caches only. `localStorage.clear()` also dropped `auth_user` and
+      // `auth_token`, which left the panel showing a signed-in operator whose
+      // every request failed, with no way back but a manual sign-out.
+      Object.keys(localStorage)
+        .filter(key => !key.startsWith('auth_'))
+        .forEach(key => localStorage.removeItem(key));
       sessionStorage.clear();
       this.showMessage('کش سیستم پاک شد.', 'success');
     } catch (error) {

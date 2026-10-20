@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -40,6 +40,7 @@ export class LoginComponent implements OnInit {
     private fb: FormBuilder,
     private authService: AuthService,
     private router: Router,
+    private route: ActivatedRoute,
     private snackBar: MatSnackBar
   ) {}
 
@@ -47,9 +48,21 @@ export class LoginComponent implements OnInit {
     this.initializeForm();
 
     
-    // Redirect if already authenticated
+    // The panel bounces here with `?expired=1` when the session ran out, so the
+    // operator knows why they were signed out instead of assuming a glitch.
+    if (this.route.snapshot.queryParamMap.get('expired') === '1') {
+      this.snackBar.open('نشست شما منقضی شده است. لطفاً دوباره وارد شوید.', 'بستن', {
+        duration: 6000,
+        direction: 'rtl',
+        panelClass: ['error-snackbar']
+      });
+    }
+
+    // Redirect if already authenticated. '/dashboard' is not a route in this
+    // panel, so a signed-in user landing on /login used to sit on a navigation
+    // that silently failed.
     if (this.authService.isAuthenticated()) {
-      this.router.navigate(['/dashboard']);
+      this.router.navigate(['/']);
     }
   }
 
