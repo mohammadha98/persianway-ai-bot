@@ -36,15 +36,15 @@
         </a>
         <a mat-button routerLink="/llm-settings" routerLinkActive="active" *ngIf="hasPermission(PermissionType.LLM)">
           <mat-icon>psychology</mat-icon>
-          LLM
+          مدل زبانی
         </a>
         <a mat-button routerLink="/rag-settings" routerLinkActive="active" *ngIf="hasPermission(PermissionType.RAG)">
           <mat-icon>storage</mat-icon>
-          RAG
+          پرامپت ها
         </a>
         <a mat-button routerLink="/tools" routerLinkActive="active" *ngIf="hasPermission(PermissionType.RAG)">
           <mat-icon>web</mat-icon>
-          Ai Engine User Interface
+          جستجوی وب
         </a>
         <a mat-button routerLink="/users" routerLinkActive="active" *ngIf="hasRole('admin')">
           <mat-icon>people</mat-icon>
